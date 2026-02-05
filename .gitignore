@@ -129,6 +129,11 @@ Dockerfile*
 # Fly.io
 .fly/
 
+# Cloudflare Workers
+.wrangler/
+.dev.vars
+worker-configuration.d.ts
+
 # Local development
 .local/
 
