@@ -18,6 +18,9 @@ import messageRoutes from './routes/messages';
 import paymentRoutes from './routes/payments';
 import adminRoutes from './routes/admin';
 import webhookRoutes from './routes/webhooks';
+import triageRoutes from './routes/triage';
+import nurseRoutes from './routes/nurse';
+import patientRoutes from './routes/patient';
 
 // Import middleware
 import { errorHandler } from './middleware/errorHandler';
@@ -47,9 +50,9 @@ app.use(helmet({
 
 // CORS configuration
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
+  origin: process.env.NODE_ENV === 'production'
     ? ['https://ahava-healthcare-admin.railway.app', 'https://ahava-healthcare-doctor.railway.app']
-    : ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:19006'],
+    : true, // Allow any origin in development (required for credentials + dynamic origin)
   credentials: true,
 }));
 
@@ -66,8 +69,8 @@ app.use(rateLimiter);
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
+  res.json({
+    status: 'ok',
     timestamp: new Date().toISOString(),
     timezone: process.env.TIMEZONE || 'Africa/Johannesburg'
   });
@@ -80,6 +83,9 @@ app.use('/api/visits', authMiddleware, visitRoutes);
 app.use('/api/messages', authMiddleware, messageRoutes);
 app.use('/api/payments', authMiddleware, paymentRoutes);
 app.use('/api/admin', authMiddleware, adminRoutes);
+app.use('/api/triage', authMiddleware, triageRoutes);
+app.use('/api/nurse', authMiddleware, nurseRoutes);
+app.use('/api/patient', authMiddleware, patientRoutes);
 app.use('/webhooks', webhookRoutes);
 
 // WebSocket initialization
@@ -97,11 +103,15 @@ const PORT = process.env.PORT || 4000;
 
 async function startServer() {
   try {
+    console.log('🔄 Starting initialization...');
+
     // Initialize Redis
+    console.log('🔄 Connecting to Redis...');
     await initializeRedis();
     console.log('✅ Redis connected');
 
     // Initialize BullMQ queues
+    console.log('🔄 Initializing Queues...');
     await initializeQueue();
     console.log('✅ BullMQ queues initialized');
 

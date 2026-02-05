@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { PrismaClient, PaymentMethod, UserRole } from '@prisma/client';
 import { AuthenticatedRequest, requirePatient } from '../middleware/auth';
 import { encryptData } from '../utils/encryption';
+import { notifyNearbyNurses } from '../services/websocket';
 import Joi from 'joi';
 
 const router = Router();
@@ -13,6 +14,8 @@ const createBookingSchema = Joi.object({
   estimatedDuration: Joi.number().min(30).max(240).default(60),
   paymentMethod: Joi.string().valid('CARD', 'INSURANCE').required(),
   amountInCents: Joi.number().min(0).required(),
+  patientLat: Joi.number().min(-90).max(90).required(), // Patient location for nurse matching
+  patientLng: Joi.number().min(-180).max(180).required(),
   insuranceProvider: Joi.string().when('paymentMethod', {
     is: 'INSURANCE',
     then: Joi.required(),
@@ -39,6 +42,8 @@ router.post('/', requirePatient, async (req: AuthenticatedRequest, res, next) =>
       estimatedDuration,
       paymentMethod,
       amountInCents,
+      patientLat,
+      patientLng,
       insuranceProvider,
       insuranceMemberNumber,
     } = value;
@@ -75,9 +80,26 @@ router.post('/', requirePatient, async (req: AuthenticatedRequest, res, next) =>
       },
     });
 
+    // 🔔 Notify nearby online nurses about the new booking
+    const patientName = `${booking.patient.firstName} ${booking.patient.lastName}`;
+    const notifiedCount = await notifyNearbyNurses(
+      patientLat,
+      patientLng,
+      10, // 10km radius
+      {
+        id: booking.id,
+        patientId: booking.patientId,
+        scheduledDate: booking.scheduledDate,
+        estimatedDuration: booking.estimatedDuration,
+        amountInCents: booking.amountInCents,
+      },
+      patientName
+    );
+
     res.status(201).json({
       success: true,
       booking,
+      notifiedNurses: notifiedCount,
     });
   } catch (error) {
     next(error);
@@ -88,9 +110,9 @@ router.post('/', requirePatient, async (req: AuthenticatedRequest, res, next) =>
 router.get('/', async (req: AuthenticatedRequest, res, next) => {
   try {
     const { status, limit = '10', offset = '0' } = req.query;
-    
+
     const whereClause: any = {};
-    
+
     if (req.user!.role === UserRole.PATIENT) {
       whereClause.patientId = req.user!.id;
     } else if (req.user!.role === UserRole.NURSE) {
@@ -117,22 +139,6 @@ router.get('/', async (req: AuthenticatedRequest, res, next) => {
             phone: true,
           },
         },
-        nurse: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-          },
-        },
-        doctor: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-          },
-        },
         visit: {
           select: {
             id: true,
@@ -140,6 +146,22 @@ router.get('/', async (req: AuthenticatedRequest, res, next) => {
             scheduledStart: true,
             actualStart: true,
             actualEnd: true,
+            nurse: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+              },
+            },
+            doctor: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+              },
+            },
           },
         },
       },
@@ -206,7 +228,7 @@ router.get('/:id', async (req: AuthenticatedRequest, res, next) => {
     }
 
     // Check permissions
-    const isAuthorized = 
+    const isAuthorized =
       req.user!.role === UserRole.ADMIN ||
       booking.patientId === req.user!.id ||
       booking.nurseId === req.user!.id ||

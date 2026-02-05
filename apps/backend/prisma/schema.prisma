@@ -1,9 +1,7 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
-  output   = "../../node_modules/@prisma/client"
 }
 
 datasource db {
@@ -62,6 +60,7 @@ model User {
   role              UserRole
   isActive          Boolean  @default(true)
   isVerified        Boolean  @default(false)
+  isAvailable       Boolean  @default(false) // For nurses/doctors to toggle "Online"
   profileImage      String?
   dateOfBirth       DateTime?
   gender            String?
@@ -90,6 +89,8 @@ model User {
   doctorOversight   Visit[]   @relation("DoctorOversight")
   sentMessages      Message[] @relation("SentMessages")
   receivedMessages  Message[] @relation("ReceivedMessages")
+  biometricReadings BiometricReading[] @relation("UserBiometrics")
+  healthAlerts      HealthAlert[] @relation("UserAlerts")
   
   // Audit
   createdAt         DateTime @default(now())
@@ -163,8 +164,14 @@ model Visit {
   // Location tracking
   gpsCoordinates  Json?       // { lat: number, lng: number, timestamp: string }[]
   
+  // Biometrics (for patients without wearable devices)
+  biometrics      Json?       // { bloodPressure: { systolic: number, diastolic: number }, heartRate: number, temperature: number, oxygenSaturation: number, weight: number, height: number, glucose: number, timestamp: string }[]
+  
+  // Treatment information
+  treatment       Json?       // { medications: [{ name: string, dosage: string, frequency: string }], procedures: string[], notes: string, timestamp: string }
+  
   // Reports
-  nurseReport     String?     // Encrypted
+  nurseReport     String?     // Encrypted - Detailed visit report
   doctorReview    String?
   doctorRating    Int?        // 1-5 stars
   
@@ -261,4 +268,76 @@ model ExportJob {
   completedAt     DateTime?
   
   @@map("export_jobs")
+}
+
+model BiometricReading {
+  id              String      @id @default(cuid())
+  userId          String
+  
+  // Core vitals
+  heartRate       Float?
+  heartRateResting Float?
+  hrvRmssd        Float?      // Heart Rate Variability
+  bloodPressureSystolic Float?
+  bloodPressureDiastolic Float?
+  oxygenSaturation Float?    // SpO2
+  temperature     Float?
+  respiratoryRate Float?
+  weight          Float?
+  height          Float?
+  glucose         Float?
+  
+  // Activity context (for wearable devices)
+  stepCount       Int?
+  activeCalories  Float?
+  skinTempOffset  Float?
+  
+  // Source tracking
+  source          String      @default("manual") // "wearable" | "manual"
+  deviceType      String?    // e.g., "apple_watch", "fitbit", "manual_entry"
+  
+  // Early warning analysis results
+  alertLevel      String?    // "GREEN" | "YELLOW" | "RED"
+  anomalies       Json?      // Array of detected anomalies
+  readinessScore  Int?       // 0-100
+  
+  // Audit
+  createdAt       DateTime   @default(now())
+  
+  // Relations
+  user            User       @relation("UserBiometrics", fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId, createdAt])
+  @@map("biometric_readings")
+}
+
+model HealthAlert {
+  id              String      @id @default(cuid())
+  userId          String
+  
+  alertLevel      String      // "YELLOW" | "RED"
+  title           String
+  message         String
+  detectedAnomalies Json?     // Array of anomalies that triggered alert
+  
+  // Alert metadata
+  acknowledged    Boolean     @default(false)
+  acknowledgedAt  DateTime?
+  resolved        Boolean     @default(false)
+  resolvedAt      DateTime?
+  
+  // Related data
+  biometricReadingId String?  // Link to the reading that triggered alert
+  visitId         String?    // Link to visit if alert led to booking
+  
+  // Audit
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  
+  // Relations
+  user            User       @relation("UserAlerts", fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId, createdAt])
+  @@index([userId, acknowledged, resolved])
+  @@map("health_alerts")
 }

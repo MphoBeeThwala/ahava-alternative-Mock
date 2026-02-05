@@ -4,7 +4,7 @@ let redis: Redis;
 
 export const initializeRedis = async () => {
   const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-  
+
   redis = new Redis(redisUrl, {
     retryDelayOnFailover: 100,
     enableReadyCheck: false,
@@ -25,7 +25,22 @@ export const initializeRedis = async () => {
 
 export const getRedis = () => {
   if (!redis) {
-    throw new Error('Redis not initialized. Call initializeRedis() first.');
+    const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+    console.log(`🔌 Lazy initializing Redis connecting to ${redisUrl}`);
+    redis = new Redis(redisUrl, {
+      retryDelayOnFailover: 100,
+      enableReadyCheck: false,
+      maxRetriesPerRequest: null,
+      lazyConnect: true, // We will connect explicitly later or let it connect on first command
+    });
+
+    redis.on('connect', () => {
+      console.log('🔗 Redis connected');
+    });
+
+    redis.on('error', (error) => {
+      console.error('❌ Redis connection error:', error);
+    });
   }
   return redis;
 };

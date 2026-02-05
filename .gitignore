@@ -131,3 +131,21 @@ Dockerfile*
 
 # Local development
 .local/
+
+# Log files
+*.log
+*_debug.log
+*_build.log
+*_startup.log
+crash.log
+prisma_debug.log
+backend_*.log
+frontend_*.log
+
+# Test scripts (optional - can commit if needed)
+# test-*.ps1
+# test-*.js
+
+# Temporary files
+*.tmp
+*.temp

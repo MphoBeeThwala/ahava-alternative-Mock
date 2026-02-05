@@ -12,13 +12,16 @@ export function generateIVSalt(): string {
   return crypto.randomBytes(ivLength).toString('hex');
 }
 
-export function encryptData(plaintext: string, key: string, ivSalt: string): string {
-  if (!process.env.ENCRYPTION_KEY || !process.env.ENCRYPTION_IV_SALT) {
+export function encryptData(plaintext: string, key?: string, ivSalt?: string): string {
+  const encryptionKeyStr = key || process.env.ENCRYPTION_KEY;
+  const ivSaltStr = ivSalt || process.env.ENCRYPTION_IV_SALT;
+  
+  if (!encryptionKeyStr || !ivSaltStr) {
     throw new Error('Encryption keys not configured');
   }
 
-  const encryptionKey = Buffer.from(key, 'base64');
-  const iv = Buffer.from(ivSalt, 'hex');
+  const encryptionKey = Buffer.from(encryptionKeyStr, 'base64');
+  const iv = Buffer.from(ivSaltStr, 'hex');
   
   const cipher = crypto.createCipher(algorithm, encryptionKey, iv);
   

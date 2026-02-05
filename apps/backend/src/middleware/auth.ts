@@ -20,19 +20,30 @@ export const authMiddleware = async (
 ) => {
   try {
     const authHeader = req.headers.authorization;
-    
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    console.log(`[AuthMiddleware] URL: ${req.originalUrl}, Method: ${req.method}`);
+    console.log(`[AuthMiddleware] Header: ${authHeader}`);
+
+    if (!authHeader) {
+      console.log('[AuthMiddleware] Missing Authorization header');
       return res.status(401).json({ error: 'No token provided' });
     }
 
-    const token = authHeader.substring(7);
-    
-    if (!process.env.JWT_SECRET) {
-      throw new Error('JWT_SECRET not configured');
+    const token = authHeader.split(' ')[1];
+    if (!token) {
+      console.log('[AuthMiddleware] Malformed Authorization header (no token)');
+      return res.status(401).json({ error: 'Invalid token format' });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET) as any;
-    
+    let decoded: any;
+    try {
+      const secret = process.env.JWT_SECRET || 'dev_secret_key_change_me_in_prod_982374982374';
+      decoded = jwt.verify(token, secret) as any;
+      console.log(`[AuthMiddleware] Token verified for user: ${decoded.userId}`);
+    } catch (error) {
+      console.error('[AuthMiddleware] Token verification failed:', error);
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+
     // Verify user still exists and is active
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },

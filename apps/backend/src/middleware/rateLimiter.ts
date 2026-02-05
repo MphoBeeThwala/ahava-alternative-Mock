@@ -11,10 +11,10 @@ export const rateLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Strict rate limiter for auth endpoints
+// Strict rate limiter for auth endpoints (relaxed for dev)
 export const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // Limit each IP to 5 requests per windowMs
+  max: process.env.NODE_ENV === 'production' ? 5 : 100, // 100 in dev, 5 in prod
   message: {
     error: 'Too many authentication attempts, please try again later.',
   },
