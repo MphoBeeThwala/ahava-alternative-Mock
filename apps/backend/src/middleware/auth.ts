@@ -36,8 +36,12 @@ export const authMiddleware = async (
 
     let decoded: any;
     try {
-      const secret = process.env.JWT_SECRET || 'dev_secret_key_change_me_in_prod_982374982374';
-      decoded = jwt.verify(token, secret) as any;
+      const secret = process.env.JWT_SECRET;
+      if (!secret || (process.env.NODE_ENV === 'production' && secret.length < 32)) {
+        return res.status(503).json({ error: 'Server configuration error' });
+      }
+      const jwtSecret = process.env.NODE_ENV === 'production' ? secret : (secret || 'dev_secret_key_change_me_in_prod');
+      decoded = jwt.verify(token, jwtSecret) as any;
       console.log(`[AuthMiddleware] Token verified for user: ${decoded.userId}`);
     } catch (error) {
       console.error('[AuthMiddleware] Token verification failed:', error);
