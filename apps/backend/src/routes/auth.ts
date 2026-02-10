@@ -246,6 +246,10 @@ router.get('/me', async (req, res, next) => {
         timezone: true,
         createdAt: true,
         updatedAt: true,
+        isAvailable: true,
+        lastKnownLat: true,
+        lastKnownLng: true,
+        lastLocationUpdate: true,
       },
     });
 

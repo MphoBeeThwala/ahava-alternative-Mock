@@ -1,15 +1,31 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { useAuth } from '../../../contexts/AuthContext';
 
 export default function LoginPage() {
     const router = useRouter();
+    const { login, isAuthenticated } = useAuth();
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+
+    // Redirect if already authenticated
+    React.useEffect(() => {
+        if (isAuthenticated) {
+            const user = JSON.parse(localStorage.getItem('user') || '{}');
+            switch (user.role) {
+                case 'PATIENT': router.push('/patient/dashboard'); break;
+                case 'DOCTOR': router.push('/doctor/dashboard'); break;
+                case 'NURSE': router.push('/nurse/dashboard'); break;
+                case 'ADMIN': router.push('/admin/dashboard'); break;
+                default: router.push('/');
+            }
+        }
+    }, [isAuthenticated, router]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -17,24 +33,13 @@ export default function LoginPage() {
         setError('');
 
         try {
-            const res = await fetch('http://localhost:4000/api/auth/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, password }),
-            });
-
-            const data = await res.json();
-
-            if (!res.ok) {
-                throw new Error(data.error || 'Login failed');
-            }
-
-            // Store token
-            localStorage.setItem('token', data.accessToken);
-            localStorage.setItem('user', JSON.stringify(data.user));
-
+            await login(email, password);
+            
+            // Get user from localStorage after login
+            const user = JSON.parse(localStorage.getItem('user') || '{}');
+            
             // Redirect based on role
-            switch (data.user.role) {
+            switch (user.role) {
                 case 'PATIENT': router.push('/patient/dashboard'); break;
                 case 'DOCTOR': router.push('/doctor/dashboard'); break;
                 case 'NURSE': router.push('/nurse/dashboard'); break;
@@ -42,55 +47,58 @@ export default function LoginPage() {
                 default: router.push('/');
             }
         } catch (err: any) {
-            setError(err.message);
+            const isNetworkError = err.message === 'Network Error' || err.code === 'ERR_NETWORK' || !err.response;
+            if (isNetworkError) {
+                setError('Cannot connect to the server. Make sure the backend is running (e.g. in apps/backend run: pnpm dev).');
+            } else {
+                setError(err.response?.data?.error || err.message || 'Login failed');
+            }
         } finally {
             setLoading(false);
         }
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-50">
-            <div className="max-w-md w-full space-y-8 p-8 bg-white rounded-lg shadow">
+        <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+            <div className="max-w-md w-full space-y-8 p-8 bg-white rounded-xl shadow-lg border border-slate-200">
                 <div>
-                    <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">Sign in to your account</h2>
+                    <h2 className="mt-6 text-center text-2xl font-bold text-slate-900 tracking-tight">
+                        Sign in to your account
+                    </h2>
                 </div>
                 <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-                    {error && <div className="text-red-500 text-center">{error}</div>}
-                    <div className="rounded-md shadow-sm -space-y-px">
-                        <div>
-                            <input
-                                type="email"
-                                required
-                                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                                placeholder="Email address"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                            />
-                        </div>
-                        <div>
-                            <input
-                                type="password"
-                                required
-                                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                                placeholder="Password"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                            />
-                        </div>
+                    {error && <div className="text-red-600 text-center text-sm font-medium">{error}</div>}
+                    <div className="space-y-3">
+                        <input
+                            type="email"
+                            required
+                            className="block w-full px-4 py-3 border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-base"
+                            placeholder="Email address"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                        />
+                        <input
+                            type="password"
+                            required
+                            className="block w-full px-4 py-3 border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-base"
+                            placeholder="Password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                        />
                     </div>
 
                     <div>
                         <button
                             type="submit"
                             disabled={loading}
-                            className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                            className="w-full flex justify-center py-3 px-4 border border-transparent text-base font-semibold rounded-lg text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
                         >
                             {loading ? 'Signing in...' : 'Sign in'}
                         </button>
                     </div>
                     <div className="text-center">
-                        <Link href="/auth/signup" className="text-blue-600 hover:text-blue-500">
-                            Don't have an account? Sign up
+                        <Link href="/auth/signup" className="text-blue-600 hover:text-blue-700 font-semibold text-sm">
+                            Don&apos;t have an account? Sign up
                         </Link>
                     </div>
                 </form>

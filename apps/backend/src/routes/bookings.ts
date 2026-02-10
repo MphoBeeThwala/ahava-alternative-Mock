@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { PrismaClient, PaymentMethod, UserRole } from '@prisma/client';
-import { AuthenticatedRequest, requirePatient } from '../middleware/auth';
+import { AuthenticatedRequest, authMiddleware, requirePatient } from '../middleware/auth';
 import { encryptData } from '../utils/encryption';
 import { notifyNearbyNurses } from '../services/websocket';
 import Joi from 'joi';
@@ -107,7 +107,7 @@ router.post('/', requirePatient, async (req: AuthenticatedRequest, res, next) =>
 });
 
 // Get user's bookings
-router.get('/', async (req: AuthenticatedRequest, res, next) => {
+router.get('/', authMiddleware, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { status, limit = '10', offset = '0' } = req.query;
 
@@ -180,7 +180,7 @@ router.get('/', async (req: AuthenticatedRequest, res, next) => {
 });
 
 // Get specific booking
-router.get('/:id', async (req: AuthenticatedRequest, res, next) => {
+router.get('/:id', authMiddleware, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
 
