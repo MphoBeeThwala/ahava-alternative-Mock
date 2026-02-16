@@ -1,8 +1,11 @@
 import axios, { AxiosInstance } from 'axios';
 
-// API Base URL - must end with /api to match backend routes (e.g. /api/auth/login)
-const raw = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
-const API_BASE_URL = raw.endsWith('/api') ? raw : raw.replace(/\/?$/, '/api');
+// API Base URL - must end with /api to match backend (e.g. /api/auth/login, /api/auth/register)
+function normalizeApiBase(url: string): string {
+  const base = url.replace(/\/+$/, ''); // strip trailing slashes
+  return base.endsWith('/api') ? base : `${base}/api`;
+}
+const API_BASE_URL = normalizeApiBase(process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api');
 
 // Create axios instance with default config
 const apiClient: AxiosInstance = axios.create({

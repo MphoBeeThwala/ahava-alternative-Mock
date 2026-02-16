@@ -48,15 +48,21 @@ app.use(helmet({
   },
 }));
 
-// CORS configuration: allow env-based origins so any Railway frontend URL works
+// CORS: allow frontend origin so browser permits cross-origin API calls (including preflight)
 const corsOrigins = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
+  ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean)
   : process.env.NODE_ENV === 'production'
-    ? ['https://ahava-healthcare-admin.railway.app', 'https://ahava-healthcare-doctor.railway.app']
+    ? [
+        'https://frontend-production-326c.up.railway.app',
+        'https://ahava-healthcare-admin.railway.app',
+        'https://ahava-healthcare-doctor.railway.app',
+      ]
     : true;
 app.use(cors({
   origin: corsOrigins,
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
 // Compression and logging
