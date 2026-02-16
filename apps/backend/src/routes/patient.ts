@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { PrismaClient, UserRole } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { AuthenticatedRequest, authMiddleware } from '../middleware/auth';
 import { rateLimiter } from '../middleware/rateLimiter';
 import axios from 'axios';

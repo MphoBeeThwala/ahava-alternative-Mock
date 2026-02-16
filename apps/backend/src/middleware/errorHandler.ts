@@ -10,9 +10,9 @@ export const errorHandler = (
   err: AppError,
   req: Request,
   res: Response,
-  next: NextFunction
+  _next: NextFunction
 ) => {
-  let error = { ...err };
+  const error = { ...err };
   error.message = err.message;
 
   // Log error

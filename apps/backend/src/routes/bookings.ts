@@ -1,7 +1,6 @@
 import { Router } from 'express';
-import { PrismaClient, PaymentMethod, UserRole } from '@prisma/client';
+import { PrismaClient, UserRole } from '@prisma/client';
 import { AuthenticatedRequest, authMiddleware, requirePatient } from '../middleware/auth';
-import { encryptData } from '../utils/encryption';
 import { notifyNearbyNurses } from '../services/websocket';
 import Joi from 'joi';
 

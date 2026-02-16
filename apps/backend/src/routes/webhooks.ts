@@ -4,7 +4,7 @@ import { PrismaClient } from '@prisma/client';
 import { Request, Response, NextFunction } from 'express';
 
 const router: Router = Router();
-const prisma = new PrismaClient();
+const _prisma = new PrismaClient();
 
 // Example webhook endpoint (e.g., payment notification)
 router.post('/payment', async (req: Request, res: Response, next: NextFunction) => {

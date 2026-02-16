@@ -20,6 +20,14 @@ const eslintConfig = [
       "next-env.d.ts",
     ],
   },
+  {
+    rules: {
+      "@typescript-eslint/no-unused-expressions": [
+        "warn",
+        { allowShortCircuit: true, allowTernary: true, allowTaggedTemplates: true },
+      ],
+    },
+  },
 ];
 
 export default eslintConfig;

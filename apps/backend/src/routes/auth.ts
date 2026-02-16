@@ -3,7 +3,6 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
 import { authRateLimiter } from '../middleware/rateLimiter';
-import { encryptData, decryptData } from '../utils/encryption';
 import Joi from 'joi';
 
 const router: Router = Router();
@@ -159,7 +158,7 @@ router.post('/refresh', async (req, res, next) => {
       throw new Error('JWT_SECRET not configured');
     }
 
-    const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET) as any;
+    const _decoded = jwt.verify(refreshToken, process.env.JWT_SECRET) as { userId: string };
 
     // Check if refresh token exists in database
     const tokenRecord = await prisma.refreshToken.findUnique({
@@ -227,7 +226,7 @@ router.get('/me', async (req, res, next) => {
       throw new Error('JWT_SECRET not configured');
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET) as any;
+    const decoded = jwt.verify(token, process.env.JWT_SECRET) as { userId: string };
 
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },

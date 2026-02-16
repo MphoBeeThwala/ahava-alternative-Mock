@@ -48,11 +48,14 @@ app.use(helmet({
   },
 }));
 
-// CORS configuration
-app.use(cors({
-  origin: process.env.NODE_ENV === 'production'
+// CORS configuration: allow env-based origins so any Railway frontend URL works
+const corsOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
+  : process.env.NODE_ENV === 'production'
     ? ['https://ahava-healthcare-admin.railway.app', 'https://ahava-healthcare-doctor.railway.app']
-    : true, // Allow any origin in development (required for credentials + dynamic origin)
+    : true;
+app.use(cors({
+  origin: corsOrigins,
   credentials: true,
 }));
 
@@ -67,13 +70,18 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Rate limiting
 app.use(rateLimiter);
 
-// Health check
+// Health check (Railway probes this)
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     timezone: process.env.TIMEZONE || 'Africa/Johannesburg'
   });
+});
+
+// Root: so opening backend URL in browser doesn't 404
+app.get('/', (req, res) => {
+  res.redirect(302, '/health');
 });
 
 // API routes

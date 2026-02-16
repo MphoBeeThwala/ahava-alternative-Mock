@@ -1,4 +1,4 @@
-import { Queue, Worker, QueueEvents } from 'bullmq';
+import { Queue, QueueEvents } from 'bullmq';
 import { getRedis } from './redis';
 
 // Queue names
@@ -8,75 +8,54 @@ export const QUEUE_NAMES = {
   EMAIL: 'email',
 } as const;
 
-// PDF Export Queue
-export const pdfExportQueue = new Queue(QUEUE_NAMES.PDF_EXPORT, {
-  connection: getRedis(),
-  defaultJobOptions: {
+// Lazy-initialized queues (only set after initializeQueue() when REDIS_URL is set)
+let pdfExportQueue: Queue | null = null;
+let pushNotificationQueue: Queue | null = null;
+let emailQueue: Queue | null = null;
+
+function getDefaultJobOptions() {
+  return {
     removeOnComplete: 10,
     removeOnFail: 5,
     attempts: 3,
-    backoff: {
-      type: 'exponential',
-      delay: 2000,
-    },
-  },
-});
-
-// Push Notification Queue
-export const pushNotificationQueue = new Queue(QUEUE_NAMES.PUSH_NOTIFICATION, {
-  connection: getRedis(),
-  defaultJobOptions: {
-    removeOnComplete: 100,
-    removeOnFail: 10,
-    attempts: 3,
-    backoff: {
-      type: 'exponential',
-      delay: 1000,
-    },
-  },
-});
-
-// Email Queue
-export const emailQueue = new Queue(QUEUE_NAMES.EMAIL, {
-  connection: getRedis(),
-  defaultJobOptions: {
-    removeOnComplete: 50,
-    removeOnFail: 10,
-    attempts: 3,
-    backoff: {
-      type: 'exponential',
-      delay: 2000,
-    },
-  },
-});
+    backoff: { type: 'exponential' as const, delay: 2000 },
+  };
+}
 
 export const initializeQueue = async () => {
-  // Initialize queue events for monitoring
-  const pdfEvents = new QueueEvents(QUEUE_NAMES.PDF_EXPORT, { connection: getRedis() });
-  const pushEvents = new QueueEvents(QUEUE_NAMES.PUSH_NOTIFICATION, { connection: getRedis() });
-  const emailEvents = new QueueEvents(QUEUE_NAMES.EMAIL, { connection: getRedis() });
-
-  // Log queue events
-  pdfEvents.on('completed', ({ jobId, returnvalue }) => {
-    console.log(`📄 PDF export job ${jobId} completed`);
+  const connection = getRedis();
+  pdfExportQueue = new Queue(QUEUE_NAMES.PDF_EXPORT, {
+    connection,
+    defaultJobOptions: { ...getDefaultJobOptions(), removeOnComplete: 10, removeOnFail: 5 },
+  });
+  pushNotificationQueue = new Queue(QUEUE_NAMES.PUSH_NOTIFICATION, {
+    connection,
+    defaultJobOptions: { ...getDefaultJobOptions(), removeOnComplete: 100, removeOnFail: 10 },
+  });
+  emailQueue = new Queue(QUEUE_NAMES.EMAIL, {
+    connection,
+    defaultJobOptions: { ...getDefaultJobOptions(), removeOnComplete: 50, removeOnFail: 10 },
   });
 
+  const pdfEvents = new QueueEvents(QUEUE_NAMES.PDF_EXPORT, { connection });
+  const pushEvents = new QueueEvents(QUEUE_NAMES.PUSH_NOTIFICATION, { connection });
+  const emailEvents = new QueueEvents(QUEUE_NAMES.EMAIL, { connection });
+
+  pdfEvents.on('completed', ({ jobId }) => {
+    console.log(`📄 PDF export job ${jobId} completed`);
+  });
   pdfEvents.on('failed', ({ jobId, failedReason }) => {
     console.error(`❌ PDF export job ${jobId} failed:`, failedReason);
   });
-
   pushEvents.on('completed', ({ jobId }) => {
     console.log(`📱 Push notification job ${jobId} completed`);
   });
-
   pushEvents.on('failed', ({ jobId, failedReason }) => {
     console.error(`❌ Push notification job ${jobId} failed:`, failedReason);
   });
-
   emailEvents.on('completed', ({ jobId }) => {
     console.log(`📧 Email job ${jobId} completed`);
   });
-
   emailEvents.on('failed', ({ jobId, failedReason }) => {
     console.error(`❌ Email job ${jobId} failed:`, failedReason);
   });
@@ -84,27 +63,25 @@ export const initializeQueue = async () => {
   console.log('✅ BullMQ queues initialized');
 };
 
-// Helper functions to add jobs
+// Helper functions to add jobs (no-op if Redis/queues not initialized)
 export const addPdfExportJob = async (data: {
   exportJobId: string;
   userId: string;
-  filters: any;
+  filters: Record<string, unknown>;
   type: string;
 }) => {
-  return pdfExportQueue.add('generate-pdf', data, {
-    priority: 1,
-  });
+  if (!pdfExportQueue) return;
+  return pdfExportQueue.add('generate-pdf', data, { priority: 1 });
 };
 
 export const addPushNotificationJob = async (data: {
   userId: string;
   title: string;
   body: string;
-  data?: any;
+  data?: Record<string, unknown>;
 }) => {
-  return pushNotificationQueue.add('send-push', data, {
-    priority: 5,
-  });
+  if (!pushNotificationQueue) return;
+  return pushNotificationQueue.add('send-push', data, { priority: 5 });
 };
 
 export const addEmailJob = async (data: {
@@ -113,7 +90,6 @@ export const addEmailJob = async (data: {
   html: string;
   text?: string;
 }) => {
-  return emailQueue.add('send-email', data, {
-    priority: 3,
-  });
+  if (!emailQueue) return;
+  return emailQueue.add('send-email', data, { priority: 3 });
 };

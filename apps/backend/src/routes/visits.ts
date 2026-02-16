@@ -1,4 +1,4 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router, Response, NextFunction } from 'express';
 import { PrismaClient, VisitStatus, UserRole } from '@prisma/client';
 import { AuthenticatedRequest, authMiddleware } from '../middleware/auth';
 import { encryptData } from '../utils/encryption';
@@ -90,7 +90,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
     }
 
     // Update booking with nurse assignment and create visit in transaction
-    const [updatedBooking, visit] = await prisma.$transaction([
+    const [, visit] = await prisma.$transaction([
       prisma.booking.update({
         where: { id: bookingId },
         data: { nurseId },
