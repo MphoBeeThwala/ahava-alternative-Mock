@@ -2,18 +2,23 @@
 
 import React, { useState, useEffect } from 'react';
 import RoleGuard, { UserRole } from '../../../components/RoleGuard';
-import { patientApi, bookingsApi, BiometricReading } from '../../../lib/api';
+import { patientApi, bookingsApi, BiometricReading, MonitoringSummary, Booking } from '../../../lib/api';
 import { useAuth } from '../../../contexts/AuthContext';
 import NavBar from '../../../components/NavBar';
 
 export default function PatientDashboard() {
     const { user } = useAuth();
     const [symptoms, setSymptoms] = useState('');
-    const [triageResult, setTriageResult] = useState<any>(null);
+    const [triageResult, setTriageResult] = useState<{
+        triageLevel: number;
+        recommendedAction: string;
+        possibleConditions?: string[];
+        reasoning: string;
+    } | null>(null);
     const [loading, setLoading] = useState(false);
     const [selectedImage, setSelectedImage] = useState<string | null>(null);
-    const [monitoringSummary, setMonitoringSummary] = useState<any>(null);
-    const [bookings, setBookings] = useState<any[]>([]);
+    const [monitoringSummary, setMonitoringSummary] = useState<MonitoringSummary | null>(null);
+    const [bookings, setBookings] = useState<Booking[]>([]);
     const [biometricData, setBiometricData] = useState<BiometricReading>({
         heartRate: undefined,
         bloodPressure: { systolic: 0, diastolic: 0 },
@@ -65,9 +70,10 @@ export default function PatientDashboard() {
                 imageBase64: selectedImage || undefined,
             });
             setTriageResult(result.data);
-        } catch (error: any) {
+        } catch (error: unknown) {
+            const e = error as { response?: { data?: { error?: string } } };
             console.error("Triage failed", error);
-            alert(error.response?.data?.error || "Failed to analyze symptoms. Please try again.");
+            alert(e.response?.data?.error || "Failed to analyze symptoms. Please try again.");
         } finally {
             setLoading(false);
         }
@@ -86,9 +92,10 @@ export default function PatientDashboard() {
                 source: 'manual',
             });
             loadMonitoringSummary();
-        } catch (error: any) {
+        } catch (error: unknown) {
+            const e = error as { response?: { data?: { error?: string } } };
             console.error("Biometric submission failed", error);
-            alert(error.response?.data?.error || "Failed to submit biometrics. Please try again.");
+            alert(e.response?.data?.error || "Failed to submit biometrics. Please try again.");
         } finally {
             setLoading(false);
         }

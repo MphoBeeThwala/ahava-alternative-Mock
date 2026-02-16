@@ -16,6 +16,7 @@ out/
 .env.test.local
 .env.production.local
 .env.production
+.env.railway
 
 # Logs
 npm-debug.log*
@@ -120,9 +121,8 @@ exports/
 # Redis dump
 dump.rdb
 
-# Docker
-.dockerignore
-Dockerfile*
+# Docker (keep .dockerignore and Dockerfiles - needed for Railway/Fly deploy)
+# .dockerignore and Dockerfile* are NOT ignored so they can be committed
 
 # Railway
 .railway/

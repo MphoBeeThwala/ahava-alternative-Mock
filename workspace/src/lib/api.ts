@@ -130,7 +130,13 @@ export interface MonitoringSummary {
   baselineEstablished: boolean;
   alertLevel: string;
   readinessScore?: number;
-  recentReadings: any[];
+  recentReadings: Record<string, unknown>[];
+}
+
+export interface ApiError {
+  message?: string;
+  code?: string;
+  response?: { data?: { error?: string } };
 }
 
 export const patientApi = {
@@ -206,9 +212,21 @@ export interface Visit {
   status: string;
   startedAt?: string;
   completedAt?: string;
-  biometrics?: any;
-  treatment?: any;
+  createdAt?: string;
+  triageLevel?: number;
+  biometrics?: Record<string, unknown> & {
+    heartRate?: number;
+    bloodPressure?: { systolic: number; diastolic: number };
+    temperature?: number;
+    oxygenSaturation?: number;
+  };
+  treatment?: { medications?: { name: string; dosage: string }[]; notes?: string };
   nurseReport?: string;
+  booking?: {
+    address?: string;
+    patient?: { firstName?: string; lastName?: string };
+    scheduledDate?: string;
+  };
 }
 
 export const visitsApi = {

@@ -46,12 +46,14 @@ export default function LoginPage() {
                 case 'ADMIN': router.push('/admin/dashboard'); break;
                 default: router.push('/');
             }
-        } catch (err: any) {
-            const isNetworkError = err.message === 'Network Error' || err.code === 'ERR_NETWORK' || !err.response;
+        } catch (err: unknown) {
+            const e = err as { message?: string; code?: string; response?: unknown };
+            const isNetworkError = e.message === 'Network Error' || e.code === 'ERR_NETWORK' || !e.response;
             if (isNetworkError) {
                 setError('Cannot connect to the server. Make sure the backend is running (e.g. in apps/backend run: pnpm dev).');
             } else {
-                setError(err.response?.data?.error || err.message || 'Login failed');
+                const ex = err as { response?: { data?: { error?: string } }; message?: string };
+                setError(ex.response?.data?.error || ex.message || 'Login failed');
             }
         } finally {
             setLoading(false);

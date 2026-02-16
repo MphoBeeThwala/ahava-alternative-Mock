@@ -2,13 +2,13 @@
 
 import React, { useState, useEffect } from 'react';
 import RoleGuard, { UserRole } from '../../../components/RoleGuard';
-import { doctorApi, visitsApi } from '../../../lib/api';
+import { doctorApi, visitsApi, Visit } from '../../../lib/api';
 import { useAuth } from '../../../contexts/AuthContext';
 import NavBar from '../../../components/NavBar';
 
 export default function DoctorDashboard() {
     const { user } = useAuth();
-    const [triageQueue, setTriageQueue] = useState<any[]>([]);
+    const [triageQueue, setTriageQueue] = useState<Visit[]>([]);
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {
@@ -32,8 +32,9 @@ export default function DoctorDashboard() {
             await doctorApi.approveVisit(visitId);
             alert('Visit approved. Notification sent to patient.');
             loadPendingVisits();
-        } catch (error: any) {
-            alert(error.response?.data?.error || 'Failed to approve visit.');
+        } catch (error: unknown) {
+            const err = error as { response?: { data?: { error?: string } } };
+            alert(err.response?.data?.error || 'Failed to approve visit.');
         }
     };
 
@@ -41,8 +42,9 @@ export default function DoctorDashboard() {
         try {
             await visitsApi.updateStatus(visitId, status);
             loadPendingVisits();
-        } catch (error: any) {
-            alert(error.response?.data?.error || 'Failed to update visit status.');
+        } catch (error: unknown) {
+            const err = error as { response?: { data?: { error?: string } } };
+            alert(err.response?.data?.error || 'Failed to update visit status.');
         }
     };
 
@@ -118,7 +120,7 @@ export default function DoctorDashboard() {
                                                         <div className="mb-2">
                                                             <strong>Medications:</strong>
                                                             <ul className="list-disc list-inside">
-                                                                {visit.treatment.medications.map((med: any, idx: number) => (
+                                                                {visit.treatment.medications.map((med, idx) => (
                                                                     <li key={idx}>{med.name} - {med.dosage}</li>
                                                                 ))}
                                                             </ul>

@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { authApi, AuthResponse } from '../lib/api';
+import { authApi, AuthResponse, RegisterData } from '../lib/api';
 
 interface User {
   id: string;
@@ -20,7 +20,7 @@ interface AuthContextType {
   token: string | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (data: any) => Promise<void>;
+  register: (data: RegisterData) => Promise<void>;
   logout: () => void;
   isAuthenticated: boolean;
 }
@@ -65,7 +65,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(response.user as User);
   };
 
-  const register = async (data: any) => {
+  const register = async (data: RegisterData) => {
     const response: AuthResponse = await authApi.register(data);
     
     if (typeof window !== 'undefined') {

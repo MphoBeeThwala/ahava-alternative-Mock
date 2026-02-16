@@ -37,8 +37,9 @@ export default function SignupPage() {
                 case 'ADMIN': router.push('/admin/dashboard'); break;
                 default: router.push('/');
             }
-        } catch (err: any) {
-            setError(err.response?.data?.error || err.message || 'Registration failed');
+        } catch (err: unknown) {
+            const e = err as { response?: { data?: { error?: string } }; message?: string };
+            setError(e.response?.data?.error || e.message || 'Registration failed');
         } finally {
             setLoading(false);
         }

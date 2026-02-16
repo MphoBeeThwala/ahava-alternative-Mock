@@ -10,7 +10,7 @@ export default function AdminDashboard() {
     const { user } = useAuth();
     const [users, setUsers] = useState<User[]>([]);
     const [loading, setLoading] = useState(false);
-    const [stats, setStats] = useState<any>(null);
+    const [stats, setStats] = useState<{ totalUsers?: number } | null>(null);
 
     useEffect(() => {
         loadUsers();
@@ -42,8 +42,9 @@ export default function AdminDashboard() {
         try {
             await adminApi.updateUserStatus(userId, !currentStatus);
             loadUsers();
-        } catch (error: any) {
-            alert(error.response?.data?.error || 'Failed to update user status.');
+        } catch (error: unknown) {
+            const err = error as { response?: { data?: { error?: string } } };
+            alert(err.response?.data?.error || 'Failed to update user status.');
         }
     };
 

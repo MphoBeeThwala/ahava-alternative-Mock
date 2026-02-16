@@ -102,29 +102,28 @@ app.use('*', (req, res) => {
 const PORT = process.env.PORT || 4000;
 
 async function startServer() {
-  try {
-    console.log('🔄 Starting initialization...');
+  console.log('🔄 Starting initialization...');
 
-    // Initialize Redis
-    console.log('🔄 Connecting to Redis...');
-    await initializeRedis();
-    console.log('✅ Redis connected');
-
-    // Initialize BullMQ queues
-    console.log('🔄 Initializing Queues...');
-    await initializeQueue();
-    console.log('✅ BullMQ queues initialized');
-
-    // Start server
-    server.listen(PORT, () => {
-      console.log(`🚀 Ahava Healthcare API server running on port ${PORT}`);
-      console.log(`🌍 Timezone: ${process.env.TIMEZONE}`);
-      console.log(`📊 Environment: ${process.env.NODE_ENV}`);
-    });
-  } catch (error) {
-    console.error('❌ Failed to start server:', error);
-    process.exit(1);
+  // Initialize Redis + Queues (optional - app works without them for core API)
+  if (process.env.REDIS_URL) {
+    try {
+      console.log('🔄 Connecting to Redis...');
+      await initializeRedis();
+      await initializeQueue();
+      console.log('✅ Redis and queues initialized');
+    } catch (err) {
+      console.warn('⚠️ Redis/Queue unavailable, running without background jobs:', (err as Error).message);
+    }
+  } else {
+    console.log('⚠️ REDIS_URL not set, skipping Redis/queues (core API will work)');
   }
+
+  // Start server
+  server.listen(PORT, () => {
+    console.log(`🚀 Ahava Healthcare API server running on port ${PORT}`);
+    console.log(`🌍 Timezone: ${process.env.TIMEZONE}`);
+    console.log(`📊 Environment: ${process.env.NODE_ENV}`);
+  });
 }
 
 // Graceful shutdown

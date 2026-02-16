@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import RoleGuard, { UserRole } from '../../../components/RoleGuard';
-import { nurseApi, visitsApi } from '../../../lib/api';
+import { nurseApi, visitsApi, Visit } from '../../../lib/api';
 import { useAuth } from '../../../contexts/AuthContext';
 import NavBar from '../../../components/NavBar';
 
@@ -11,8 +11,7 @@ export default function NurseDashboard() {
     const [isAvailable, setIsAvailable] = useState(false);
     const [locationStatus, setLocationStatus] = useState('Unknown');
     const [loading, setLoading] = useState(false);
-    const [visits, setVisits] = useState<any[]>([]);
-    const [profile, setProfile] = useState<any>(null);
+    const [visits, setVisits] = useState<Visit[]>([]);
 
     useEffect(() => {
         loadProfile();
@@ -22,7 +21,6 @@ export default function NurseDashboard() {
     const loadProfile = async () => {
         try {
             const data = await nurseApi.getProfile();
-            setProfile(data.user || data);
             const user = data.user || data;
             setIsAvailable(user.isAvailable || false);
             if (user.lastKnownLat && user.lastKnownLng) {
@@ -64,13 +62,14 @@ export default function NurseDashboard() {
                     setIsAvailable(true);
                     setLocationStatus(`Active at ${position.coords.latitude.toFixed(4)}, ${position.coords.longitude.toFixed(4)}`);
                     loadVisits(); // Refresh visits when going online
-                } catch (error: any) {
+                } catch (error: unknown) {
+                    const e = error as { response?: { data?: { error?: string } } };
                     console.error(error);
-                    alert(error.response?.data?.error || "Failed to go online. Check network.");
+                    alert(e.response?.data?.error || "Failed to go online. Check network.");
                 } finally {
                     setLoading(false);
                 }
-            }, (err) => {
+            }, () => {
                 alert("Location access denied. Cannot go online.");
                 setLoading(false);
             });
@@ -84,8 +83,9 @@ export default function NurseDashboard() {
                 });
                 setIsAvailable(false);
                 setLocationStatus("Offline");
-            } catch (error: any) {
-                alert(error.response?.data?.error || "Failed to go offline.");
+            } catch (error: unknown) {
+                const e = error as { response?: { data?: { error?: string } } };
+                alert(e.response?.data?.error || "Failed to go offline.");
             } finally {
                 setLoading(false);
             }
@@ -96,8 +96,9 @@ export default function NurseDashboard() {
         try {
             await visitsApi.updateStatus(visitId, status);
             loadVisits();
-        } catch (error: any) {
-            alert(error.response?.data?.error || "Failed to update visit status.");
+        } catch (error: unknown) {
+            const e = error as { response?: { data?: { error?: string } } };
+            alert(e.response?.data?.error || "Failed to update visit status.");
         }
     };
 
