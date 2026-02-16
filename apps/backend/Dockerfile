@@ -18,10 +18,12 @@ COPY . .
 RUN pnpm --filter @ahava-healthcare/api prisma:generate
 RUN pnpm --filter @ahava-healthcare/api build
 
-# Production image
+# Production image: pnpm uses symlinks in apps/backend/node_modules -> ../../node_modules/.pnpm
+# so we must copy root node_modules (the store) for require() to resolve.
 FROM node:20-alpine AS runner
 RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 apiuser
 WORKDIR /app/apps/backend
+COPY --from=builder --chown=apiuser:nodejs /app/node_modules /app/node_modules
 COPY --from=builder --chown=apiuser:nodejs /app/apps/backend/dist ./dist
 COPY --from=builder --chown=apiuser:nodejs /app/apps/backend/node_modules ./node_modules
 COPY --from=builder --chown=apiuser:nodejs /app/apps/backend/package.json ./
