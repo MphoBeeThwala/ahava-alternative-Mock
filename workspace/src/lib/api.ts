@@ -1,7 +1,8 @@
 import axios, { AxiosInstance } from 'axios';
 
-// API Base URL - use environment variable or default to localhost
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
+// API Base URL - must end with /api to match backend routes (e.g. /api/auth/login)
+const raw = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
+const API_BASE_URL = raw.endsWith('/api') ? raw : raw.replace(/\/?$/, '/api');
 
 // Create axios instance with default config
 const apiClient: AxiosInstance = axios.create({
