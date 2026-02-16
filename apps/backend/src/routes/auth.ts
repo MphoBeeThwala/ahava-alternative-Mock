@@ -263,6 +263,22 @@ router.get('/me', async (req, res, next) => {
   }
 });
 
+/** Parse expiry string (e.g. "15m", "7d") to seconds for jwt.SignOptions */
+function parseExpiry(s: string): number {
+  const n = parseInt(s, 10);
+  if (!isNaN(n)) return n;
+  const m = s.match(/^(\d+)([smhd])$/);
+  if (!m) return 900;
+  const val = parseInt(m[1], 10);
+  switch (m[2]) {
+    case 's': return val;
+    case 'm': return val * 60;
+    case 'h': return val * 3600;
+    case 'd': return val * 86400;
+    default: return 900;
+  }
+}
+
 // Helper function to generate tokens
 function generateTokens(userId: string, role: string) {
   if (!process.env.JWT_SECRET) {
@@ -270,10 +286,11 @@ function generateTokens(userId: string, role: string) {
   }
 
   const secret = process.env.JWT_SECRET as jwt.Secret;
-  const accessOpts: jwt.SignOptions = { expiresIn: process.env.JWT_EXPIRES_IN ?? '15m' };
-  const refreshOpts: jwt.SignOptions = { expiresIn: process.env.REFRESH_TOKEN_EXPIRES_IN ?? '7d' };
-  const accessToken = jwt.sign({ userId, role }, secret, accessOpts);
-  const refreshToken = jwt.sign({ userId, role }, secret, refreshOpts);
+  // Use numeric seconds to satisfy jsonwebtoken SignOptions (avoids StringValue type issue)
+  const accessExpiry = process.env.JWT_EXPIRES_IN ? parseExpiry(process.env.JWT_EXPIRES_IN) : 900; // 15m
+  const refreshExpiry = process.env.REFRESH_TOKEN_EXPIRES_IN ? parseExpiry(process.env.REFRESH_TOKEN_EXPIRES_IN) : 604800; // 7d
+  const accessToken = jwt.sign({ userId, role }, secret, { expiresIn: accessExpiry });
+  const refreshToken = jwt.sign({ userId, role }, secret, { expiresIn: refreshExpiry });
 
   // Store refresh token in database
   const expiresAt = new Date();
