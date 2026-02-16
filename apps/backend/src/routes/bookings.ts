@@ -5,7 +5,7 @@ import { encryptData } from '../utils/encryption';
 import { notifyNearbyNurses } from '../services/websocket';
 import Joi from 'joi';
 
-const router = Router();
+const router: Router = Router();
 const prisma = new PrismaClient();
 
 const createBookingSchema = Joi.object({
@@ -194,22 +194,6 @@ router.get('/:id', authMiddleware, async (req: AuthenticatedRequest, res, next) 
             lastName: true,
             email: true,
             phone: true,
-          },
-        },
-        nurse: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-          },
-        },
-        doctor: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
           },
         },
         visit: {

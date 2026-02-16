@@ -4,7 +4,7 @@ import { PrismaClient } from '@prisma/client';
 import { Request, Response, NextFunction } from 'express';
 import { authMiddleware } from '../middleware/auth';
 
-const router = Router();
+const router: Router = Router();
 const prisma = new PrismaClient();
 
 // Create a new admin user (example)

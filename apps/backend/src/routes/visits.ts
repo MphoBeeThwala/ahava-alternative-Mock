@@ -4,7 +4,7 @@ import { AuthenticatedRequest, authMiddleware } from '../middleware/auth';
 import { encryptData } from '../utils/encryption';
 import Joi from 'joi';
 
-const router = Router();
+const router: Router = Router();
 const prisma = new PrismaClient();
 
 // Validation schemas

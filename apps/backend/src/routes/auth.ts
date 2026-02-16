@@ -6,7 +6,7 @@ import { authRateLimiter } from '../middleware/rateLimiter';
 import { encryptData, decryptData } from '../utils/encryption';
 import Joi from 'joi';
 
-const router = Router();
+const router: Router = Router();
 const prisma = new PrismaClient();
 
 // Validation schemas
@@ -269,17 +269,11 @@ function generateTokens(userId: string, role: string) {
     throw new Error('JWT_SECRET not configured');
   }
 
-  const accessToken = jwt.sign(
-    { userId, role },
-    process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRES_IN || '15m' }
-  );
-
-  const refreshToken = jwt.sign(
-    { userId, role },
-    process.env.JWT_SECRET,
-    { expiresIn: process.env.REFRESH_TOKEN_EXPIRES_IN || '7d' }
-  );
+  const secret = process.env.JWT_SECRET as jwt.Secret;
+  const accessOpts: jwt.SignOptions = { expiresIn: process.env.JWT_EXPIRES_IN ?? '15m' };
+  const refreshOpts: jwt.SignOptions = { expiresIn: process.env.REFRESH_TOKEN_EXPIRES_IN ?? '7d' };
+  const accessToken = jwt.sign({ userId, role }, secret, accessOpts);
+  const refreshToken = jwt.sign({ userId, role }, secret, refreshOpts);
 
   // Store refresh token in database
   const expiresAt = new Date();

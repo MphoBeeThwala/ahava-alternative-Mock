@@ -4,7 +4,7 @@ import { authMiddleware } from '../middleware/auth';
 import { rateLimiter } from '../middleware/rateLimiter';
 import Joi from 'joi';
 
-const router = Router();
+const router: Router = Router();
 const prisma = new PrismaClient();
 
 // Validation

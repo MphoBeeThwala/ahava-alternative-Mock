@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { Request, Response, NextFunction } from 'express';
 
-const router = Router();
+const router: Router = Router();
 const prisma = new PrismaClient();
 
 // Example webhook endpoint (e.g., payment notification)

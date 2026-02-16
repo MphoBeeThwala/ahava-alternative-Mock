@@ -3,7 +3,7 @@ import { analyzeSymptoms } from '../services/aiTriage';
 import { authMiddleware } from '../middleware/auth';
 import { rateLimiter } from '../middleware/rateLimiter';
 
-const router = Router();
+const router: Router = Router();
 
 // POST /api/triage
 router.post('/', authMiddleware, rateLimiter, async (req, res, next) => {

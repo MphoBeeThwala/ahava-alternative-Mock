@@ -6,7 +6,7 @@ import axios from 'axios';
 import Joi from 'joi';
 import { processBiometricReading, getMonitoringSummary, detectEarlyWarningSigns } from '../services/monitoring';
 
-const router = Router();
+const router: Router = Router();
 const prisma = new PrismaClient();
 
 // ML Service URL (from environment or default)
