@@ -1,11 +1,13 @@
 import axios, { AxiosInstance } from 'axios';
 
-// API Base URL - must end with /api to match backend (e.g. /api/auth/login, /api/auth/register)
+// API Base URL: use same-origin /api when unset (Next.js rewrites proxy to backend → no CORS, no env)
 function normalizeApiBase(url: string): string {
-  const base = url.replace(/\/+$/, ''); // strip trailing slashes
+  const base = url.replace(/\/+$/, '').trim();
   return base.endsWith('/api') ? base : `${base}/api`;
 }
-const API_BASE_URL = normalizeApiBase(process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api');
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL
+  ? normalizeApiBase(process.env.NEXT_PUBLIC_API_URL)
+  : '/api';
 
 // Create axios instance with default config
 const apiClient: AxiosInstance = axios.create({

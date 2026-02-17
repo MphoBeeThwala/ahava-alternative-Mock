@@ -1,50 +1,53 @@
 import Redis from 'ioredis';
 
-let redis: Redis;
+let redis: Redis | null = null;
+let redisInitFailed = false;
 
-export const initializeRedis = async () => {
+export const initializeRedis = async (): Promise<Redis> => {
+  if (redis) return redis;
+  if (redisInitFailed) throw new Error('Redis previously failed to connect');
+
   const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-
-  redis = new Redis(redisUrl, {
-    enableReadyCheck: false,
-    maxRetriesPerRequest: null,
+  const client = new Redis(redisUrl, {
+    enableReadyCheck: true,
+    maxRetriesPerRequest: 1,
+    connectTimeout: 3000,
     lazyConnect: true,
   });
 
-  redis.on('connect', () => {
-    console.log('🔗 Redis connected');
+  client.on('error', (err) => {
+    console.error('❌ Redis connection error:', err.message);
   });
 
-  redis.on('error', (error) => {
-    console.error('❌ Redis connection error:', error);
-  });
-
-  return redis;
-};
-
-export const getRedis = () => {
-  if (!redis) {
-    const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-    console.log(`🔌 Lazy initializing Redis connecting to ${redisUrl}`);
-    redis = new Redis(redisUrl, {
-      enableReadyCheck: false,
-      maxRetriesPerRequest: null,
-      lazyConnect: true,
-    });
-
-    redis.on('connect', () => {
+  try {
+    await Promise.race([
+      client.connect(),
+      new Promise<void>((_, rej) =>
+        setTimeout(() => rej(new Error('Redis connection timeout')), 4000)
+      ),
+    ]);
+    client.on('connect', () => {
       console.log('🔗 Redis connected');
     });
+    redis = client;
+    return redis;
+  } catch (err) {
+    client.disconnect();
+    redisInitFailed = true;
+    throw err;
+  }
+};
 
-    redis.on('error', (error) => {
-      console.error('❌ Redis connection error:', error);
-    });
+export const getRedis = (): Redis => {
+  if (!redis) {
+    throw new Error('Redis not initialized. Set REDIS_URL and ensure initializeRedis() ran successfully.');
   }
   return redis;
 };
 
-export const closeRedis = async () => {
+export const closeRedis = async (): Promise<void> => {
   if (redis) {
-    await redis.quit();
+    await redis.quit().catch(() => {});
+    redis = null;
   }
 };

@@ -50,7 +50,7 @@ export default function LoginPage() {
             const e = err as { message?: string; code?: string; response?: unknown };
             const isNetworkError = e.message === 'Network Error' || e.code === 'ERR_NETWORK' || !e.response;
             if (isNetworkError) {
-                setError('Cannot connect to the server. Make sure the backend is running (e.g. in apps/backend run: pnpm dev).');
+                setError('Cannot reach the API. If local: run the backend (e.g. pnpm dev in apps/backend). If deployed: set BACKEND_URL on the frontend service and redeploy.');
             } else {
                 const ex = err as { response?: { data?: { error?: string } }; message?: string };
                 setError(ex.response?.data?.error || ex.message || 'Login failed');
