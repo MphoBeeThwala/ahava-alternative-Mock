@@ -1,13 +1,7 @@
 import axios, { AxiosInstance } from 'axios';
 
-// API Base URL: use same-origin /api when unset (Next.js rewrites proxy to backend → no CORS, no env)
-function normalizeApiBase(url: string): string {
-  const base = url.replace(/\/+$/, '').trim();
-  return base.endsWith('/api') ? base : `${base}/api`;
-}
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL
-  ? normalizeApiBase(process.env.NEXT_PUBLIC_API_URL)
-  : '/api';
+// Always same-origin /api → Next.js rewrites proxy to backend. No cross-origin = no CORS.
+const API_BASE_URL = '/api';
 
 // Create axios instance with default config
 const apiClient: AxiosInstance = axios.create({
