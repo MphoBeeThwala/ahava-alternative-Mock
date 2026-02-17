@@ -3,7 +3,7 @@ import { PrismaClient, TriageCaseStatus, UserRole } from '@prisma/client';
 import Joi from 'joi';
 import { AuthenticatedRequest, authMiddleware } from '../middleware/auth';
 
-const router = Router();
+const router: Router = Router();
 const prisma = new PrismaClient();
 
 // GET /api/triage-cases – doctor: list pending cases + my reviewed cases
