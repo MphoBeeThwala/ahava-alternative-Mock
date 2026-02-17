@@ -19,6 +19,7 @@ import paymentRoutes from './routes/payments';
 import adminRoutes from './routes/admin';
 import webhookRoutes from './routes/webhooks';
 import triageRoutes from './routes/triage';
+import triageCasesRoutes from './routes/triageCases';
 import nurseRoutes from './routes/nurse';
 import patientRoutes from './routes/patient';
 
@@ -98,6 +99,7 @@ app.use('/api/messages', authMiddleware, messageRoutes);
 app.use('/api/payments', authMiddleware, paymentRoutes);
 app.use('/api/admin', authMiddleware, adminRoutes);
 app.use('/api/triage', authMiddleware, triageRoutes);
+app.use('/api/triage-cases', authMiddleware, triageCasesRoutes);
 app.use('/api/nurse', authMiddleware, nurseRoutes);
 app.use('/api/patient', authMiddleware, patientRoutes);
 app.use('/webhooks', webhookRoutes);

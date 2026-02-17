@@ -51,6 +51,13 @@ enum MessageType {
   SYSTEM
 }
 
+enum TriageCaseStatus {
+  PENDING_REVIEW   // AI done, waiting for doctor
+  APPROVED         // Doctor agrees with AI assessment
+  DOCTOR_OVERRIDE  // Doctor disagrees; final diagnosis may follow later
+  REFERRED         // In-person or partner appointment needed
+}
+
 model User {
   id                String   @id @default(cuid())
   email             String   @unique
@@ -91,6 +98,8 @@ model User {
   receivedMessages  Message[] @relation("ReceivedMessages")
   biometricReadings BiometricReading[] @relation("UserBiometrics")
   healthAlerts      HealthAlert[] @relation("UserAlerts")
+  triageCasesAsPatient TriageCase[] @relation("TriageCasePatient")
+  triageCasesAsDoctor  TriageCase[] @relation("TriageCaseDoctor")
   
   // Audit
   createdAt         DateTime @default(now())
@@ -340,4 +349,33 @@ model HealthAlert {
   @@index([userId, createdAt])
   @@index([userId, acknowledged, resolved])
   @@map("health_alerts")
+}
+
+model TriageCase {
+  id                String           @id @default(cuid())
+  patientId         String
+  doctorId          String?
+  
+  symptoms          String
+  imageStorageRef   String?          // Optional reference to stored image
+  aiTriageLevel     Int              // 1-5
+  aiRecommendedAction String
+  aiPossibleConditions Json          // string[]
+  aiReasoning       String
+  
+  status            TriageCaseStatus  @default(PENDING_REVIEW)
+  doctorNotes       String?
+  finalDiagnosis    String?          // Set when doctor approves or overrides
+  referredTo        String?           // e.g. "In-person with Dr X" or "Partner clinic near patient"
+  
+  patient           User             @relation("TriageCasePatient", fields: [patientId], references: [id], onDelete: Cascade)
+  doctor            User?            @relation("TriageCaseDoctor", fields: [doctorId], references: [id], onDelete: SetNull)
+  
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  
+  @@index([status])
+  @@index([patientId])
+  @@index([doctorId])
+  @@map("triage_cases")
 }

@@ -142,6 +142,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
 router.get('/', authMiddleware, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     const whereClause: any = {};
+    const statusFilter = req.query.status as string | undefined;
 
     // Filter by user role
     if (req.user!.role === UserRole.PATIENT) {
@@ -149,7 +150,16 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res: Response,
     } else if (req.user!.role === UserRole.NURSE) {
       whereClause.nurseId = req.user!.id;
     } else if (req.user!.role === UserRole.DOCTOR) {
-      whereClause.doctorId = req.user!.id;
+      if (statusFilter === 'PENDING_REVIEW') {
+        whereClause.doctorReview = null;
+        whereClause.nurseReport = { not: null };
+        whereClause.OR = [
+          { doctorId: req.user!.id },
+          { doctorId: null },
+        ];
+      } else {
+        whereClause.doctorId = req.user!.id;
+      }
     }
     // Admin can see all visits
 
@@ -567,6 +577,102 @@ router.put('/:id', authMiddleware, async (req: AuthenticatedRequest, res: Respon
                 firstName: true,
                 lastName: true,
                 email: true,
+              },
+            },
+          },
+        },
+        nurse: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+        doctor: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    res.json({ success: true, visit: updatedVisit });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Doctor approves visit (sets review and marks completed)
+router.post('/:id/approve', authMiddleware, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const visitId = req.params.id;
+    const { review } = req.body || {};
+
+    const visit = await prisma.visit.findUnique({
+      where: { id: visitId },
+      include: {
+        booking: {
+          include: {
+            patient: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+                phone: true,
+              },
+            },
+          },
+        },
+        nurse: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+        doctor: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    if (!visit) {
+      return res.status(404).json({ error: 'Visit not found' });
+    }
+
+    if (req.user!.role !== UserRole.DOCTOR && req.user!.role !== UserRole.ADMIN) {
+      return res.status(403).json({ error: 'Only doctors can approve visits' });
+    }
+
+    const updatedVisit = await prisma.visit.update({
+      where: { id: visitId },
+      data: {
+        doctorReview: typeof review === 'string' ? review : undefined,
+        doctorId: visit.doctorId || req.user!.id,
+        status: VisitStatus.COMPLETED,
+        ...(visit.actualEnd ? {} : { actualEnd: new Date() }),
+      },
+      include: {
+        booking: {
+          include: {
+            patient: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+                phone: true,
               },
             },
           },

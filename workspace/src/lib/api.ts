@@ -276,13 +276,47 @@ export const nurseApi = {
 };
 
 // ==================== DOCTOR ====================
+export interface TriageCase {
+  id: string;
+  patientId: string;
+  doctorId: string | null;
+  symptoms: string;
+  aiTriageLevel: number;
+  aiRecommendedAction: string;
+  aiPossibleConditions: string[];
+  aiReasoning: string;
+  status: string;
+  doctorNotes: string | null;
+  finalDiagnosis: string | null;
+  referredTo: string | null;
+  createdAt: string;
+  patient?: { id: string; firstName: string; lastName: string; email?: string; phone?: string | null };
+}
+
 export const doctorApi = {
   getPendingVisits: async () => {
     const res = await apiClient.get('/visits?status=PENDING_REVIEW');
     return res.data;
   },
-  approveVisit: async (visitId: string) => {
-    const res = await apiClient.post(`/visits/${visitId}/approve`);
+  approveVisit: async (visitId: string, review?: string) => {
+    const res = await apiClient.post(`/visits/${visitId}/approve`, review != null ? { review } : {});
+    return res.data;
+  },
+  getTriageCases: async (status?: 'PENDING_REVIEW' | 'mine') => {
+    const q = status ? `?status=${status}` : '?status=PENDING_REVIEW';
+    const res = await apiClient.get(`/triage-cases${q}`);
+    return res.data;
+  },
+  approveTriageCase: async (caseId: string, finalDiagnosis?: string) => {
+    const res = await apiClient.post(`/triage-cases/${caseId}/approve`, finalDiagnosis != null ? { finalDiagnosis } : {});
+    return res.data;
+  },
+  overrideTriageCase: async (caseId: string, doctorNotes?: string, finalDiagnosis?: string) => {
+    const res = await apiClient.post(`/triage-cases/${caseId}/override`, { doctorNotes, finalDiagnosis });
+    return res.data;
+  },
+  referTriageCase: async (caseId: string, referredTo: string, doctorNotes?: string) => {
+    const res = await apiClient.post(`/triage-cases/${caseId}/refer`, { referredTo, doctorNotes });
     return res.data;
   },
 };
