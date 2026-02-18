@@ -49,6 +49,12 @@ export const errorHandler = (
     }
   }
 
+  // Prisma validation (e.g. invalid where: { id: undefined }) — don't send raw message to client
+  if (err instanceof Prisma.PrismaClientValidationError) {
+    error.message = 'Invalid request';
+    error.statusCode = 400;
+  }
+
   // JWT errors
   if (err.name === 'JsonWebTokenError') {
     error.message = 'Invalid token';

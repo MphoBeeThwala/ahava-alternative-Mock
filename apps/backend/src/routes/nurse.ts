@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { authMiddleware } from '../middleware/auth';
+import { authMiddleware, AuthenticatedRequest } from '../middleware/auth';
 import { rateLimiter } from '../middleware/rateLimiter';
 import Joi from 'joi';
 
@@ -29,7 +29,7 @@ router.post('/availability', authMiddleware, rateLimiter, async (req, res, next)
         }
 
         const { lat, lng, isAvailable } = value;
-        const userId = (req as any).user.userId;
+        const userId = (req as AuthenticatedRequest).user!.id;
 
         // Update user
         const user = await prisma.user.update({
