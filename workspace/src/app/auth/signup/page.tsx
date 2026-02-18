@@ -38,13 +38,16 @@ export default function SignupPage() {
                 default: router.push('/');
             }
         } catch (err: unknown) {
-            const e = err as { message?: string; code?: string; response?: unknown };
+            const e = err as { message?: string; code?: string; response?: { status?: number; data?: { error?: string } } };
+            const status = e.response?.status;
+            const is502 = status === 502 || status === 503 || status === 504;
             const isNetworkError = e.message === 'Network Error' || e.code === 'ERR_NETWORK' || !e.response;
-            if (isNetworkError) {
+            if (is502) {
+                setError('Service temporarily unavailable. The backend may be starting or restarting—please try again in a moment.');
+            } else if (isNetworkError) {
                 setError('Cannot reach the API. If local: run the backend (e.g. pnpm dev in apps/backend). If deployed: set BACKEND_URL on the frontend service and redeploy.');
             } else {
-                const ex = err as { response?: { data?: { error?: string } }; message?: string };
-                setError(ex.response?.data?.error || ex.message || 'Registration failed');
+                setError((e.response?.data as { error?: string })?.error || e.message || 'Registration failed');
             }
         } finally {
             setLoading(false);
