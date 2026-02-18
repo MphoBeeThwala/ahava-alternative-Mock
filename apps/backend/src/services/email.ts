@@ -5,7 +5,7 @@
 import { Resend } from 'resend';
 
 const apiKey = process.env.RESEND_API_KEY;
-const fromEmail = process.env.EMAIL_FROM || 'Ahava Healthcare <onboarding@resend.dev>');
+const fromEmail = process.env.EMAIL_FROM || 'Ahava Healthcare <onboarding@resend.dev>';
 
 let resend: Resend | null = null;
 
