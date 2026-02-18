@@ -2,6 +2,7 @@ import { Router, Response, NextFunction } from 'express';
 import { PrismaClient, VisitStatus, UserRole } from '@prisma/client';
 import { AuthenticatedRequest, authMiddleware } from '../middleware/auth';
 import { encryptData } from '../utils/encryption';
+import { notifyVisitApproved } from '../services/notifications';
 import Joi from 'joi';
 
 const router: Router = Router();
@@ -695,6 +696,15 @@ router.post('/:id/approve', authMiddleware, async (req: AuthenticatedRequest, re
         },
       },
     });
+
+    const patient = updatedVisit.booking?.patient;
+    if (patient?.email) {
+      notifyVisitApproved({
+        to: patient.email,
+        patientName: `${patient.firstName} ${patient.lastName}`,
+        doctorReview: updatedVisit.doctorReview ?? undefined,
+      }).catch((e) => console.error('[visits] notify approved failed', e));
+    }
 
     res.json({ success: true, visit: updatedVisit });
   } catch (error) {

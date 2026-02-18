@@ -2,6 +2,7 @@ import { Router, Response, NextFunction } from 'express';
 import { PrismaClient, TriageCaseStatus, UserRole } from '@prisma/client';
 import Joi from 'joi';
 import { AuthenticatedRequest, authMiddleware } from '../middleware/auth';
+import { notifyTriageApproved, notifyTriageOverride, notifyTriageReferred } from '../services/notifications';
 
 const router: Router = Router();
 const prisma = new PrismaClient();
@@ -92,6 +93,12 @@ router.post('/:id/approve', authMiddleware, async (req: AuthenticatedRequest, re
       },
     });
 
+    notifyTriageApproved({
+      to: updated.patient.email,
+      patientName: `${updated.patient.firstName} ${updated.patient.lastName}`,
+      finalDiagnosis: updated.finalDiagnosis || updated.aiRecommendedAction,
+    }).catch((e) => console.error('[triage] notify approved failed', e));
+
     res.json({ success: true, case: updated });
   } catch (err) {
     next(err);
@@ -127,6 +134,13 @@ router.post('/:id/override', authMiddleware, async (req: AuthenticatedRequest, r
       },
     });
 
+    notifyTriageOverride({
+      to: updated.patient.email,
+      patientName: `${updated.patient.firstName} ${updated.patient.lastName}`,
+      doctorNotes: updated.doctorNotes ?? undefined,
+      finalDiagnosis: updated.finalDiagnosis ?? undefined,
+    }).catch((e) => console.error('[triage] notify override failed', e));
+
     res.json({ success: true, case: updated });
   } catch (err) {
     next(err);
@@ -161,6 +175,13 @@ router.post('/:id/refer', authMiddleware, async (req: AuthenticatedRequest, res:
         patient: { select: { id: true, firstName: true, lastName: true, email: true } },
       },
     });
+
+    notifyTriageReferred({
+      to: updated.patient.email,
+      patientName: `${updated.patient.firstName} ${updated.patient.lastName}`,
+      referredTo: updated.referredTo!,
+      doctorNotes: updated.doctorNotes ?? undefined,
+    }).catch((e) => console.error('[triage] notify referred failed', e));
 
     res.json({ success: true, case: updated });
   } catch (err) {

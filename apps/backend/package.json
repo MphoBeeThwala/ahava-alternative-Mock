@@ -22,6 +22,9 @@
     "db:reset": "prisma migrate reset --force",
     "validate:env": "node scripts/validate-env.js"
   },
+  "prisma": {
+    "seed": "tsx src/seed.ts"
+  },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "@prisma/client": "6.16.2",
@@ -45,6 +48,7 @@
     "multer": "^1.4.5-lts.1",
     "nodemailer": "^7.0.13",
     "pdfkit": "^0.14.0",
+    "resend": "^4.0.0",
     "sharp": "^0.33.0",
     "ws": "^8.14.2"
   },

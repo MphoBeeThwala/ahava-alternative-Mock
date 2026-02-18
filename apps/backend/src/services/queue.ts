@@ -1,5 +1,6 @@
-import { Queue, QueueEvents } from 'bullmq';
+import { Queue, QueueEvents, Worker } from 'bullmq';
 import { getRedis } from './redis';
+import { sendEmail } from './email';
 
 // Queue names
 export const QUEUE_NAMES = {
@@ -12,6 +13,7 @@ export const QUEUE_NAMES = {
 let pdfExportQueue: Queue | null = null;
 let pushNotificationQueue: Queue | null = null;
 let emailQueue: Queue | null = null;
+let emailWorker: Worker | null = null;
 
 function getDefaultJobOptions() {
   return {
@@ -60,6 +62,19 @@ export const initializeQueue = async () => {
     console.error(`❌ Email job ${jobId} failed:`, failedReason);
   });
 
+  emailWorker = new Worker(
+    QUEUE_NAMES.EMAIL,
+    async (job) => {
+      const { to, subject, html, text } = job.data as { to: string; subject: string; html: string; text?: string };
+      const result = await sendEmail({ to, subject, html, text });
+      if (result.error) throw result.error;
+    },
+    { connection, concurrency: 5 }
+  );
+  emailWorker.on('failed', (job, err) => {
+    console.error(`❌ Email job ${job?.id} failed:`, err?.message);
+  });
+
   console.log('✅ BullMQ queues initialized');
 };
 
@@ -90,6 +105,10 @@ export const addEmailJob = async (data: {
   html: string;
   text?: string;
 }) => {
-  if (!emailQueue) return;
-  return emailQueue.add('send-email', data, { priority: 3 });
+  if (emailQueue) {
+    return emailQueue.add('send-email', data, { priority: 3 });
+  }
+  // No Redis: send directly so notifications still work (e.g. serverless or dev without Redis)
+  const { sendEmail } = await import('./email');
+  sendEmail(data).catch((e) => console.error('[email] direct send failed', e));
 };
