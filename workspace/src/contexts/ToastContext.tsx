@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 type ToastType = "success" | "error" | "info";
 
@@ -34,7 +34,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     setState({ message, type });
   }, []);
 
-  const toast = useCallback(
+  const toast = useMemo(
     () => ({
       success: (message: string) => show(message, "success"),
       error: (message: string) => show(message, "error"),

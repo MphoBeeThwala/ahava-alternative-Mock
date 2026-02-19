@@ -6,7 +6,7 @@ import { doctorApi, visitsApi, Visit, TriageCase } from '../../../lib/api';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useToast } from '../../../contexts/ToastContext';
 import DashboardLayout from '../../../components/DashboardLayout';
-import { Card, CardHeader, CardTitle } from '../../../components/ui/Card';
+import { Card } from '../../../components/ui/Card';
 import { KpiCard } from '../../../components/ui/KpiCard';
 import { Modal } from '../../../components/ui/Modal';
 import { StatusBadge } from '../../../components/ui/StatusBadge';
