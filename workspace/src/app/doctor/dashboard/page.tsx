@@ -4,10 +4,16 @@ import React, { useState, useEffect } from 'react';
 import RoleGuard, { UserRole } from '../../../components/RoleGuard';
 import { doctorApi, visitsApi, Visit, TriageCase } from '../../../lib/api';
 import { useAuth } from '../../../contexts/AuthContext';
-import NavBar from '../../../components/NavBar';
+import { useToast } from '../../../contexts/ToastContext';
+import DashboardLayout from '../../../components/DashboardLayout';
+import { Card, CardHeader, CardTitle } from '../../../components/ui/Card';
+import { KpiCard } from '../../../components/ui/KpiCard';
+import { Modal } from '../../../components/ui/Modal';
+import { StatusBadge } from '../../../components/ui/StatusBadge';
 
 export default function DoctorDashboard() {
     const { user } = useAuth();
+    const toast = useToast();
     const [triageQueue, setTriageQueue] = useState<Visit[]>([]);
     const [triageCases, setTriageCases] = useState<TriageCase[]>([]);
     const [loading, setLoading] = useState(false);
@@ -43,11 +49,11 @@ export default function DoctorDashboard() {
     const handleApprove = async (visitId: string) => {
         try {
             await doctorApi.approveVisit(visitId);
-            alert('Visit approved. Notification sent to patient.');
+            toast.success('Visit approved. Notification sent to patient.');
             loadPendingVisits();
         } catch (error: unknown) {
             const err = error as { response?: { data?: { error?: string } } };
-            alert(err.response?.data?.error || 'Failed to approve visit.');
+            toast.error(err.response?.data?.error || 'Failed to approve visit.');
         }
     };
 
@@ -57,18 +63,18 @@ export default function DoctorDashboard() {
             loadPendingVisits();
         } catch (error: unknown) {
             const err = error as { response?: { data?: { error?: string } } };
-            alert(err.response?.data?.error || 'Failed to update visit status.');
+            toast.error(err.response?.data?.error || 'Failed to update visit status.');
         }
     };
 
     const handleApproveTriage = async (caseId: string) => {
         try {
             await doctorApi.approveTriageCase(caseId);
-            alert('Case approved. Patient can use AI assessment as final.');
+            toast.success('Case approved. Patient can use AI assessment as final.');
             loadTriageCases();
         } catch (error: unknown) {
             const err = error as { response?: { data?: { error?: string } } };
-            alert(err.response?.data?.error || 'Failed to approve.');
+            toast.error(err.response?.data?.error || 'Failed to approve.');
         }
     };
 
@@ -76,12 +82,12 @@ export default function DoctorDashboard() {
         if (!overrideModal) return;
         try {
             await doctorApi.overrideTriageCase(overrideModal.caseId, overrideModal.notes, overrideModal.diagnosis);
-            alert('Your assessment recorded. You can send final diagnosis to patient later.');
+            toast.success('Your assessment recorded. You can send final diagnosis to patient later.');
             setOverrideModal(null);
             loadTriageCases();
         } catch (error: unknown) {
             const err = error as { response?: { data?: { error?: string } } };
-            alert(err.response?.data?.error || 'Failed to save.');
+            toast.error(err.response?.data?.error || 'Failed to save.');
         }
     };
 
@@ -89,12 +95,12 @@ export default function DoctorDashboard() {
         if (!referModal || !referModal.referredTo.trim()) return;
         try {
             await doctorApi.referTriageCase(referModal.caseId, referModal.referredTo, referModal.notes);
-            alert('Case referred. Arrange in-person or partner appointment.');
+            toast.success('Case referred. Arrange in-person or partner appointment.');
             setReferModal(null);
             loadTriageCases();
         } catch (error: unknown) {
             const err = error as { response?: { data?: { error?: string } } };
-            alert(err.response?.data?.error || 'Failed to refer.');
+            toast.error(err.response?.data?.error || 'Failed to refer.');
         }
     };
 
@@ -102,65 +108,67 @@ export default function DoctorDashboard() {
 
     return (
         <RoleGuard allowedRoles={[UserRole.DOCTOR]}>
-            <NavBar />
-            <div className="p-6 sm:p-8 bg-slate-50 min-h-screen">
+            <DashboardLayout>
+                <div className="p-6 sm:p-8 bg-[var(--background)] min-h-screen">
                 <header className="flex flex-wrap justify-between items-center gap-4 mb-8">
                     <div>
-                        <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">Doctor Portal</h1>
-                        <p className="text-slate-700 font-medium mt-1">Welcome, Dr. {user?.lastName}</p>
+                        <h1 className="text-2xl sm:text-3xl font-bold text-[var(--foreground)] tracking-tight">Doctor Portal</h1>
+                        <p className="text-[var(--muted)] font-medium mt-1">Welcome, Dr. {user?.lastName}</p>
                     </div>
-                    <span className="bg-blue-100 text-blue-800 px-4 py-2 rounded-full font-semibold">
-                        Active Queue: {totalPending}
-                    </span>
+                    <KpiCard
+                        label="Active Queue"
+                        value={totalPending}
+                        badge={`${totalPending} pending`}
+                        badgeVariant={totalPending > 0 ? 'warning' : 'success'}
+                    />
                 </header>
 
                 {/* AI-assisted remote triage (sent from patient dashboard) */}
                 {triageCases.length > 0 && (
                     <section className="mb-10">
-                        <h2 className="text-xl font-bold text-slate-800 mb-4">AI Triage Queue (remote)</h2>
+                        <h2 className="text-xl font-bold text-[var(--foreground)] mb-4">AI Triage Queue (remote)</h2>
                         <div className="grid gap-6">
                             {triageCases.map((tc) => (
-                                <div key={tc.id} className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                                <Card key={tc.id}>
                                     <div className="flex justify-between items-start mb-4">
                                         <div>
-                                            <h3 className="text-xl font-bold text-slate-900">
+                                            <h3 className="text-xl font-bold text-[var(--foreground)]">
                                                 {tc.patient?.firstName} {tc.patient?.lastName}
                                             </h3>
-                                            <p className="text-sm text-slate-600">
+                                            <p className="text-sm text-[var(--muted)]">
                                                 {new Date(tc.createdAt).toLocaleString()}
                                             </p>
                                         </div>
-                                        <span className={`px-4 py-2 rounded-lg font-bold ${
-                                            tc.aiTriageLevel <= 2 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
-                                        }`}>
+                                        <StatusBadge variant={tc.aiTriageLevel <= 2 ? 'danger' : 'warning'}>
                                             Level {tc.aiTriageLevel}
-                                        </span>
+                                        </StatusBadge>
                                     </div>
                                     <p className="text-slate-700 mb-2"><strong>Symptoms:</strong> {tc.symptoms}</p>
                                     <p className="text-slate-600 text-sm mb-2"><strong>AI recommendation:</strong> {tc.aiRecommendedAction}</p>
                                     <p className="text-slate-500 text-sm mb-2"><strong>Possible conditions:</strong> {(tc.aiPossibleConditions || []).join(', ')}</p>
                                     <p className="text-slate-500 text-sm mb-4"><strong>AI reasoning:</strong> {tc.aiReasoning}</p>
-                                    <div className="flex flex-wrap gap-3 border-t pt-4">
+                                    <div className="flex flex-wrap gap-3 border-t pt-4" style={{ borderColor: 'var(--border)' }}>
                                         <button
                                             onClick={() => handleApproveTriage(tc.id)}
-                                            className="px-4 py-2 bg-emerald-600 text-white font-medium rounded-lg hover:bg-emerald-700"
+                                            className="px-4 py-2 rounded-lg font-medium text-white transition"
+                                            style={{ backgroundColor: 'var(--success)' }}
                                         >
                                             Approve (agree with AI)
                                         </button>
                                         <button
                                             onClick={() => setOverrideModal({ caseId: tc.id, notes: '', diagnosis: '' })}
-                                            className="px-4 py-2 bg-amber-600 text-white font-medium rounded-lg hover:bg-amber-700"
+                                            className="px-4 py-2 rounded-lg font-medium text-white transition bg-amber-600 hover:bg-amber-700"
                                         >
                                             Add my diagnosis
                                         </button>
                                         <button
                                             onClick={() => setReferModal({ caseId: tc.id, referredTo: '', notes: '' })}
-                                            className="px-4 py-2 bg-slate-600 text-white font-medium rounded-lg hover:bg-slate-700"
+                                            className="px-4 py-2 rounded-lg font-medium text-white bg-slate-600 hover:bg-slate-700 transition"
                                         >
                                             Refer (in-person / partner)
                                         </button>
                                     </div>
-                                </div>
+                                </Card>
                             ))}
                         </div>
                     </section>
@@ -168,40 +176,36 @@ export default function DoctorDashboard() {
 
                 {/* Nurse visit queue */}
                 <section>
-                    <h2 className="text-xl font-bold text-slate-800 mb-4">Visit queue (nurse reports)</h2>
+                    <h2 className="text-xl font-bold text-[var(--foreground)] mb-4">Visit queue (nurse reports)</h2>
                 {loading ? (
                     <div className="text-center py-12">
-                        <p className="text-slate-600 font-medium">Loading pending reviews...</p>
+                        <p className="font-medium text-[var(--muted)]">Loading pending reviews...</p>
                     </div>
                 ) : triageQueue.length === 0 && triageCases.length === 0 ? (
-                    <div className="text-center py-12 bg-white rounded-xl border border-slate-200 text-slate-600">
-                        <p className="text-xl font-medium">All caught up! No pending reviews.</p>
-                    </div>
+                    <Card className="text-center py-12">
+                        <p className="text-xl font-medium text-[var(--muted)]">All caught up! No pending reviews.</p>
+                    </Card>
                 ) : triageQueue.length === 0 ? (
-                    <div className="text-center py-8 bg-white rounded-xl border border-slate-200 text-slate-500">
-                        <p>No pending nurse visits.</p>
-                    </div>
+                    <Card className="text-center py-8">
+                        <p className="text-[var(--muted)]">No pending nurse visits.</p>
+                    </Card>
                 ) : (
                     <div className="grid gap-6">
                         {triageQueue.map((visit) => (
-                            <div key={visit.id} className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                            <Card key={visit.id}>
                                 <div className="flex justify-between items-start mb-4">
                                     <div>
-                                        <h3 className="text-xl font-bold text-slate-900">
+                                        <h3 className="text-xl font-bold text-[var(--foreground)]">
                                             {visit.booking?.patient?.firstName} {visit.booking?.patient?.lastName}
                                         </h3>
-                                        <p className="text-sm text-slate-600">
+                                        <p className="text-sm text-[var(--muted)]">
                                             {visit.createdAt ? new Date(visit.createdAt).toLocaleString() : 'Date TBD'}
                                         </p>
-                                        <p className="text-sm text-slate-600 mt-1">{visit.booking?.address}</p>
+                                        <p className="text-sm text-[var(--muted)] mt-1">{visit.booking?.address}</p>
                                     </div>
-                                    <div className={`px-4 py-2 rounded-lg font-bold ${
-                                        visit.triageLevel <= 2 
-                                            ? 'bg-red-100 text-red-700' 
-                                            : 'bg-yellow-100 text-yellow-700'
-                                    }`}>
-                                        {visit.triageLevel ? `Triage Level ${visit.triageLevel}` : visit.status}
-                                    </div>
+                                    <StatusBadge variant={visit.triageLevel <= 2 ? 'danger' : 'warning'}>
+                                        {visit.triageLevel ? `Level ${visit.triageLevel}` : visit.status}
+                                    </StatusBadge>
                                 </div>
 
                                 {visit.biometrics && (
@@ -253,86 +257,109 @@ export default function DoctorDashboard() {
                                     </div>
                                 )}
 
-                                <div className="flex gap-4 border-t pt-4">
+                                <div className="flex gap-4 border-t pt-4" style={{ borderColor: 'var(--border)' }}>
                                     <button
                                         onClick={() => handleApprove(visit.id)}
-                                        className="px-6 py-2 bg-emerald-600 text-white font-medium rounded-lg hover:bg-emerald-700 transition"
+                                        className="px-6 py-2 rounded-lg font-medium text-white transition"
+                                        style={{ backgroundColor: 'var(--success)' }}
                                     >
                                         Approve & Complete
                                     </button>
                                     <button
                                         onClick={() => handleStatusUpdate(visit.id, 'PENDING_REVIEW')}
-                                        className="px-6 py-2 bg-white border border-slate-300 text-slate-700 font-semibold rounded-lg hover:bg-slate-50 transition"
+                                        className="px-6 py-2 rounded-lg border font-semibold transition bg-[var(--card)] hover:bg-slate-50"
+                                        style={{ borderColor: 'var(--border)', color: 'var(--foreground)' }}
                                     >
                                         Request More Info
                                     </button>
                                     <button
                                         onClick={() => handleStatusUpdate(visit.id, 'CANCELLED')}
-                                        className="px-6 py-2 bg-white border border-red-200 text-red-600 font-medium rounded-lg hover:bg-red-50 transition ml-auto"
+                                        className="px-6 py-2 rounded-lg border font-medium transition ml-auto hover:bg-red-50"
+                                        style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }}
                                     >
                                         Escalate to ER
                                     </button>
                                 </div>
-                            </div>
+                            </Card>
                         ))}
                     </div>
                 )}
                 </section>
 
                 {/* Refer modal */}
-                {referModal && (
-                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-                        <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
-                            <h3 className="text-lg font-bold text-slate-900 mb-4">Refer patient</h3>
+                <Modal
+                    open={!!referModal}
+                    onClose={() => setReferModal(null)}
+                    title="Refer patient"
+                    primaryLabel="Refer"
+                    onPrimary={handleReferTriage}
+                    primaryDisabled={!referModal?.referredTo?.trim()}
+                    secondaryLabel="Cancel"
+                    onSecondary={() => setReferModal(null)}
+                >
+                    <div className="space-y-4">
+                        <div>
+                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Where to refer</label>
                             <input
                                 type="text"
                                 placeholder="e.g. In-person with Dr X / Partner clinic near patient"
-                                className="w-full px-4 py-2 border border-slate-300 rounded-lg mb-3"
-                                value={referModal.referredTo}
-                                onChange={(e) => setReferModal({ ...referModal, referredTo: e.target.value })}
+                                className="w-full rounded-lg border px-4 py-2.5 text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2"
+                                style={{ borderColor: 'var(--border)' }}
+                                value={referModal?.referredTo ?? ''}
+                                onChange={(e) => referModal && setReferModal({ ...referModal, referredTo: e.target.value })}
                             />
+                        </div>
+                        <div>
+                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Notes (optional)</label>
                             <textarea
-                                placeholder="Notes (optional)"
-                                className="w-full px-4 py-2 border border-slate-300 rounded-lg mb-4"
+                                placeholder="Notes for referral"
+                                className="w-full rounded-lg border px-4 py-2.5 text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2"
+                                style={{ borderColor: 'var(--border)' }}
                                 rows={2}
-                                value={referModal.notes}
-                                onChange={(e) => setReferModal({ ...referModal, notes: e.target.value })}
+                                value={referModal?.notes ?? ''}
+                                onChange={(e) => referModal && setReferModal({ ...referModal, notes: e.target.value })}
                             />
-                            <div className="flex gap-3">
-                                <button onClick={handleReferTriage} className="flex-1 py-2 bg-slate-700 text-white rounded-lg font-medium">Refer</button>
-                                <button onClick={() => setReferModal(null)} className="flex-1 py-2 border border-slate-300 rounded-lg">Cancel</button>
-                            </div>
                         </div>
                     </div>
-                )}
+                </Modal>
 
                 {/* Override modal */}
-                {overrideModal && (
-                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-                        <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
-                            <h3 className="text-lg font-bold text-slate-900 mb-4">Add your diagnosis</h3>
+                <Modal
+                    open={!!overrideModal}
+                    onClose={() => setOverrideModal(null)}
+                    title="Add your diagnosis"
+                    primaryLabel="Save"
+                    onPrimary={handleOverrideTriage}
+                    secondaryLabel="Cancel"
+                    onSecondary={() => setOverrideModal(null)}
+                >
+                    <div className="space-y-4">
+                        <div>
+                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Your notes (optional)</label>
                             <textarea
-                                placeholder="Your notes (optional)"
-                                className="w-full px-4 py-2 border border-slate-300 rounded-lg mb-3"
+                                placeholder="Clinical notes"
+                                className="w-full rounded-lg border px-4 py-2.5 text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2"
+                                style={{ borderColor: 'var(--border)' }}
                                 rows={2}
-                                value={overrideModal.notes}
-                                onChange={(e) => setOverrideModal({ ...overrideModal, notes: e.target.value })}
+                                value={overrideModal?.notes ?? ''}
+                                onChange={(e) => overrideModal && setOverrideModal({ ...overrideModal, notes: e.target.value })}
                             />
+                        </div>
+                        <div>
+                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Final diagnosis</label>
                             <input
                                 type="text"
-                                placeholder="Final diagnosis (can send to patient later)"
-                                className="w-full px-4 py-2 border border-slate-300 rounded-lg mb-4"
-                                value={overrideModal.diagnosis}
-                                onChange={(e) => setOverrideModal({ ...overrideModal, diagnosis: e.target.value })}
+                                placeholder="Can send to patient later"
+                                className="w-full rounded-lg border px-4 py-2.5 text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2"
+                                style={{ borderColor: 'var(--border)' }}
+                                value={overrideModal?.diagnosis ?? ''}
+                                onChange={(e) => overrideModal && setOverrideModal({ ...overrideModal, diagnosis: e.target.value })}
                             />
-                            <div className="flex gap-3">
-                                <button onClick={handleOverrideTriage} className="flex-1 py-2 bg-amber-600 text-white rounded-lg font-medium">Save</button>
-                                <button onClick={() => setOverrideModal(null)} className="flex-1 py-2 border border-slate-300 rounded-lg">Cancel</button>
-                            </div>
                         </div>
                     </div>
-                )}
-            </div>
+                </Modal>
+                </div>
+            </DashboardLayout>
         </RoleGuard>
     );
 }

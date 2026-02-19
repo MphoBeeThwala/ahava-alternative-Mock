@@ -6,6 +6,15 @@
   --muted: #475569;
   --card: #ffffff;
   --border: #e2e8f0;
+  /* UI/UX inspiration tokens – use for primary actions, status, cards (see docs/UI_UX_INSPIRATION_AND_PLAN.md) */
+  --primary: #4f46e5;
+  --primary-hover: #4338ca;
+  --success: #059669;
+  --warning: #d97706;
+  --danger: #dc2626;
+  --radius: 0.75rem;
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
 }
 
 @theme inline {

@@ -4,10 +4,14 @@ import React, { useState, useEffect } from 'react';
 import RoleGuard, { UserRole } from '../../../components/RoleGuard';
 import { patientApi, bookingsApi, BiometricReading, MonitoringSummary, Booking } from '../../../lib/api';
 import { useAuth } from '../../../contexts/AuthContext';
-import NavBar from '../../../components/NavBar';
+import { useToast } from '../../../contexts/ToastContext';
+import DashboardLayout from '../../../components/DashboardLayout';
+import { Card, CardHeader, CardTitle } from '../../../components/ui/Card';
+import { StatusBadge } from '../../../components/ui/StatusBadge';
 
 export default function PatientDashboard() {
     const { user } = useAuth();
+    const toast = useToast();
     const [symptoms, setSymptoms] = useState('');
     const [triageResult, setTriageResult] = useState<{
         triageLevel: number;
@@ -73,7 +77,7 @@ export default function PatientDashboard() {
         } catch (error: unknown) {
             const e = error as { response?: { data?: { error?: string } } };
             console.error("Triage failed", error);
-            alert(e.response?.data?.error || "Failed to analyze symptoms. Please try again.");
+            toast.error(e.response?.data?.error || "Failed to analyze symptoms. Please try again.");
         } finally {
             setLoading(false);
         }
@@ -83,7 +87,7 @@ export default function PatientDashboard() {
         try {
             setLoading(true);
             await patientApi.submitBiometrics(biometricData);
-            alert('Biometrics submitted successfully!');
+            toast.success('Biometrics submitted successfully!');
             setBiometricData({
                 heartRate: undefined,
                 bloodPressure: { systolic: 0, diastolic: 0 },
@@ -95,7 +99,7 @@ export default function PatientDashboard() {
         } catch (error: unknown) {
             const e = error as { response?: { data?: { error?: string } } };
             console.error("Biometric submission failed", error);
-            alert(e.response?.data?.error || "Failed to submit biometrics. Please try again.");
+            toast.error(e.response?.data?.error || "Failed to submit biometrics. Please try again.");
         } finally {
             setLoading(false);
         }
@@ -103,53 +107,55 @@ export default function PatientDashboard() {
 
     return (
         <RoleGuard allowedRoles={[UserRole.PATIENT]}>
-            <NavBar />
-            <div className="p-6 sm:p-8 bg-slate-50 min-h-screen">
-                <div className="max-w-6xl mx-auto">
-                    <div className="flex flex-wrap justify-between items-center gap-4 mb-8">
-                        <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
-                            Patient Portal
-                        </h1>
-                        <p className="text-sm sm:text-base font-medium text-slate-700">
-                            Welcome, {user?.firstName} {user?.lastName}
-                        </p>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-                        {/* Health Monitor Card */}
-                        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                            <h2 className="text-lg font-semibold mb-4 text-slate-900 tracking-tight">
-                                Health Status
-                            </h2>
-                            <div className="flex items-center justify-between mb-4">
-                                <div>
-                                    <p className="text-sm font-medium text-slate-600">Readiness Score</p>
-                                    <p className="text-3xl font-bold text-slate-900 mt-1">
-                                        {monitoringSummary?.readinessScore ?? 'N/A'}
-                                    </p>
-                                </div>
-                                <span className={`px-3 py-1.5 rounded-full text-sm font-semibold ${
-                                    monitoringSummary?.alertLevel === 'GREEN'
-                                        ? 'bg-emerald-100 text-emerald-800'
-                                        : monitoringSummary?.alertLevel === 'YELLOW'
-                                        ? 'bg-amber-100 text-amber-800'
-                                        : 'bg-red-100 text-red-800'
-                                }`}>
-                                    {monitoringSummary?.alertLevel ?? 'Unknown'}
-                                </span>
-                            </div>
-                            <p className="text-sm font-medium text-slate-600">
-                                {monitoringSummary?.baselineEstablished
-                                    ? 'Baseline established'
-                                    : 'Establishing baseline...'}
+            <DashboardLayout>
+                <div className="p-6 sm:p-8 bg-[var(--background)]">
+                    <div className="max-w-6xl mx-auto">
+                        <div className="flex flex-wrap justify-between items-center gap-4 mb-8">
+                            <h1 className="text-2xl sm:text-3xl font-bold text-[var(--foreground)] tracking-tight">
+                                Patient Portal
+                            </h1>
+                            <p className="text-sm sm:text-base font-medium text-[var(--muted)]">
+                                Welcome, {user?.firstName} {user?.lastName}
                             </p>
                         </div>
 
-                        {/* Biometric Entry Card */}
-                        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                            <h2 className="text-lg font-semibold mb-4 text-slate-900 tracking-tight">
-                                Record Biometrics
-                            </h2>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+                            {/* Health Status – KPI-style card */}
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle>Health Status</CardTitle>
+                                </CardHeader>
+                                <div className="flex items-center justify-between mb-4">
+                                    <div>
+                                        <p className="text-sm font-medium text-[var(--muted)]">Readiness Score</p>
+                                        <p className="text-3xl font-bold text-[var(--foreground)] mt-1">
+                                            {monitoringSummary?.readinessScore ?? 'N/A'}
+                                        </p>
+                                    </div>
+                                    <StatusBadge
+                                        variant={
+                                            monitoringSummary?.alertLevel === 'GREEN'
+                                                ? 'success'
+                                                : monitoringSummary?.alertLevel === 'YELLOW'
+                                                ? 'warning'
+                                                : 'danger'
+                                        }
+                                    >
+                                        {monitoringSummary?.alertLevel ?? 'Unknown'}
+                                    </StatusBadge>
+                                </div>
+                                <p className="text-sm font-medium text-[var(--muted)]">
+                                    {monitoringSummary?.baselineEstablished
+                                        ? 'Baseline established'
+                                        : 'Establishing baseline...'}
+                                </p>
+                            </Card>
+
+                            {/* Biometric Entry */}
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle>Record Biometrics</CardTitle>
+                                </CardHeader>
                             <div className="space-y-3">
                                 <div className="grid grid-cols-2 gap-2">
                                     <input
@@ -214,18 +220,19 @@ export default function PatientDashboard() {
                                 <button
                                     onClick={handleBiometricSubmit}
                                     disabled={loading}
-                                    className="w-full py-2.5 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-50 transition"
+                                    className="w-full py-2.5 rounded-lg font-semibold text-white transition disabled:opacity-50"
+                                    style={{ backgroundColor: 'var(--primary)' }}
                                 >
                                     Submit
                                 </button>
                             </div>
-                        </div>
+                            </Card>
 
-                        {/* AI Triage Card */}
-                        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                            <h2 className="text-lg font-semibold mb-4 text-slate-900 tracking-tight">
-                                AI Doctor Assistant
-                            </h2>
+                            {/* AI Triage */}
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle>AI Doctor Assistant</CardTitle>
+                                </CardHeader>
 
                             {!triageResult ? (
                                 <div className="space-y-4">
@@ -255,7 +262,8 @@ export default function PatientDashboard() {
                                     <button
                                         onClick={handleTriage}
                                         disabled={loading || !symptoms}
-                                        className="w-full py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition disabled:opacity-50"
+                                        className="w-full py-3 rounded-lg font-semibold text-white transition disabled:opacity-50"
+                                        style={{ backgroundColor: 'var(--primary)' }}
                                     >
                                         {loading ? 'Analyzing...' : 'Analyze Symptoms'}
                                     </button>
@@ -280,48 +288,49 @@ export default function PatientDashboard() {
                                             setSymptoms('');
                                             setSelectedImage(null);
                                         }}
-                                        className="text-blue-600 text-sm font-medium hover:underline w-full text-center"
+                                        className="text-sm font-medium w-full text-center hover:underline"
+                                        style={{ color: 'var(--primary)' }}
                                     >
                                         Start Over
                                     </button>
                                 </div>
                             )}
+                            </Card>
                         </div>
-                    </div>
 
-                    {/* Bookings Section */}
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                        <h2 className="text-lg font-semibold mb-4 text-slate-900 tracking-tight">
-                            My Bookings
-                        </h2>
-                        {bookings.length === 0 ? (
-                            <p className="text-slate-600 font-medium">No bookings yet. Book a visit to get started.</p>
-                        ) : (
-                            <div className="space-y-4">
-                                {bookings.map((booking) => (
-                                    <div key={booking.id} className="p-4 border border-slate-200 rounded-lg">
-                                        <div className="flex justify-between items-start gap-4">
-                                            <div>
-                                                <p className="font-semibold text-slate-900">
-                                                    {new Date(booking.scheduledDate).toLocaleDateString()}
-                                                </p>
-                                                <p className="text-sm text-slate-600 mt-1">{booking.address}</p>
+                        {/* Bookings */}
+                        <Card>
+                            <CardHeader>
+                                <CardTitle>My Bookings</CardTitle>
+                            </CardHeader>
+                            {bookings.length === 0 ? (
+                                <p className="font-medium text-[var(--muted)]">No bookings yet. Book a visit to get started.</p>
+                            ) : (
+                                <div className="space-y-4">
+                                    {bookings.map((booking) => (
+                                        <div key={booking.id} className="p-4 rounded-lg border" style={{ borderColor: 'var(--border)' }}>
+                                            <div className="flex justify-between items-start gap-4">
+                                                <div>
+                                                    <p className="font-semibold text-[var(--foreground)]">
+                                                        {new Date(booking.scheduledDate).toLocaleDateString()}
+                                                    </p>
+                                                    <p className="text-sm text-[var(--muted)] mt-1">{booking.address}</p>
+                                                </div>
+                                                <StatusBadge
+                                                    variant={booking.status === 'CONFIRMED' ? 'success' : 'warning'}
+                                                    className="text-xs shrink-0"
+                                                >
+                                                    {booking.status}
+                                                </StatusBadge>
                                             </div>
-                                            <span className={`px-3 py-1 rounded-full text-xs font-semibold shrink-0 ${
-                                                booking.status === 'CONFIRMED'
-                                                    ? 'bg-emerald-100 text-emerald-800'
-                                                    : 'bg-amber-100 text-amber-800'
-                                            }`}>
-                                                {booking.status}
-                                            </span>
                                         </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
+                                    ))}
+                                </div>
+                            )}
+                        </Card>
                     </div>
                 </div>
-            </div>
+            </DashboardLayout>
         </RoleGuard>
     );
 }

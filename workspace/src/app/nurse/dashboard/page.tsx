@@ -4,14 +4,21 @@ import React, { useState, useEffect } from 'react';
 import RoleGuard, { UserRole } from '../../../components/RoleGuard';
 import { nurseApi, visitsApi, Visit } from '../../../lib/api';
 import { useAuth } from '../../../contexts/AuthContext';
-import NavBar from '../../../components/NavBar';
+import { useToast } from '../../../contexts/ToastContext';
+import DashboardLayout from '../../../components/DashboardLayout';
+import { Card, CardHeader, CardTitle } from '../../../components/ui/Card';
+import { StatusBadge } from '../../../components/ui/StatusBadge';
+
+type VisitStatusFilter = 'ALL' | Visit['status'];
 
 export default function NurseDashboard() {
     const { user } = useAuth();
+    const toast = useToast();
     const [isAvailable, setIsAvailable] = useState(false);
     const [locationStatus, setLocationStatus] = useState('Unknown');
     const [loading, setLoading] = useState(false);
     const [visits, setVisits] = useState<Visit[]>([]);
+    const [statusFilter, setStatusFilter] = useState<VisitStatusFilter>('ALL');
 
     useEffect(() => {
         loadProfile();
@@ -44,7 +51,7 @@ export default function NurseDashboard() {
         setLoading(true);
 
         if (!navigator.geolocation) {
-            alert("Geolocation is not supported by your browser");
+            toast.error("Geolocation is not supported by your browser");
             setLoading(false);
             return;
         }
@@ -65,12 +72,12 @@ export default function NurseDashboard() {
                 } catch (error: unknown) {
                     const e = error as { response?: { data?: { error?: string } } };
                     console.error(error);
-                    alert(e.response?.data?.error || "Failed to go online. Check network.");
+                    toast.error(e.response?.data?.error || "Failed to go online. Check network.");
                 } finally {
                     setLoading(false);
                 }
             }, () => {
-                alert("Location access denied. Cannot go online.");
+                toast.error("Location access denied. Cannot go online.");
                 setLoading(false);
             });
         } else {
@@ -85,7 +92,7 @@ export default function NurseDashboard() {
                 setLocationStatus("Offline");
             } catch (error: unknown) {
                 const e = error as { response?: { data?: { error?: string } } };
-                alert(e.response?.data?.error || "Failed to go offline.");
+                toast.error(e.response?.data?.error || "Failed to go offline.");
             } finally {
                 setLoading(false);
             }
@@ -98,14 +105,16 @@ export default function NurseDashboard() {
             loadVisits();
         } catch (error: unknown) {
             const e = error as { response?: { data?: { error?: string } } };
-            alert(e.response?.data?.error || "Failed to update visit status.");
+            toast.error(e.response?.data?.error || "Failed to update visit status.");
         }
     };
 
+    const filteredVisits = statusFilter === 'ALL' ? visits : visits.filter((v) => v.status === statusFilter);
+
     return (
         <RoleGuard allowedRoles={[UserRole.NURSE]}>
-            <NavBar />
-            <div className="p-6 sm:p-8 bg-slate-50 min-h-screen">
+            <DashboardLayout>
+                <div className="p-6 sm:p-8 bg-[var(--background)] min-h-screen">
                 <div className="mb-8">
                     <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight mb-2">Nurse Portal</h1>
                     <p className="text-slate-700 font-medium">Welcome, {user?.firstName} {user?.lastName}</p>
@@ -149,39 +158,56 @@ export default function NurseDashboard() {
 
                     {/* Visits List */}
                     <div className="lg:col-span-2">
-                        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-                            <h2 className="text-xl font-semibold mb-4">📋 My Visits</h2>
-                            {visits.length === 0 ? (
-                                <p className="text-slate-600 font-medium">No visits assigned yet.</p>
+                        <Card>
+                            <CardHeader className="flex flex-row flex-wrap justify-between items-center gap-4">
+                                <CardTitle className="mb-0">My Visits</CardTitle>
+                                {visits.length > 0 && (
+                                    <select
+                                        value={statusFilter}
+                                        onChange={(e) => setStatusFilter(e.target.value as VisitStatusFilter)}
+                                        className="rounded-lg border px-3 py-2 text-sm text-[var(--foreground)]"
+                                        style={{ borderColor: 'var(--border)' }}
+                                    >
+                                        <option value="ALL">All status</option>
+                                        <option value="SCHEDULED">Scheduled</option>
+                                        <option value="EN_ROUTE">En route</option>
+                                        <option value="ARRIVED">Arrived</option>
+                                        <option value="IN_PROGRESS">In progress</option>
+                                        <option value="COMPLETED">Completed</option>
+                                    </select>
+                                )}
+                            </CardHeader>
+                            {filteredVisits.length === 0 ? (
+                                <p className="font-medium text-[var(--muted)]">
+                                    {visits.length === 0 ? 'No visits assigned yet.' : 'No visits match the filter.'}
+                                </p>
                             ) : (
                                 <div className="space-y-4">
-                                    {visits.map((visit) => (
-                                        <div key={visit.id} className="p-4 border rounded-lg">
+                                    {filteredVisits.map((visit) => (
+                                        <div key={visit.id} className="p-4 rounded-lg border" style={{ borderColor: 'var(--border)' }}>
                                             <div className="flex justify-between items-start mb-2">
                                                 <div>
-                                                    <p className="font-semibold">Visit #{visit.id.slice(0, 8)}</p>
-                                                    <p className="text-sm text-slate-600">
-                                                        {visit.booking?.scheduledDate 
+                                                    <p className="font-semibold text-[var(--foreground)]">Visit #{visit.id.slice(0, 8)}</p>
+                                                    <p className="text-sm text-[var(--muted)]">
+                                                        {visit.booking?.scheduledDate
                                                             ? new Date(visit.booking.scheduledDate).toLocaleString()
                                                             : 'Date TBD'}
                                                     </p>
-                                                    <p className="text-sm text-slate-600">{visit.booking?.address}</p>
+                                                    <p className="text-sm text-[var(--muted)]">{visit.booking?.address}</p>
                                                 </div>
-                                                <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                                                    visit.status === 'COMPLETED' 
-                                                        ? 'bg-green-100 text-green-700'
-                                                        : visit.status === 'IN_PROGRESS'
-                                                        ? 'bg-blue-100 text-blue-700'
-                                                        : 'bg-yellow-100 text-yellow-700'
-                                                }`}>
+                                                <StatusBadge
+                                                    variant={visit.status === 'COMPLETED' ? 'success' : 'warning'}
+                                                    className="text-xs"
+                                                >
                                                     {visit.status}
-                                                </span>
+                                                </StatusBadge>
                                             </div>
                                             <div className="flex gap-2 mt-4">
                                                 {visit.status === 'SCHEDULED' && (
                                                     <button
                                                         onClick={() => handleVisitStatusUpdate(visit.id, 'EN_ROUTE')}
-                                                        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+                                                        className="px-4 py-2 rounded text-sm font-medium text-white transition"
+                                                        style={{ backgroundColor: 'var(--primary)' }}
                                                     >
                                                         Start Journey
                                                     </button>
@@ -189,7 +215,7 @@ export default function NurseDashboard() {
                                                 {visit.status === 'EN_ROUTE' && (
                                                     <button
                                                         onClick={() => handleVisitStatusUpdate(visit.id, 'ARRIVED')}
-                                                        className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm"
+                                                        className="px-4 py-2 rounded text-sm font-medium text-white bg-green-600 hover:bg-green-700 transition"
                                                     >
                                                         Mark Arrived
                                                     </button>
@@ -197,7 +223,7 @@ export default function NurseDashboard() {
                                                 {visit.status === 'ARRIVED' && (
                                                     <button
                                                         onClick={() => handleVisitStatusUpdate(visit.id, 'IN_PROGRESS')}
-                                                        className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 text-sm"
+                                                        className="px-4 py-2 rounded text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 transition"
                                                     >
                                                         Start Visit
                                                     </button>
@@ -205,7 +231,8 @@ export default function NurseDashboard() {
                                                 {visit.status === 'IN_PROGRESS' && (
                                                     <button
                                                         onClick={() => handleVisitStatusUpdate(visit.id, 'COMPLETED')}
-                                                        className="px-4 py-2 bg-emerald-600 text-white rounded hover:bg-emerald-700 text-sm"
+                                                        className="px-4 py-2 rounded text-sm font-medium text-white transition"
+                                                        style={{ backgroundColor: 'var(--success)' }}
                                                     >
                                                         Complete Visit
                                                     </button>
@@ -215,10 +242,11 @@ export default function NurseDashboard() {
                                     ))}
                                 </div>
                             )}
-                        </div>
+                        </Card>
                     </div>
                 </div>
-            </div>
+                </div>
+            </DashboardLayout>
         </RoleGuard>
     );
 }

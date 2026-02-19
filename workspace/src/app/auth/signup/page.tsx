@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '../../../contexts/AuthContext';
+import { Card, CardHeader, CardTitle } from '../../../components/ui/Card';
 
 export default function SignupPage() {
     const router = useRouter();
@@ -55,78 +56,114 @@ export default function SignupPage() {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
-            <div className="max-w-md w-full space-y-8 p-8 bg-white rounded-xl shadow-lg border border-slate-200">
-                <div>
-                    <h2 className="mt-6 text-center text-2xl font-bold text-slate-900 tracking-tight">
-                        Create your account
-                    </h2>
-                </div>
-                <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-                    {error && <div className="text-red-600 text-center text-sm font-medium">{error}</div>}
-                    <div className="space-y-3">
+        <div className="min-h-screen flex items-center justify-center p-4" style={{ background: 'var(--background)' }}>
+            <Card className="max-w-md w-full">
+                <CardHeader>
+                    <CardTitle className="text-center text-2xl">Create your account</CardTitle>
+                </CardHeader>
+                <form className="space-y-6" onSubmit={handleSubmit}>
+                    {error && (
+                        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
+                            {error}
+                        </div>
+                    )}
+
+                    <section className="space-y-4" aria-labelledby="personal-heading">
+                        <h2 id="personal-heading" className="text-sm font-semibold text-[var(--foreground)]">Personal</h2>
                         <div className="flex gap-3">
+                            <div className="flex-1">
+                                <label htmlFor="signup-first" className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">First name</label>
+                                <input
+                                    id="signup-first"
+                                    type="text"
+                                    required
+                                    autoComplete="given-name"
+                                    className="w-full rounded-lg border px-4 py-3 text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                                    style={{ borderColor: 'var(--border)' }}
+                                    placeholder="First name"
+                                    value={formData.firstName}
+                                    onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
+                                />
+                            </div>
+                            <div className="flex-1">
+                                <label htmlFor="signup-last" className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Last name</label>
+                                <input
+                                    id="signup-last"
+                                    type="text"
+                                    required
+                                    autoComplete="family-name"
+                                    className="w-full rounded-lg border px-4 py-3 text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                                    style={{ borderColor: 'var(--border)' }}
+                                    placeholder="Last name"
+                                    value={formData.lastName}
+                                    onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
+                                />
+                            </div>
+                        </div>
+                    </section>
+
+                    <section className="space-y-4" aria-labelledby="account-heading">
+                        <h2 id="account-heading" className="text-sm font-semibold text-[var(--foreground)]">Account</h2>
+                        <div>
+                            <label htmlFor="signup-email" className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Email address</label>
                             <input
-                                type="text"
+                                id="signup-email"
+                                type="email"
                                 required
-                                className="flex-1 px-4 py-3 border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-base"
-                                placeholder="First Name"
-                                value={formData.firstName}
-                                onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
-                            />
-                            <input
-                                type="text"
-                                required
-                                className="flex-1 px-4 py-3 border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-base"
-                                placeholder="Last Name"
-                                value={formData.lastName}
-                                onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
+                                autoComplete="email"
+                                className="block w-full rounded-lg border px-4 py-3 text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                                style={{ borderColor: 'var(--border)' }}
+                                placeholder="you@example.com"
+                                value={formData.email}
+                                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                             />
                         </div>
-                        <input
-                            type="email"
-                            required
-                            className="block w-full px-4 py-3 border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-base"
-                            placeholder="Email address"
-                            value={formData.email}
-                            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                        />
-                        <input
-                            type="password"
-                            required
-                            className="block w-full px-4 py-3 border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-base"
-                            placeholder="Password"
-                            value={formData.password}
-                            onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                        />
-                        <select
-                            className="block w-full px-4 py-3 border border-slate-300 rounded-lg text-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-base bg-white"
-                            value={formData.role}
-                            onChange={(e) => setFormData({ ...formData, role: e.target.value as typeof formData.role })}
-                        >
-                            <option value="PATIENT">Patient</option>
-                            <option value="DOCTOR">Doctor</option>
-                            <option value="NURSE">Nurse</option>
-                            <option value="ADMIN">Admin</option>
-                        </select>
-                    </div>
+                        <div>
+                            <label htmlFor="signup-password" className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Password</label>
+                            <input
+                                id="signup-password"
+                                type="password"
+                                required
+                                autoComplete="new-password"
+                                className="block w-full rounded-lg border px-4 py-3 text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                                style={{ borderColor: 'var(--border)' }}
+                                placeholder="••••••••"
+                                value={formData.password}
+                                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                            />
+                        </div>
+                        <div>
+                            <label htmlFor="signup-role" className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Role</label>
+                            <select
+                                id="signup-role"
+                                className="block w-full rounded-lg border px-4 py-3 text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] bg-[var(--card)]"
+                                style={{ borderColor: 'var(--border)' }}
+                                value={formData.role}
+                                onChange={(e) => setFormData({ ...formData, role: e.target.value as typeof formData.role })}
+                            >
+                                <option value="PATIENT">Patient</option>
+                                <option value="DOCTOR">Doctor</option>
+                                <option value="NURSE">Nurse</option>
+                                <option value="ADMIN">Admin</option>
+                            </select>
+                        </div>
+                    </section>
 
-                    <div>
-                        <button
-                            type="submit"
-                            disabled={loading}
-                            className="w-full flex justify-center py-3 px-4 border border-transparent text-base font-semibold rounded-lg text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
-                        >
-                            {loading ? 'Creating account...' : 'Sign up'}
-                        </button>
-                    </div>
-                    <div className="text-center">
-                        <Link href="/auth/login" className="text-blue-600 hover:text-blue-700 font-semibold text-sm">
+                    <button
+                        type="submit"
+                        disabled={loading}
+                        className="w-full rounded-lg py-3 px-4 text-base font-semibold text-white transition disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--primary)]"
+                        style={{ backgroundColor: 'var(--primary)' }}
+                    >
+                        {loading ? 'Creating account...' : 'Sign up'}
+                    </button>
+                    <p className="text-center text-sm">
+                        <Link href="/auth/login" className="font-semibold hover:underline" style={{ color: 'var(--primary)' }}>
                             Already have an account? Sign in
                         </Link>
-                    </div>
+                    </p>
                 </form>
-            </div>
+            </Card>
         </div>
     );
 }

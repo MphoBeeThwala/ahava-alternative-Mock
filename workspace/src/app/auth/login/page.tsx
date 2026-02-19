@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '../../../contexts/AuthContext';
+import { Card, CardHeader, CardTitle } from '../../../components/ui/Card';
 
 export default function LoginPage() {
     const router = useRouter();
@@ -64,50 +65,68 @@ export default function LoginPage() {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
-            <div className="max-w-md w-full space-y-8 p-8 bg-white rounded-xl shadow-lg border border-slate-200">
-                <div>
-                    <h2 className="mt-6 text-center text-2xl font-bold text-slate-900 tracking-tight">
-                        Sign in to your account
-                    </h2>
-                </div>
-                <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-                    {error && <div className="text-red-600 text-center text-sm font-medium">{error}</div>}
-                    <div className="space-y-3">
-                        <input
-                            type="email"
-                            required
-                            className="block w-full px-4 py-3 border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-base"
-                            placeholder="Email address"
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                        />
-                        <input
-                            type="password"
-                            required
-                            className="block w-full px-4 py-3 border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-base"
-                            placeholder="Password"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                        />
-                    </div>
+        <div className="min-h-screen flex items-center justify-center p-4" style={{ background: 'var(--background)' }}>
+            <Card className="max-w-md w-full">
+                <CardHeader>
+                    <CardTitle className="text-center text-2xl">Sign in to your account</CardTitle>
+                </CardHeader>
+                <form className="space-y-6" onSubmit={handleSubmit}>
+                    {error && (
+                        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
+                            {error}
+                        </div>
+                    )}
+                    <section className="space-y-4" aria-labelledby="credentials-heading">
+                        <h2 id="credentials-heading" className="sr-only">Credentials</h2>
+                        <div>
+                            <label htmlFor="login-email" className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">
+                                Email address
+                            </label>
+                            <input
+                                id="login-email"
+                                type="email"
+                                required
+                                autoComplete="email"
+                                className="block w-full rounded-lg border px-4 py-3 text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                                style={{ borderColor: 'var(--border)' }}
+                                placeholder="you@example.com"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                            />
+                        </div>
+                        <div>
+                            <label htmlFor="login-password" className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">
+                                Password
+                            </label>
+                            <input
+                                id="login-password"
+                                type="password"
+                                required
+                                autoComplete="current-password"
+                                className="block w-full rounded-lg border px-4 py-3 text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                                style={{ borderColor: 'var(--border)' }}
+                                placeholder="••••••••"
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                            />
+                        </div>
+                    </section>
 
-                    <div>
-                        <button
-                            type="submit"
-                            disabled={loading}
-                            className="w-full flex justify-center py-3 px-4 border border-transparent text-base font-semibold rounded-lg text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
-                        >
-                            {loading ? 'Signing in...' : 'Sign in'}
-                        </button>
-                    </div>
-                    <div className="text-center">
-                        <Link href="/auth/signup" className="text-blue-600 hover:text-blue-700 font-semibold text-sm">
+                    <button
+                        type="submit"
+                        disabled={loading}
+                        className="w-full rounded-lg py-3 px-4 text-base font-semibold text-white transition disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--primary)]"
+                        style={{ backgroundColor: 'var(--primary)' }}
+                    >
+                        {loading ? 'Signing in...' : 'Sign in'}
+                    </button>
+                    <p className="text-center text-sm">
+                        <Link href="/auth/signup" className="font-semibold hover:underline" style={{ color: 'var(--primary)' }}>
                             Don&apos;t have an account? Sign up
                         </Link>
-                    </div>
+                    </p>
                 </form>
-            </div>
+            </Card>
         </div>
     );
 }
