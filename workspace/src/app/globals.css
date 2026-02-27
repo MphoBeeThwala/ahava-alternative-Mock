@@ -1,30 +1,37 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
-  --muted: #475569;
+  /* Warm, distinctive palette – not generic indigo/slate */
+  --background: #f5f3ef;
+  --foreground: #1c1917;
+  --muted: #57534e;
   --card: #ffffff;
-  --border: #e2e8f0;
-  /* UI/UX inspiration tokens – use for primary actions, status, cards (see docs/UI_UX_INSPIRATION_AND_PLAN.md) */
-  --primary: #4f46e5;
-  --primary-hover: #4338ca;
+  --border: #e7e5e4;
+  --primary: #0d9488;
+  --primary-hover: #0f766e;
+  --primary-soft: rgba(13, 148, 136, 0.12);
   --success: #059669;
   --warning: #d97706;
   --danger: #dc2626;
-  --radius: 0.75rem;
-  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-  --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --radius: 0.875rem;
+  --radius-lg: 1.125rem;
+  /* Softer, warmer shadows */
+  --shadow-sm: 0 1px 2px 0 rgb(28 25 23 / 0.04);
+  --shadow: 0 2px 8px -2px rgb(28 25 23 / 0.08), 0 4px 12px -4px rgb(28 25 23 / 0.06);
+  --shadow-md: 0 4px 16px -4px rgb(28 25 23 / 0.1), 0 8px 24px -8px rgb(28 25 23 / 0.08);
+  /* Motion */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration: 200ms;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
 }
 
-/* Force light theme for consistent visibility; remove dark mode that can hide text */
+/* Base */
 body {
   background: var(--background);
   color: var(--foreground);
@@ -35,13 +42,51 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Ensure all text and inputs have visible color when inherited */
-input, textarea, select, button {
+input,
+textarea,
+select,
+button {
   font-family: inherit;
   font-size: inherit;
 }
 
 input::placeholder,
 textarea::placeholder {
-  color: #64748b;
+  color: #78716c;
+}
+
+/* Reusable interactive styles */
+.btn-primary {
+  background: var(--primary);
+  color: white;
+  transition: background var(--duration) var(--ease-out), transform var(--duration) var(--ease-out);
+}
+.btn-primary:hover {
+  background: var(--primary-hover);
+  transform: translateY(-1px);
+}
+.btn-primary:active {
+  transform: translateY(0);
+}
+
+.card-interactive {
+  transition: box-shadow var(--duration) var(--ease-out), transform var(--duration) var(--ease-out);
+}
+.card-interactive:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+.nav-link {
+  transition: background var(--duration) var(--ease-out), color var(--duration) var(--ease-out);
+}
+
+/* Focus ring for accessibility */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }

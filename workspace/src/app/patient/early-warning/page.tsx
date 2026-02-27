@@ -91,8 +91,7 @@ export default function EarlyWarningPage() {
                   </p>
                   <Link
                     href="/patient/dashboard"
-                    className="inline-block px-4 py-2 rounded-lg font-medium text-white"
-                    style={{ backgroundColor: "var(--primary)" }}
+                    className="btn-primary inline-block px-4 py-2 rounded-xl font-medium"
                   >
                     Go to dashboard & submit biometrics
                   </Link>

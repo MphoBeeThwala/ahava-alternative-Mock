@@ -54,68 +54,59 @@ export default function DashboardLayout({
 
   const dashboardPath = getDashboardPath();
 
+  const linkClass = (active: boolean) =>
+    `nav-link flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium ${
+      active
+        ? "bg-[var(--primary)] text-white shadow-sm"
+        : "text-[var(--muted)] hover:bg-[var(--primary-soft)] hover:text-[var(--foreground)]"
+    }`;
+
   return (
     <div className="flex min-h-screen bg-[var(--background)]">
-      {/* Sidebar – design tokens, primary for active state */}
       <aside
-        className="flex w-56 flex-col border-r bg-white"
-        style={{ borderColor: "var(--border)" }}
+        className="flex w-60 flex-col bg-[var(--card)] border-r"
+        style={{ borderColor: "var(--border)", boxShadow: "var(--shadow-sm)" }}
       >
-        <div className="flex h-14 items-center px-4 border-b" style={{ borderColor: "var(--border)" }}>
+        <div className="flex h-16 items-center px-5 border-b" style={{ borderColor: "var(--border)" }}>
           <Link
             href={dashboardPath}
             className="text-lg font-bold tracking-tight text-[var(--foreground)]"
             aria-label="Ahava Healthcare home"
           >
-            Ahava Healthcare
+            Ahava
           </Link>
         </div>
-        <nav className="flex-1 p-3" aria-label="Dashboard navigation">
+        <nav className="flex-1 p-3 space-y-1" aria-label="Dashboard navigation">
           <Link
             href={dashboardPath}
-            className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition ${
-              pathname === dashboardPath
-                ? "bg-[var(--primary)] text-white"
-                : "text-[var(--muted)] hover:bg-slate-100 hover:text-[var(--foreground)]"
-            }`}
+            className={linkClass(pathname === dashboardPath)}
             aria-current={pathname === dashboardPath ? "page" : undefined}
           >
-            <span aria-hidden>◉</span>
+            <span aria-hidden className="opacity-80">◉</span>
             {getDashboardLabel()}
           </Link>
           {user.role === "PATIENT" && (
             <>
               <Link
                 href="/patient/early-warning"
-                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition mt-1 ${
-                  pathname === "/patient/early-warning"
-                    ? "bg-[var(--primary)] text-white"
-                    : "text-[var(--muted)] hover:bg-slate-100 hover:text-[var(--foreground)]"
-                }`}
+                className={linkClass(pathname === "/patient/early-warning")}
                 aria-current={pathname === "/patient/early-warning" ? "page" : undefined}
               >
-                <span aria-hidden>⚠</span>
+                <span aria-hidden className="opacity-80">⚠</span>
                 Early Warning
               </Link>
               <Link
                 href="/patient/ai-doctor"
-                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition mt-1 ${
-                  pathname === "/patient/ai-doctor"
-                    ? "bg-[var(--primary)] text-white"
-                    : "text-[var(--muted)] hover:bg-slate-100 hover:text-[var(--foreground)]"
-                }`}
+                className={linkClass(pathname === "/patient/ai-doctor")}
                 aria-current={pathname === "/patient/ai-doctor" ? "page" : undefined}
               >
-                <span aria-hidden>🩺</span>
+                <span aria-hidden className="opacity-80">🩺</span>
                 AI Doctor
               </Link>
             </>
           )}
         </nav>
-        <div
-          className="border-t p-3"
-          style={{ borderColor: "var(--border)" }}
-        >
+        <div className="border-t p-3" style={{ borderColor: "var(--border)" }}>
           <p className="truncate px-3 py-1 text-xs font-medium text-[var(--muted)]">
             {user.firstName} {user.lastName}
           </p>
@@ -123,7 +114,7 @@ export default function DashboardLayout({
           <button
             type="button"
             onClick={() => logout()}
-            className="mt-2 w-full rounded-lg px-3 py-2 text-left text-sm font-medium text-[var(--muted)] hover:bg-slate-100 hover:text-[var(--foreground)]"
+            className="nav-link mt-2 w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-[var(--muted)] hover:bg-[var(--primary-soft)] hover:text-[var(--foreground)]"
             aria-label="Log out"
           >
             Logout

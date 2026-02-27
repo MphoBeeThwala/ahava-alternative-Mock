@@ -108,8 +108,7 @@ export default function AiDoctorPage() {
                   <button
                     onClick={handleTriage}
                     disabled={loading || !symptoms}
-                    className="w-full py-3 rounded-lg font-semibold text-white transition disabled:opacity-50"
-                    style={{ backgroundColor: "var(--primary)" }}
+                    className="btn-primary w-full py-3 rounded-xl font-semibold disabled:opacity-50"
                   >
                     {loading ? "Analyzing…" : "Analyze symptoms"}
                   </button>

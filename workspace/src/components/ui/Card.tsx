@@ -13,7 +13,7 @@ export function Card({
 }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={`rounded-[var(--radius)] border bg-[var(--card)] p-6 shadow-[var(--shadow)] ${className}`}
+      className={`rounded-[var(--radius-lg)] border bg-[var(--card)] p-6 shadow-[var(--shadow)] ${className}`}
       style={{ borderColor: "var(--border)" }}
       {...rest}
     >

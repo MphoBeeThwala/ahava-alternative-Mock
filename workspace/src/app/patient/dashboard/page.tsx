@@ -99,8 +99,8 @@ export default function PatientDashboard() {
                         {/* Early Warning — prominent demo callout */}
                         <Link
                             href="/patient/early-warning"
-                            className="block mb-8 p-6 rounded-xl border-2 transition hover:opacity-95"
-                            style={{ borderColor: 'var(--primary)', backgroundColor: 'var(--card)' }}
+                            className="card-interactive block mb-8 p-6 rounded-[var(--radius-lg)] border-2"
+                            style={{ borderColor: 'var(--primary)', backgroundColor: 'var(--card)', boxShadow: 'var(--shadow)' }}
                         >
                             <div className="flex flex-wrap items-center justify-between gap-4">
                                 <div>
@@ -111,10 +111,7 @@ export default function PatientDashboard() {
                                         View your risk scores (Framingham, QRISK3, ML), metrics (HR, HRV, sleep, ECG, temperature trend), and recommendations.
                                     </p>
                                 </div>
-                                <span
-                                    className="inline-flex items-center gap-2 px-5 py-3 rounded-lg font-semibold text-white shrink-0"
-                                    style={{ backgroundColor: 'var(--primary)' }}
-                                >
+                                <span className="btn-primary inline-flex items-center gap-2 px-5 py-3 rounded-xl font-semibold shrink-0">
                                     Open Early Warning →
                                 </span>
                             </div>
@@ -122,7 +119,7 @@ export default function PatientDashboard() {
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                             {/* Health Status – KPI-style card */}
-                            <Card>
+                            <Card className="card-interactive">
                                 <CardHeader>
                                     <CardTitle>Health Status</CardTitle>
                                 </CardHeader>
@@ -155,7 +152,7 @@ export default function PatientDashboard() {
                             </Card>
 
                             {/* Biometric Entry */}
-                            <Card>
+                            <Card className="card-interactive">
                                 <CardHeader>
                                     <CardTitle>Record Biometrics</CardTitle>
                                 </CardHeader>
@@ -166,7 +163,8 @@ export default function PatientDashboard() {
                                         name="heartRate"
                                         type="number"
                                         placeholder="Heart Rate"
-                                        className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                        className="w-full px-3 py-2.5 border rounded-xl text-[var(--foreground)] placeholder:text-[var(--muted)] focus:ring-2 focus:ring-[var(--primary)] outline-none transition"
+                                        style={{ borderColor: 'var(--border)' }}
                                         value={biometricData.heartRate || ''}
                                         onChange={(e) => setBiometricData({
                                             ...biometricData,
@@ -178,7 +176,8 @@ export default function PatientDashboard() {
                                         name="temperature"
                                         type="number"
                                         placeholder="Temp (°C)"
-                                        className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                        className="w-full px-3 py-2.5 border rounded-xl text-[var(--foreground)] placeholder:text-[var(--muted)] focus:ring-2 focus:ring-[var(--primary)] outline-none transition"
+                                        style={{ borderColor: 'var(--border)' }}
                                         value={biometricData.temperature || ''}
                                         onChange={(e) => setBiometricData({
                                             ...biometricData,
@@ -192,7 +191,8 @@ export default function PatientDashboard() {
                                         name="bloodPressureSystolic"
                                         type="number"
                                         placeholder="Systolic"
-                                        className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                        className="w-full px-3 py-2.5 border rounded-xl text-[var(--foreground)] placeholder:text-[var(--muted)] focus:ring-2 focus:ring-[var(--primary)] outline-none transition"
+                                        style={{ borderColor: 'var(--border)' }}
                                         value={biometricData.bloodPressure?.systolic || ''}
                                         onChange={(e) => setBiometricData({
                                             ...biometricData,
@@ -207,7 +207,8 @@ export default function PatientDashboard() {
                                         name="bloodPressureDiastolic"
                                         type="number"
                                         placeholder="Diastolic"
-                                        className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                        className="w-full px-3 py-2.5 border rounded-xl text-[var(--foreground)] placeholder:text-[var(--muted)] focus:ring-2 focus:ring-[var(--primary)] outline-none transition"
+                                        style={{ borderColor: 'var(--border)' }}
                                         value={biometricData.bloodPressure?.diastolic || ''}
                                         onChange={(e) => setBiometricData({
                                             ...biometricData,
@@ -223,7 +224,8 @@ export default function PatientDashboard() {
                                     name="oxygenSaturation"
                                     type="number"
                                     placeholder="SpO2 (%)"
-                                    className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                    className="w-full px-3 py-2.5 border rounded-xl text-[var(--foreground)] placeholder:text-[var(--muted)] focus:ring-2 focus:ring-[var(--primary)] outline-none transition"
+                                    style={{ borderColor: 'var(--border)' }}
                                     value={biometricData.oxygenSaturation || ''}
                                     onChange={(e) => setBiometricData({
                                         ...biometricData,
@@ -235,8 +237,7 @@ export default function PatientDashboard() {
                                     id="biometric-submit"
                                     onClick={handleBiometricSubmit}
                                     disabled={loading}
-                                    className="w-full py-2.5 rounded-lg font-semibold text-white transition disabled:opacity-50"
-                                    style={{ backgroundColor: 'var(--primary)' }}
+                                    className="btn-primary w-full py-2.5 rounded-xl font-semibold disabled:opacity-50"
                                 >
                                     Submit
                                 </button>
@@ -244,7 +245,7 @@ export default function PatientDashboard() {
                             </Card>
 
                             {/* Link to AI Doctor Assistant (separate service) */}
-                            <Card className="flex flex-col justify-center">
+                            <Card className="card-interactive flex flex-col justify-center">
                                 <CardHeader>
                                     <CardTitle>AI Doctor Assistant</CardTitle>
                                 </CardHeader>
@@ -253,8 +254,7 @@ export default function PatientDashboard() {
                                 </p>
                                 <Link
                                     href="/patient/ai-doctor"
-                                    className="inline-flex items-center justify-center py-2.5 rounded-lg font-semibold text-white transition hover:opacity-90"
-                                    style={{ backgroundColor: 'var(--primary)' }}
+                                    className="btn-primary inline-flex items-center justify-center py-2.5 rounded-xl font-semibold"
                                 >
                                     Open AI Doctor Assistant →
                                 </Link>
@@ -262,7 +262,7 @@ export default function PatientDashboard() {
                         </div>
 
                         {/* Recent biometric readings */}
-                        <Card className="mb-8">
+                        <Card className="card-interactive mb-8">
                             <CardHeader>
                                 <CardTitle>Recent readings</CardTitle>
                             </CardHeader>
@@ -297,7 +297,7 @@ export default function PatientDashboard() {
                         </Card>
 
                         {/* Bookings */}
-                        <Card>
+                        <Card className="card-interactive">
                             <CardHeader>
                                 <CardTitle>My Bookings</CardTitle>
                             </CardHeader>

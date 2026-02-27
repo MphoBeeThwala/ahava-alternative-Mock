@@ -88,7 +88,7 @@ export default function LoginPage() {
                                 type="email"
                                 required
                                 autoComplete="email"
-                                className="block w-full rounded-lg border px-4 py-3 text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                                className="block w-full rounded-xl border px-4 py-3 text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] transition"
                                 style={{ borderColor: 'var(--border)' }}
                                 placeholder="you@example.com"
                                 value={email}
@@ -105,7 +105,7 @@ export default function LoginPage() {
                                 type="password"
                                 required
                                 autoComplete="current-password"
-                                className="block w-full rounded-lg border px-4 py-3 text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                                className="block w-full rounded-xl border px-4 py-3 text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] transition"
                                 style={{ borderColor: 'var(--border)' }}
                                 placeholder="••••••••"
                                 value={password}
@@ -117,8 +117,7 @@ export default function LoginPage() {
                     <button
                         type="submit"
                         disabled={loading}
-                        className="w-full rounded-lg py-3 px-4 text-base font-semibold text-white transition disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--primary)]"
-                        style={{ backgroundColor: 'var(--primary)' }}
+                        className="btn-primary w-full rounded-xl py-3 px-4 text-base font-semibold disabled:opacity-50"
                     >
                         {loading ? 'Signing in...' : 'Sign in'}
                     </button>
