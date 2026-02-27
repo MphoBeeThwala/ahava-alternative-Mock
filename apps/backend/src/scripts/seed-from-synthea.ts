@@ -189,8 +189,7 @@ async function main() {
   const obs = obsRows.map((r) => rowToObject(oHdr, r));
 
   // Group observations by (Patient, Date as day) and map LOINC Code -> value
-  type DayKey = string;
-  const byPatientDay: Record<string, Record<DayKey, Record<string, number>>> = {};
+  const byPatientDay: Record<string, Record<string, number>> = {};
 
   for (const o of obs) {
     const patientId = o.Patient || o['Patient'];
@@ -219,7 +218,7 @@ async function main() {
     const hr = fields.heartRate ?? fields.heartRateResting;
     await prisma.biometricReading.create({
       data: {
-        userId,
+        user: { connect: { id: userId } },
         ...(hr != null && { heartRate: hr, heartRateResting: hr }),
         ...(fields.bloodPressureSystolic != null && { bloodPressureSystolic: fields.bloodPressureSystolic }),
         ...(fields.bloodPressureDiastolic != null && { bloodPressureDiastolic: fields.bloodPressureDiastolic }),
