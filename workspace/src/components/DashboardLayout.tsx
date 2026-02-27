@@ -111,6 +111,9 @@ export default function DashboardLayout({
             {user.firstName} {user.lastName}
           </p>
           <p className="truncate px-3 text-xs text-[var(--muted)]">{user.role}</p>
+          <p className="px-3 pt-2 text-[10px] text-[var(--muted)] opacity-80" title="New UI + Early Warning">
+            App v2
+          </p>
           <button
             type="button"
             onClick={() => logout()}

@@ -1,5 +1,13 @@
 # Railway deployment – frontend + backend
 
+## Frontend service must use the Next.js (workspace) app
+
+The **patient-facing app** (Patient Portal, Early Warning, AI Doctor) is the **Next.js app** in the `workspace` folder. To get the latest UI (teal theme, Early Warning in sidebar) and avoid an old or wrong build:
+
+1. **Root Directory:** Leave **empty** (repo root). Do **not** set Root to `frontend` (that’s a different, older Vite app).
+2. **Build:** A root `railway.toml` tells Railway to use `workspace/Dockerfile`. If your frontend service uses repo root, it will use that and build the Next.js app.
+3. **After deploy:** In the sidebar you should see **“App v2”** at the bottom and links for **Early Warning (ML)** and **AI Doctor**. If you still see purple and only “Patient Portal”, trigger a **redeploy** and do a **hard refresh** (Ctrl+Shift+R).
+
 ## Fix CORS / login once and for all
 
 The frontend **always** calls `/api` on its own origin. Next.js rewrites proxy `/api/*` to the backend. So the browser never talks to the backend URL → **no CORS**.
