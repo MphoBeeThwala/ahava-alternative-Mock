@@ -2,6 +2,13 @@
 
 Use this to show the Early Warning dashboard with real-looking data and risk scores.
 
+## If you don’t see the new design or Early Warning
+
+- **New design (teal, warm background, Plus Jakarta Sans)** and **Early Warning** are in the **workspace** (Next.js) app. If you still see purple/blue and no “Early Warning”:
+  1. **Redeploy the frontend** on Railway (or your host) so it builds from the latest `main`.
+  2. **Check the build** – the frontend Dockerfile builds `workspace`; the deploy commit should match your latest push.
+  3. **Hard refresh** the app: `Ctrl+Shift+R` (Windows/Linux) or `Cmd+Shift+R` (Mac) to avoid cached CSS/JS.
+
 ## Where to see it on the frontend
 
 - **Patient dashboard:** After login, a large **“Early Warning — Cardiovascular & Wellness”** card with an **“Open Early Warning →”** button appears at the top.

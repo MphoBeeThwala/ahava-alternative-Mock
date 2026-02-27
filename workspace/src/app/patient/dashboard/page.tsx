@@ -87,6 +87,20 @@ export default function PatientDashboard() {
             <DashboardLayout>
                 <div className="p-6 sm:p-8 bg-[var(--background)]">
                     <div className="max-w-6xl mx-auto">
+                        {/* Unmissable ML Early Warning strip — first thing on the page */}
+                        <Link
+                            href="/patient/early-warning"
+                            className="flex items-center justify-between gap-3 mb-6 px-4 py-3 rounded-xl border-2 w-full text-left transition hover:opacity-95"
+                            style={{ borderColor: 'var(--primary)', backgroundColor: 'var(--primary-soft)' }}
+                        >
+                            <span className="text-sm font-semibold text-[var(--primary)] uppercase tracking-wide">
+                                ML Early Warning Service
+                            </span>
+                            <span className="text-sm font-medium text-[var(--foreground)]">
+                                Cardiovascular &amp; wellness risk scores →
+                            </span>
+                        </Link>
+
                         <div className="flex flex-wrap justify-between items-center gap-4 mb-8">
                             <h1 className="text-2xl sm:text-3xl font-bold text-[var(--foreground)] tracking-tight">
                                 Patient Portal
@@ -96,7 +110,7 @@ export default function PatientDashboard() {
                             </p>
                         </div>
 
-                        {/* Early Warning — prominent demo callout */}
+                        {/* Early Warning — prominent card (also in sidebar as "Early Warning") */}
                         <Link
                             href="/patient/early-warning"
                             className="card-interactive block mb-8 p-6 rounded-[var(--radius-lg)] border-2"
@@ -104,9 +118,14 @@ export default function PatientDashboard() {
                         >
                             <div className="flex flex-wrap items-center justify-between gap-4">
                                 <div>
-                                    <h2 className="text-xl font-bold text-[var(--foreground)] mb-1">
-                                        Early Warning — Cardiovascular &amp; Wellness
-                                    </h2>
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <h2 className="text-xl font-bold text-[var(--foreground)]">
+                                            Early Warning — Cardiovascular &amp; Wellness
+                                        </h2>
+                                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[var(--primary-soft)] text-[var(--primary)]">
+                                            ML service
+                                        </span>
+                                    </div>
                                     <p className="text-sm text-[var(--muted)]">
                                         View your risk scores (Framingham, QRISK3, ML), metrics (HR, HRV, sleep, ECG, temperature trend), and recommendations.
                                     </p>

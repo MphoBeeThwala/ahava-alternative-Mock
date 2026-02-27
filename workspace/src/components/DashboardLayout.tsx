@@ -93,7 +93,7 @@ export default function DashboardLayout({
                 aria-current={pathname === "/patient/early-warning" ? "page" : undefined}
               >
                 <span aria-hidden className="opacity-80">⚠</span>
-                Early Warning
+                Early Warning (ML)
               </Link>
               <Link
                 href="/patient/ai-doctor"
