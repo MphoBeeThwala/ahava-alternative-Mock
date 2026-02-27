@@ -8,9 +8,12 @@ import Joi from 'joi';
 const router: Router = Router();
 const prisma = new PrismaClient();
 
+// Allow any TLD including .test for mock/load-test users (IANA list excludes .test)
+const emailSchema = Joi.string().email({ tlds: { allow: false } }).required();
+
 // Validation schemas
 const registerSchema = Joi.object({
-  email: Joi.string().email().required(),
+  email: emailSchema,
   password: Joi.string().min(8).required(),
   firstName: Joi.string().min(2).required(),
   lastName: Joi.string().min(2).required(),
@@ -22,7 +25,7 @@ const registerSchema = Joi.object({
 });
 
 const loginSchema = Joi.object({
-  email: Joi.string().email().required(),
+  email: emailSchema,
   password: Joi.string().required(),
 });
 
@@ -285,8 +288,8 @@ function generateTokens(userId: string, role: string) {
   }
 
   const secret = process.env.JWT_SECRET as jwt.Secret;
-  // Use numeric seconds to satisfy jsonwebtoken SignOptions (avoids StringValue type issue)
-  const accessExpiry = process.env.JWT_EXPIRES_IN ? parseExpiry(process.env.JWT_EXPIRES_IN) : 900; // 15m
+  // Use numeric seconds to satisfy jsonwebtoken SignOptions (avoids StringValue type issue). Minimum 60s so load tests work.
+  const accessExpiry = Math.max(60, process.env.JWT_EXPIRES_IN ? parseExpiry(process.env.JWT_EXPIRES_IN) : 900); // 15m default
   const refreshExpiry = process.env.REFRESH_TOKEN_EXPIRES_IN ? parseExpiry(process.env.REFRESH_TOKEN_EXPIRES_IN) : 604800; // 7d
   const accessToken = jwt.sign({ userId, role }, secret, { expiresIn: accessExpiry });
   const refreshToken = jwt.sign({ userId, role }, secret, { expiresIn: refreshExpiry });

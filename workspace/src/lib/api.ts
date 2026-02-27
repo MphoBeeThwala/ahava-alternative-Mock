@@ -106,8 +106,50 @@ export interface BiometricReading {
   stepCount?: number;
   activeCalories?: number;
   skinTempOffset?: number;
+  sleepDurationHours?: number;
+  ecgRhythm?: 'regular' | 'irregular' | 'unknown';
+  temperatureTrend?: 'normal' | 'elevated_single_day' | 'elevated_over_3_days';
   source?: 'wearable' | 'manual';
   deviceType?: string;
+}
+
+export interface EarlyWarningSummary {
+  user_id: string;
+  processed_at: string;
+  heart_rate_resting: number;
+  hrv_rmssd: number;
+  spo2: number;
+  sleep_duration_hours: number;
+  step_count: number;
+  ecg_rhythm: string;
+  temperature_trend: string;
+  hr_baseline?: number;
+  hrv_baseline?: number;
+  hr_trend_2w?: string;
+  hrv_vs_baseline?: string;
+  sleep_pattern?: string;
+  risk_scores: {
+    framingham_10y_pct: number;
+    qrisk3_10y_pct: number;
+    ml_cvd_risk_pct: number;
+    ml_confidence: number;
+  };
+  fusion: {
+    trajectory_risk_2y_pct?: number;
+    alert_triggered: boolean;
+    alert_message?: string;
+  };
+  clinical_flags: string[];
+  alert_level: 'GREEN' | 'YELLOW' | 'RED';
+  anomalies: string[];
+  recommendations: string[];
+}
+
+export interface RiskProfile {
+  smoker?: boolean;
+  hypertension?: boolean;
+  cholesterolKnown?: boolean;
+  cholesterolValue?: number;
 }
 
 export interface TriageRequest {
@@ -154,6 +196,23 @@ export const patientApi = {
   },
   getMonitoringSummary: async (): Promise<MonitoringSummary> => {
     const res = await apiClient.get('/patient/monitoring/summary');
+    const raw = res.data?.data ?? res.data;
+    if (!raw || typeof raw !== 'object') return { baselineEstablished: false, alertLevel: 'Unknown', recentReadings: [] };
+    return {
+      baselineEstablished: Boolean(raw.baselineEstablished),
+      alertLevel: raw.alertLevel ?? (raw.recentAlerts > 0 ? 'YELLOW' : raw.baselineEstablished ? 'GREEN' : 'Unknown'),
+      readinessScore: raw.currentReadinessScore ?? raw.readinessScore,
+      recentReadings: Array.isArray(raw.recentReadings) ? raw.recentReadings : [],
+    };
+  },
+  getEarlyWarningSummary: async (): Promise<EarlyWarningSummary> => {
+    const res = await apiClient.get('/patient/early-warning');
+    const data = res.data?.data ?? res.data;
+    if (!data || res.data?.success === false) throw new Error(res.data?.error ?? 'Failed to load');
+    return data;
+  },
+  updateRiskProfile: async (profile: RiskProfile) => {
+    const res = await apiClient.patch('/patient/risk-profile', profile);
     return res.data;
   },
   submitTriage: async (data: TriageRequest): Promise<TriageResponse> => {

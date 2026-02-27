@@ -19,6 +19,9 @@ export const authMiddleware = async (
   next: NextFunction
 ) => {
   try {
+    // Skip verification if already authenticated (e.g. app-level auth already ran for /api/patient)
+    if (req.user) return next();
+
     const authHeader = req.headers.authorization;
     console.log(`[AuthMiddleware] URL: ${req.originalUrl}, Method: ${req.method}`);
     console.log(`[AuthMiddleware] Header: ${authHeader}`);

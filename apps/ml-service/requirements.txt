@@ -1,7 +1,9 @@
-fastapi==0.110.0
-uvicorn==0.27.1
-pydantic==2.6.3
-numpy==1.26.4
-pandas==2.2.1
-python-dotenv==1.0.1
-requests==2.31.0
+# Use flexible versions so pip can pick builds with pre-built wheels (avoids Rust build on Windows).
+# If install fails on Python 3.14+, use Python 3.11 or 3.12 for this service: py -3.12 -m venv .venv
+fastapi>=0.110.0
+uvicorn>=0.27.0
+pydantic>=2.6.0,<3
+numpy>=1.26.0,<3
+pandas>=2.0.0
+python-dotenv>=1.0.0
+requests>=2.31.0

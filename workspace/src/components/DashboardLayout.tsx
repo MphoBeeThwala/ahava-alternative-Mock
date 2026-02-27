@@ -53,7 +53,6 @@ export default function DashboardLayout({
   }
 
   const dashboardPath = getDashboardPath();
-  const isActive = pathname === dashboardPath;
 
   return (
     <div className="flex min-h-screen bg-[var(--background)]">
@@ -75,15 +74,43 @@ export default function DashboardLayout({
           <Link
             href={dashboardPath}
             className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition ${
-              isActive
+              pathname === dashboardPath
                 ? "bg-[var(--primary)] text-white"
                 : "text-[var(--muted)] hover:bg-slate-100 hover:text-[var(--foreground)]"
             }`}
-            aria-current={isActive ? "page" : undefined}
+            aria-current={pathname === dashboardPath ? "page" : undefined}
           >
             <span aria-hidden>◉</span>
             {getDashboardLabel()}
           </Link>
+          {user.role === "PATIENT" && (
+            <>
+              <Link
+                href="/patient/early-warning"
+                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition mt-1 ${
+                  pathname === "/patient/early-warning"
+                    ? "bg-[var(--primary)] text-white"
+                    : "text-[var(--muted)] hover:bg-slate-100 hover:text-[var(--foreground)]"
+                }`}
+                aria-current={pathname === "/patient/early-warning" ? "page" : undefined}
+              >
+                <span aria-hidden>⚠</span>
+                Early Warning
+              </Link>
+              <Link
+                href="/patient/ai-doctor"
+                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition mt-1 ${
+                  pathname === "/patient/ai-doctor"
+                    ? "bg-[var(--primary)] text-white"
+                    : "text-[var(--muted)] hover:bg-slate-100 hover:text-[var(--foreground)]"
+                }`}
+                aria-current={pathname === "/patient/ai-doctor" ? "page" : undefined}
+              >
+                <span aria-hidden>🩺</span>
+                AI Doctor
+              </Link>
+            </>
+          )}
         </nav>
         <div
           className="border-t p-3"

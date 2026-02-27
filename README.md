@@ -65,6 +65,9 @@ corepack yarn test:web           # Frontend tests only
 corepack yarn prisma:generate    # Generate Prisma client
 corepack yarn prisma:migrate     # Run migrations
 corepack yarn prisma:seed        # Seed database
+pnpm run seed:mock-patients      # 1000 mock patients (load test)
+pnpm run seed:from-synthea       # Seed from Synthea CSV (see docs/SYNTHEA_INTEGRATION_REPORT.md)
+pnpm run synthea:run-and-seed    # Run Synthea JAR then seed (set SYNTHEA_JAR)
 corepack yarn db:reset           # Reset database
 
 # Code Quality

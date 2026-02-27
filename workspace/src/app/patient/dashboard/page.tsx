@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import RoleGuard, { UserRole } from '../../../components/RoleGuard';
 import { patientApi, bookingsApi, BiometricReading, MonitoringSummary, Booking } from '../../../lib/api';
 import { useAuth } from '../../../contexts/AuthContext';
@@ -12,16 +13,9 @@ import { StatusBadge } from '../../../components/ui/StatusBadge';
 export default function PatientDashboard() {
     const { user } = useAuth();
     const toast = useToast();
-    const [symptoms, setSymptoms] = useState('');
-    const [triageResult, setTriageResult] = useState<{
-        triageLevel: number;
-        recommendedAction: string;
-        possibleConditions?: string[];
-        reasoning: string;
-    } | null>(null);
     const [loading, setLoading] = useState(false);
-    const [selectedImage, setSelectedImage] = useState<string | null>(null);
     const [monitoringSummary, setMonitoringSummary] = useState<MonitoringSummary | null>(null);
+    const [biometricHistory, setBiometricHistory] = useState<Array<Record<string, unknown>>>([]);
     const [bookings, setBookings] = useState<Booking[]>([]);
     const [biometricData, setBiometricData] = useState<BiometricReading>({
         heartRate: undefined,
@@ -33,6 +27,7 @@ export default function PatientDashboard() {
 
     useEffect(() => {
         loadMonitoringSummary();
+        loadBiometricHistory();
         loadBookings();
     }, []);
 
@@ -45,41 +40,22 @@ export default function PatientDashboard() {
         }
     };
 
+    const loadBiometricHistory = async () => {
+        try {
+            const res = await patientApi.getBiometricHistory(20);
+            const list = (res?.data?.history ?? res?.history ?? res) as Array<Record<string, unknown>>;
+            setBiometricHistory(Array.isArray(list) ? list : []);
+        } catch (error) {
+            console.error('Failed to load biometric history:', error);
+        }
+    };
+
     const loadBookings = async () => {
         try {
             const data = await bookingsApi.getMyBookings();
             setBookings(data.bookings || []);
         } catch (error) {
             console.error('Failed to load bookings:', error);
-        }
-    };
-
-    const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                const base64 = (reader.result as string).split(',')[1];
-                setSelectedImage(base64);
-            };
-            reader.readAsDataURL(file);
-        }
-    };
-
-    const handleTriage = async () => {
-        try {
-            setLoading(true);
-            const result = await patientApi.submitTriage({
-                symptoms,
-                imageBase64: selectedImage || undefined,
-            });
-            setTriageResult(result.data);
-        } catch (error: unknown) {
-            const e = error as { response?: { data?: { error?: string } } };
-            console.error("Triage failed", error);
-            toast.error(e.response?.data?.error || "Failed to analyze symptoms. Please try again.");
-        } finally {
-            setLoading(false);
         }
     };
 
@@ -96,6 +72,7 @@ export default function PatientDashboard() {
                 source: 'manual',
             });
             loadMonitoringSummary();
+            loadBiometricHistory();
         } catch (error: unknown) {
             const e = error as { response?: { data?: { error?: string } } };
             console.error("Biometric submission failed", error);
@@ -119,7 +96,31 @@ export default function PatientDashboard() {
                             </p>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+                        {/* Early Warning — prominent demo callout */}
+                        <Link
+                            href="/patient/early-warning"
+                            className="block mb-8 p-6 rounded-xl border-2 transition hover:opacity-95"
+                            style={{ borderColor: 'var(--primary)', backgroundColor: 'var(--card)' }}
+                        >
+                            <div className="flex flex-wrap items-center justify-between gap-4">
+                                <div>
+                                    <h2 className="text-xl font-bold text-[var(--foreground)] mb-1">
+                                        Early Warning — Cardiovascular &amp; Wellness
+                                    </h2>
+                                    <p className="text-sm text-[var(--muted)]">
+                                        View your risk scores (Framingham, QRISK3, ML), metrics (HR, HRV, sleep, ECG, temperature trend), and recommendations.
+                                    </p>
+                                </div>
+                                <span
+                                    className="inline-flex items-center gap-2 px-5 py-3 rounded-lg font-semibold text-white shrink-0"
+                                    style={{ backgroundColor: 'var(--primary)' }}
+                                >
+                                    Open Early Warning →
+                                </span>
+                            </div>
+                        </Link>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                             {/* Health Status – KPI-style card */}
                             <Card>
                                 <CardHeader>
@@ -147,7 +148,9 @@ export default function PatientDashboard() {
                                 <p className="text-sm font-medium text-[var(--muted)]">
                                     {monitoringSummary?.baselineEstablished
                                         ? 'Baseline established'
-                                        : 'Establishing baseline...'}
+                                        : biometricHistory.length === 0
+                                        ? 'Submit your first reading above to get started.'
+                                        : `Collecting data (${biometricHistory.length} reading${biometricHistory.length === 1 ? '' : 's'} so far). Need 14+ for full baseline.`}
                                 </p>
                             </Card>
 
@@ -156,9 +159,11 @@ export default function PatientDashboard() {
                                 <CardHeader>
                                     <CardTitle>Record Biometrics</CardTitle>
                                 </CardHeader>
-                            <div className="space-y-3">
+                            <div className="space-y-3" role="form" aria-label="Record biometrics">
                                 <div className="grid grid-cols-2 gap-2">
                                     <input
+                                        id="biometric-heart-rate"
+                                        name="heartRate"
                                         type="number"
                                         placeholder="Heart Rate"
                                         className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
@@ -169,6 +174,8 @@ export default function PatientDashboard() {
                                         })}
                                     />
                                     <input
+                                        id="biometric-temperature"
+                                        name="temperature"
                                         type="number"
                                         placeholder="Temp (°C)"
                                         className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
@@ -181,6 +188,8 @@ export default function PatientDashboard() {
                                 </div>
                                 <div className="grid grid-cols-2 gap-2">
                                     <input
+                                        id="biometric-systolic"
+                                        name="bloodPressureSystolic"
                                         type="number"
                                         placeholder="Systolic"
                                         className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
@@ -194,6 +203,8 @@ export default function PatientDashboard() {
                                         })}
                                     />
                                     <input
+                                        id="biometric-diastolic"
+                                        name="bloodPressureDiastolic"
                                         type="number"
                                         placeholder="Diastolic"
                                         className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
@@ -208,6 +219,8 @@ export default function PatientDashboard() {
                                     />
                                 </div>
                                 <input
+                                    id="biometric-spo2"
+                                    name="oxygenSaturation"
                                     type="number"
                                     placeholder="SpO2 (%)"
                                     className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
@@ -218,6 +231,8 @@ export default function PatientDashboard() {
                                     })}
                                 />
                                 <button
+                                    type="button"
+                                    id="biometric-submit"
                                     onClick={handleBiometricSubmit}
                                     disabled={loading}
                                     className="w-full py-2.5 rounded-lg font-semibold text-white transition disabled:opacity-50"
@@ -228,75 +243,58 @@ export default function PatientDashboard() {
                             </div>
                             </Card>
 
-                            {/* AI Triage */}
-                            <Card>
+                            {/* Link to AI Doctor Assistant (separate service) */}
+                            <Card className="flex flex-col justify-center">
                                 <CardHeader>
                                     <CardTitle>AI Doctor Assistant</CardTitle>
                                 </CardHeader>
-
-                            {!triageResult ? (
-                                <div className="space-y-4">
-                                    <textarea
-                                        className="w-full p-4 border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
-                                        rows={4}
-                                        placeholder="Describe your symptoms..."
-                                        value={symptoms}
-                                        onChange={(e) => setSymptoms(e.target.value)}
-                                    />
-
-                                    <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:border-blue-500 transition cursor-pointer relative">
-                                        <input
-                                            type="file"
-                                            accept="image/*"
-                                            onChange={handleImageUpload}
-                                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                        />
-                                        <div className="space-y-2">
-                                            <span className="text-3xl" aria-hidden>📸</span>
-                                            <p className="text-sm font-medium text-slate-600">
-                                                {selectedImage ? 'Image Attached' : 'Upload a photo (Optional)'}
-                                            </p>
-                                        </div>
-                                    </div>
-
-                                    <button
-                                        onClick={handleTriage}
-                                        disabled={loading || !symptoms}
-                                        className="w-full py-3 rounded-lg font-semibold text-white transition disabled:opacity-50"
-                                        style={{ backgroundColor: 'var(--primary)' }}
-                                    >
-                                        {loading ? 'Analyzing...' : 'Analyze Symptoms'}
-                                    </button>
-                                </div>
-                            ) : (
-                                <div className="space-y-4">
-                                    <div className={`p-4 rounded-lg border-l-4 ${
-                                        triageResult.triageLevel < 3
-                                            ? 'bg-red-50 border-red-500'
-                                            : 'bg-emerald-50 border-emerald-500'
-                                    }`}>
-                                    <h3 className="font-bold text-slate-900 mb-2">Analysis Complete</h3>
-                                    <p className="mb-2 text-slate-800"><strong>Recommended Action:</strong> {triageResult.recommendedAction}</p>
-                                    <p className="text-sm text-slate-700">
-                                        <strong>Possible Conditions:</strong> {triageResult.possibleConditions?.join(', ')}
-                                    </p>
-                                    </div>
-                                    <p className="text-xs text-center text-slate-600">{triageResult.reasoning}</p>
-                                    <button
-                                        onClick={() => {
-                                            setTriageResult(null);
-                                            setSymptoms('');
-                                            setSelectedImage(null);
-                                        }}
-                                        className="text-sm font-medium w-full text-center hover:underline"
-                                        style={{ color: 'var(--primary)' }}
-                                    >
-                                        Start Over
-                                    </button>
-                                </div>
-                            )}
+                                <p className="text-sm text-[var(--muted)] mb-4">
+                                    Describe symptoms and get AI-assisted triage recommendations. For decision support only — not a medical diagnosis.
+                                </p>
+                                <Link
+                                    href="/patient/ai-doctor"
+                                    className="inline-flex items-center justify-center py-2.5 rounded-lg font-semibold text-white transition hover:opacity-90"
+                                    style={{ backgroundColor: 'var(--primary)' }}
+                                >
+                                    Open AI Doctor Assistant →
+                                </Link>
                             </Card>
                         </div>
+
+                        {/* Recent biometric readings */}
+                        <Card className="mb-8">
+                            <CardHeader>
+                                <CardTitle>Recent readings</CardTitle>
+                            </CardHeader>
+                            {biometricHistory.length === 0 ? (
+                                <p className="text-sm font-medium text-[var(--muted)]">No readings yet. Use the form above to submit your first biometrics.</p>
+                            ) : (
+                                <div className="space-y-3">
+                                    {biometricHistory.slice(0, 10).map((r: Record<string, unknown>, i: number) => (
+                                        <div
+                                            key={(r.id as string) ?? i}
+                                            className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2 border-b last:border-b-0 text-sm"
+                                            style={{ borderColor: 'var(--border)' }}
+                                        >
+                                            <span className="text-[var(--muted)]">
+                                                {r.createdAt ? new Date(r.createdAt as string).toLocaleString() : '—'}
+                                            </span>
+                                            {(r.heartRate != null || r.heartRateResting != null) && (
+                                                <span>HR: {String(r.heartRate ?? r.heartRateResting ?? '—')}</span>
+                                            )}
+                                            {(r.bloodPressureSystolic != null || r.bloodPressureDiastolic != null) && (
+                                                <span>BP: {r.bloodPressureSystolic}/{r.bloodPressureDiastolic}</span>
+                                            )}
+                                            {r.oxygenSaturation != null && <span>SpO2: {r.oxygenSaturation}%</span>}
+                                            {r.temperature != null && <span>Temp: {r.temperature}°C</span>}
+                                            {r.readinessScore != null && (
+                                                <span className="font-medium">Score: {r.readinessScore}</span>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </Card>
 
                         {/* Bookings */}
                         <Card>

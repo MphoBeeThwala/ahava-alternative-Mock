@@ -108,7 +108,9 @@ router.post('/', requirePatient, async (req: AuthenticatedRequest, res, next) =>
 // Get user's bookings
 router.get('/', authMiddleware, async (req: AuthenticatedRequest, res, next) => {
   try {
-    const { status, limit = '10', offset = '0' } = req.query;
+    const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit), 10) || 10));
+    const offset = Math.max(0, parseInt(String(req.query.offset), 10) || 0);
+    const status = req.query.status as string | undefined;
 
     const whereClause: any = {};
 
@@ -165,16 +167,20 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res, next) => 
         },
       },
       orderBy: { createdAt: 'desc' },
-      take: parseInt(limit as string),
-      skip: parseInt(offset as string),
+      take: limit,
+      skip: offset,
     });
 
     res.json({
       success: true,
       bookings,
     });
-  } catch (error) {
-    next(error);
+  } catch (error: any) {
+    console.error('[Bookings] Failed to fetch:', error?.message || error);
+    return res.status(503).json({
+      success: false,
+      error: 'Unable to load bookings. Database may be unavailable.',
+    });
   }
 });
 

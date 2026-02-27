@@ -84,6 +84,7 @@ export default function LoginPage() {
                             </label>
                             <input
                                 id="login-email"
+                                data-testid="login-email"
                                 type="email"
                                 required
                                 autoComplete="email"
@@ -100,6 +101,7 @@ export default function LoginPage() {
                             </label>
                             <input
                                 id="login-password"
+                                data-testid="login-password"
                                 type="password"
                                 required
                                 autoComplete="current-password"

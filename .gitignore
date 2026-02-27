@@ -11,6 +11,7 @@ out/
 
 # Environment variables
 .env
+.env.synthea
 .env.local
 .env.development.local
 .env.test.local
@@ -155,3 +156,14 @@ frontend_*.log
 # Temporary files
 *.tmp
 *.temp
+
+# Synthea generated data (use seed:from-synthea to import)
+synthea-output/
+output/
+
+# Python (ml-service)
+.venv*/
+__pycache__/
+*.pyc
+*.pyo
+apps/ml-service/models/

@@ -85,6 +85,9 @@ model User {
   
   // Push notification tokens
   pushTokens        String[]
+
+  // CVD risk context for early warning (POPIA: minimal storage)
+  riskProfile       Json?    // { smoker?: boolean, hypertension?: boolean, cholesterolKnown?: boolean }
   
   // Auth
   passwordHash      String?
@@ -300,6 +303,9 @@ model BiometricReading {
   stepCount       Int?
   activeCalories  Float?
   skinTempOffset  Float?
+  sleepDurationHours Float?   // hours per night (wearable)
+  ecgRhythm       String?     // "regular" | "irregular" (single-lead ECG)
+  temperatureTrend String?    // "normal" | "elevated_single_day" | "elevated_over_3_days"
   
   // Source tracking
   source          String      @default("manual") // "wearable" | "manual"

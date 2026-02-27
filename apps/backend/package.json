@@ -19,6 +19,8 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "prisma:seed": "tsx src/seed.ts",
+    "seed:mock-patients": "tsx src/scripts/seed-mock-patients.ts",
+    "seed:from-synthea": "tsx src/scripts/seed-from-synthea.ts",
     "db:reset": "prisma migrate reset --force",
     "validate:env": "node scripts/validate-env.js"
   },

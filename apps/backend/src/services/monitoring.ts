@@ -36,18 +36,23 @@ export async function processBiometricReading(
 ): Promise<MonitoringResult> {
   try {
     // Send to ML service for analysis
+    const mlPayload: Record<string, unknown> = {
+      timestamp: new Date().toISOString(),
+      heart_rate_resting: biometricData.heartRateResting || biometricData.heartRate || 70,
+      hrv_rmssd: biometricData.hrvRmssd || 50,
+      spo2: biometricData.oxygenSaturation || 98,
+      skin_temp_offset: biometricData.skinTempOffset || 0,
+      respiratory_rate: biometricData.respiratoryRate || 16,
+      step_count: biometricData.stepCount || 0,
+      active_calories: biometricData.activeCalories || 0,
+    };
+    if (biometricData.sleepDurationHours != null) mlPayload.sleep_duration_hours = biometricData.sleepDurationHours;
+    if (biometricData.ecgRhythm) mlPayload.ecg_rhythm = biometricData.ecgRhythm;
+    if (biometricData.temperatureTrend) mlPayload.temperature_trend = biometricData.temperatureTrend;
+
     const mlResponse = await axios.post(
       `${ML_SERVICE_URL}/ingest?user_id=${userId}`,
-      {
-        timestamp: new Date().toISOString(),
-        heart_rate_resting: biometricData.heartRateResting || biometricData.heartRate || 70,
-        hrv_rmssd: biometricData.hrvRmssd || 50,
-        spo2: biometricData.oxygenSaturation || 98,
-        skin_temp_offset: biometricData.skinTempOffset || 0,
-        respiratory_rate: biometricData.respiratoryRate || 16,
-        step_count: biometricData.stepCount || 0,
-        active_calories: biometricData.activeCalories || 0,
-      },
+      mlPayload,
       { timeout: 5000 }
     );
 
@@ -242,24 +247,20 @@ export async function getMonitoringSummary(userId: string): Promise<{
   recentAlerts: number;
   trend: 'STABLE' | 'IMPROVING' | 'DECLINING';
 }> {
-  // Get baseline status
+  // Get baseline status (select only columns that exist in all environments)
   let readings: any[] = [];
   try {
-    if (prisma.biometricReading) {
-      readings = await prisma.biometricReading.findMany({
-        where: { userId },
-        orderBy: { createdAt: 'asc' },
-      });
-    } else {
-      // Fallback: Fetch via raw SQL
-      readings = await prisma.$queryRaw<any[]>`
-        SELECT * FROM biometric_readings
-        WHERE "userId" = ${userId}
-        ORDER BY "createdAt" ASC
-      `;
-    }
-  } catch (error) {
-    console.warn('[Monitoring] Failed to fetch readings:', error);
+    readings = await prisma.biometricReading.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        id: true,
+        createdAt: true,
+        readinessScore: true,
+      },
+    });
+  } catch (error: any) {
+    console.warn('[Monitoring] Failed to fetch readings:', error?.message || error);
   }
 
   const baselineEstablished = readings.length >= 14;
@@ -285,29 +286,17 @@ export async function getMonitoringSummary(userId: string): Promise<{
   // Get recent alerts
   let recentAlerts = 0;
   try {
-    if (prisma.healthAlert) {
-      recentAlerts = await prisma.healthAlert.count({
-        where: {
-          userId,
-          resolved: false,
-          createdAt: {
-            gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), // Last 7 days
-          },
+    recentAlerts = await prisma.healthAlert.count({
+      where: {
+        userId,
+        resolved: false,
+        createdAt: {
+          gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), // Last 7 days
         },
-      });
-    } else {
-      // Fallback: Count via raw SQL
-      const result = await prisma.$queryRaw<Array<{ count: bigint }>>`
-        SELECT COUNT(*)::int as count
-        FROM health_alerts
-        WHERE "userId" = ${userId} 
-          AND resolved = false
-          AND "createdAt" >= NOW() - INTERVAL '7 days'
-      `;
-      recentAlerts = Number(result[0]?.count || 0);
-    }
-  } catch (error) {
-    console.warn('[Monitoring] Failed to count alerts:', error);
+      },
+    });
+  } catch (error: any) {
+    console.warn('[Monitoring] Failed to count alerts:', error?.message || error);
   }
 
   // Calculate trend

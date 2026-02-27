@@ -24,12 +24,18 @@
     "prisma:generate": "pnpm --filter @ahava-healthcare/api prisma:generate",
     "prisma:migrate": "pnpm --filter @ahava-healthcare/api prisma:migrate",
     "prisma:seed": "pnpm --filter @ahava-healthcare/api prisma:seed",
+    "seed:mock-patients": "pnpm --filter @ahava-healthcare/api seed:mock-patients",
+    "seed:from-synthea": "pnpm --filter @ahava-healthcare/api seed:from-synthea",
+    "synthea:run-and-seed": "node scripts/run-synthea-and-seed.js",
+    "load-test:patient-pipeline": "node scripts/load-test-patient-pipeline.js",
+    "test:early-warning": "node scripts/run-early-warning-test.js",
     "db:reset": "pnpm --filter @ahava-healthcare/api db:reset"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
     "eslint": "^8.55.0",
     "prettier": "^3.1.0",
+    "puppeteer": "^24.37.4",
     "typescript": "^5.3.0"
   },
   "engines": {
