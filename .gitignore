@@ -167,3 +167,6 @@ __pycache__/
 *.pyc
 *.pyo
 apps/ml-service/models/
+
+# Single lockfile for monorepo (use pnpm-lock.yaml at root); avoids Next.js "multiple lockfiles" warning
+workspace/package-lock.json

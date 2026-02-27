@@ -37,6 +37,9 @@ const app = express();
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
+// Trust proxy so X-Forwarded-For is trusted (required behind Railway/reverse proxies for rate-limit)
+app.set('trust proxy', 1);
+
 // Security middleware
 app.use(helmet({
   contentSecurityPolicy: {
