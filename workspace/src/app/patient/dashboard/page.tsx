@@ -283,12 +283,12 @@ export default function PatientDashboard() {
                                                 <span>HR: {String(r.heartRate ?? r.heartRateResting ?? '—')}</span>
                                             )}
                                             {(r.bloodPressureSystolic != null || r.bloodPressureDiastolic != null) && (
-                                                <span>BP: {r.bloodPressureSystolic}/{r.bloodPressureDiastolic}</span>
+                                                <span>BP: {String(r.bloodPressureSystolic ?? '—')}/{String(r.bloodPressureDiastolic ?? '—')}</span>
                                             )}
-                                            {r.oxygenSaturation != null && <span>SpO2: {r.oxygenSaturation}%</span>}
-                                            {r.temperature != null && <span>Temp: {r.temperature}°C</span>}
+                                            {r.oxygenSaturation != null && <span>SpO2: {String(r.oxygenSaturation)}%</span>}
+                                            {r.temperature != null && <span>Temp: {String(r.temperature)}°C</span>}
                                             {r.readinessScore != null && (
-                                                <span className="font-medium">Score: {r.readinessScore}</span>
+                                                <span className="font-medium">Score: {String(r.readinessScore)}</span>
                                             )}
                                         </div>
                                     ))}
