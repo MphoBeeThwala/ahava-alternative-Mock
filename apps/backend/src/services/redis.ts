@@ -10,7 +10,7 @@ export const initializeRedis = async (): Promise<Redis> => {
   const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
   const client = new Redis(redisUrl, {
     enableReadyCheck: true,
-    maxRetriesPerRequest: 1,
+    maxRetriesPerRequest: null, // Required by BullMQ Workers (allows retries on disconnect)
     connectTimeout: 3000,
     lazyConnect: true,
   });

@@ -61,7 +61,7 @@ const corsOrigins = process.env.CORS_ORIGIN
         'https://ahava-healthcare-admin.railway.app',
         'https://ahava-healthcare-doctor.railway.app',
       ]
-    : true;
+    : ['http://localhost:3000', 'http://127.0.0.1:3000'];
 app.use(cors({
   origin: corsOrigins,
   credentials: true,
@@ -127,8 +127,8 @@ async function startServer() {
   if (process.env.REDIS_URL) {
     try {
       console.log('🔄 Connecting to Redis...');
-      await initializeRedis();
-      await initializeQueue();
+      const redis = await initializeRedis();
+      await initializeQueue(redis);
       console.log('✅ Redis and queues initialized');
     } catch (err) {
       console.warn('⚠️ Redis/Queue unavailable, running without background jobs:', (err as Error).message);

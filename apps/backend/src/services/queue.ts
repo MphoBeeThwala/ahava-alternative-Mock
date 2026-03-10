@@ -1,5 +1,5 @@
+import type Redis from 'ioredis';
 import { Queue, QueueEvents, Worker } from 'bullmq';
-import { getRedis } from './redis';
 import { sendEmail } from './email';
 
 // Queue names
@@ -24,8 +24,7 @@ function getDefaultJobOptions() {
   };
 }
 
-export const initializeQueue = async () => {
-  const connection = getRedis();
+export const initializeQueue = async (connection: Redis) => {
   pdfExportQueue = new Queue(QUEUE_NAMES.PDF_EXPORT, {
     connection,
     defaultJobOptions: { ...getDefaultJobOptions(), removeOnComplete: 10, removeOnFail: 5 },

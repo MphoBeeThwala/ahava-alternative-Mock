@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import dotenv from 'dotenv';
+import { getMedicalContext } from './statPearls';
 
 dotenv.config();
 
@@ -24,13 +25,26 @@ export interface TriageResult {
     reasoning: string;
 }
 
-const TRIAGE_PROMPT = `Act as a strictly objective medical triage assistant. 
+function buildTriagePrompt(symptoms: string, medicalContext?: string | null): string {
+    const basePrompt = `Act as a strictly objective medical triage assistant. 
 Analyze the following symptoms and (optional) image.
 
-SYMPTOMS: "{SYMPTOMS}"
+SYMPTOMS: "${symptoms}"`;
 
-Output ONLY valid JSON with the following structure:
-{
+    const contextSection = medicalContext
+        ? `
+
+REFERENCE (peer-reviewed medical context from StatPearls - use to inform your assessment, do not copy verbatim):
+${medicalContext}
+
+`
+        : "\n";
+
+    return `${basePrompt}${contextSection}
+Output ONLY valid JSON with the following structure:`;
+}
+
+const TRIAGE_PROMPT_END = `{
   "triageLevel": number (1-5, where 1 is critical/ER, 5 is basic home care),
   "possibleConditions": ["string", "string"],
   "recommendedAction": "string (Advice for the patient/nurse)",
@@ -41,14 +55,17 @@ IMPORTANT: Do not include markdown formatting like \`\`\`json. Just the raw JSON
 DISCLAIMER: This is for informational purposes only.`;
 
 // Claude via official Anthropic API
-async function analyzeWithClaude(request: TriageRequest): Promise<TriageResult> {
+async function analyzeWithClaude(
+    request: TriageRequest,
+    medicalContext?: string | null
+): Promise<TriageResult> {
     if (!ANTHROPIC_API_KEY) {
         throw new Error("ANTHROPIC_API_KEY is not configured");
     }
 
     console.log("[aiTriage] Using Claude via Anthropic API...");
 
-    const prompt = TRIAGE_PROMPT.replace("{SYMPTOMS}", request.symptoms);
+    const prompt = buildTriagePrompt(request.symptoms, medicalContext) + TRIAGE_PROMPT_END;
 
     // Build message content
     const content: any[] = [{ type: "text", text: prompt }];
@@ -103,8 +120,11 @@ async function analyzeWithClaude(request: TriageRequest): Promise<TriageResult> 
     return JSON.parse(cleanJson) as TriageResult;
 }
 
-// Gemini primary
-async function analyzeWithGemini(request: TriageRequest): Promise<TriageResult> {
+// Gemini
+async function analyzeWithGemini(
+    request: TriageRequest,
+    medicalContext?: string | null
+): Promise<TriageResult> {
     if (!genAI) {
         throw new Error("GEMINI_API_KEY is not configured");
     }
@@ -112,7 +132,7 @@ async function analyzeWithGemini(request: TriageRequest): Promise<TriageResult> 
     console.log("[aiTriage] Using Gemini...");
 
     const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-    const prompt = TRIAGE_PROMPT.replace("{SYMPTOMS}", request.symptoms);
+    const prompt = buildTriagePrompt(request.symptoms, medicalContext) + TRIAGE_PROMPT_END;
 
     const parts: any[] = [prompt];
 
@@ -140,10 +160,21 @@ async function analyzeWithGemini(request: TriageRequest): Promise<TriageResult> 
 export async function analyzeSymptoms(request: TriageRequest): Promise<TriageResult> {
     console.log(`[aiTriage] analyzeSymptoms called`);
 
+    // Fetch StatPearls medical context (Option A - Proxy/Context Injection)
+    let medicalContext: string | null = null;
+    try {
+        medicalContext = await getMedicalContext(request.symptoms);
+        if (medicalContext) {
+            console.log(`[aiTriage] StatPearls context fetched (${medicalContext.length} chars)`);
+        }
+    } catch (err) {
+        console.warn("[aiTriage] StatPearls context fetch failed, proceeding without:", err);
+    }
+
     // Try Claude first (primary)
     if (ANTHROPIC_API_KEY) {
         try {
-            return await analyzeWithClaude(request);
+            return await analyzeWithClaude(request, medicalContext);
         } catch (error: any) {
             console.warn(`[aiTriage] Claude failed: ${error.message}`);
 
@@ -159,7 +190,7 @@ export async function analyzeSymptoms(request: TriageRequest): Promise<TriageRes
     // Fallback to Gemini
     if (genAI) {
         try {
-            return await analyzeWithGemini(request);
+            return await analyzeWithGemini(request, medicalContext);
         } catch (error: any) {
             console.error(`[aiTriage] Gemini also failed: ${error.message}`);
             throw new Error("Both AI providers failed. Please try again later.");

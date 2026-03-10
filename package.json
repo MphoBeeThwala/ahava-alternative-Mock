@@ -29,6 +29,7 @@
     "synthea:run-and-seed": "node scripts/run-synthea-and-seed.js",
     "load-test:patient-pipeline": "node scripts/load-test-patient-pipeline.js",
     "test:early-warning": "node scripts/run-early-warning-test.js",
+    "test:services": "node scripts/test-services.js",
     "db:reset": "pnpm --filter @ahava-healthcare/api db:reset"
   },
   "devDependencies": {

@@ -1,19 +1,27 @@
 import axios, { AxiosInstance } from 'axios';
 
-// Always same-origin /api → Next.js rewrites proxy to backend. No cross-origin = no CORS.
-const API_BASE_URL = '/api';
+// In development, call the backend directly so the Authorization header is sent (Next.js rewrites
+// do not forward it, which causes 401 and logout when using services). In production, use same-origin /api.
+function getApiBaseUrl(): string {
+  if (typeof window === 'undefined') return '/api';
+  if (process.env.NODE_ENV !== 'development') return '/api';
+  return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
+}
 
 // Create axios instance with default config
 const apiClient: AxiosInstance = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: getApiBaseUrl(),
+  timeout: 30000,
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Request interceptor to add auth token
+// Request interceptor: ensure dev uses direct backend URL and token is always attached
 apiClient.interceptors.request.use(
   (config) => {
+    config.baseURL = getApiBaseUrl();
     const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -27,9 +35,10 @@ apiClient.interceptors.request.use(
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      // Token expired or invalid
-      if (typeof window !== 'undefined') {
+    if (error.response?.status === 401 && typeof window !== 'undefined') {
+      // Avoid redirect loop if already on login/signup
+      const path = window.location.pathname || '';
+      if (!path.startsWith('/auth/')) {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
         window.location.href = '/auth/login';
