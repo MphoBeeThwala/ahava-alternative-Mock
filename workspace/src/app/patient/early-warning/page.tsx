@@ -33,7 +33,7 @@ export default function EarlyWarningPage() {
       try {
         setError(null);
         const result = await patientApi.getEarlyWarningSummary();
-        if (!cancelled) setData(result);
+        if (!cancelled) setData(result as Record<string, unknown>);
       } catch (e: unknown) {
         const err = e as { response?: { status: number; data?: { error?: string } } };
         if (!cancelled) {
