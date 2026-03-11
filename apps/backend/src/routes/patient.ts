@@ -492,6 +492,13 @@ router.get('/early-warning', authMiddleware, async (req: AuthenticatedRequest, r
           sleepQuality: 'unknown'
         },
         baselineMetrics: biometrics,
+        fusion: {
+          alert_triggered: false,
+          alert_message: undefined,
+          trajectory_risk_2y_pct: undefined,
+        },
+        alert_level: 'GREEN',
+        anomalies: [],
       };
     }
 
