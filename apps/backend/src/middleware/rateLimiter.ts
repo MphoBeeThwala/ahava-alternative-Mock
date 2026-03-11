@@ -10,6 +10,9 @@ export const rateLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  // Behind proxy (Railway): use X-Forwarded-For but skip validation warnings
+  skip: (req) => process.env.NODE_ENV === 'development' && !req.ip,
+  keyGenerator: (req) => req.ip || req.socket.remoteAddress || 'unknown',
 });
 
 // Strict rate limiter for auth endpoints (relaxed in dev so load-test can run 1000 logins)
@@ -21,6 +24,9 @@ export const authRateLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  // Behind proxy: use X-Forwarded-For
+  skip: (req) => process.env.NODE_ENV === 'development' && !req.ip,
+  keyGenerator: (req) => req.ip || req.socket.remoteAddress || 'unknown',
 });
 
 // Webhook rate limiter (more lenient)
@@ -32,4 +38,7 @@ export const webhookRateLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  // Behind proxy: use X-Forwarded-For
+  skip: (req) => process.env.NODE_ENV === 'development' && !req.ip,
+  keyGenerator: (req) => req.ip || req.socket.remoteAddress || 'unknown',
 });
