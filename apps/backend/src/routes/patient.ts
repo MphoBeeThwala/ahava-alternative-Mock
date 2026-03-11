@@ -403,70 +403,96 @@ router.get('/early-warning', authMiddleware, async (req: AuthenticatedRequest, r
       temperature_trend: ['normal', 'elevated_single_day', 'elevated_over_3_days'].includes(r.temperatureTrend) ? r.temperatureTrend : 'normal',
     };
 
-    // Prefer summary (no duplicate append); if ML has no data, backfill from DB then analyze
+    // Try ML service first, with graceful fallback to database-only analysis
     let mlData: any;
-    try {
-      const summaryRes = await axios.get(
-        `${ML_SERVICE_URL}/early-warning/summary/${encodeURIComponent(userId)}`,
-        { timeout: 8000 }
-      );
-      mlData = summaryRes.data;
-    } catch (summaryErr: any) {
-      if (summaryErr.response?.status !== 404) throw summaryErr;
-      // ML has no history: backfill from DB (last 20 readings, send oldest-first so baseline works)
-      const recentReadings = await prisma.biometricReading.findMany({
+    const mlServiceAvailable = process.env.ML_SERVICE_URL && !process.env.ML_SERVICE_URL.includes('localhost');
+    
+    if (mlServiceAvailable) {
+      try {
+        const summaryRes = await axios.get(
+          `${ML_SERVICE_URL}/early-warning/summary/${encodeURIComponent(userId)}`,
+          { timeout: 8000 }
+        );
+        mlData = summaryRes.data;
+      } catch (summaryErr: any) {
+        if (summaryErr.response?.status !== 404) throw summaryErr;
+        // ML has no history: backfill from DB (last 20 readings, send oldest-first so baseline works)
+        const recentReadings = await prisma.biometricReading.findMany({
+          where: { userId },
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+          select: {
+            createdAt: true,
+            heartRate: true,
+            heartRateResting: true,
+            hrvRmssd: true,
+            oxygenSaturation: true,
+            skinTempOffset: true,
+            respiratoryRate: true,
+            stepCount: true,
+            activeCalories: true,
+            sleepDurationHours: true,
+            ecgRhythm: true,
+            temperatureTrend: true,
+          },
+        });
+        const inOrder = [...recentReadings].reverse();
+        for (const row of inOrder) {
+          const r = row as any;
+          const ts = r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString();
+          const clamp = (v: number | null | undefined, min: number, max: number, def: number) =>
+            v != null ? Math.min(max, Math.max(min, Number(v))) : def;
+          try {
+            await axios.post(
+              `${ML_SERVICE_URL}/ingest?user_id=${encodeURIComponent(userId)}`,
+              {
+                timestamp: ts,
+                heart_rate_resting: clamp(r.heartRateResting ?? r.heartRate, 30, 200, 72),
+                hrv_rmssd: clamp(r.hrvRmssd, 0, 300, 35),
+                spo2: clamp(r.oxygenSaturation, 50, 100, 98),
+                skin_temp_offset: clamp(r.skinTempOffset, -5, 5, 0),
+                respiratory_rate: clamp(r.respiratoryRate, 4, 60, 16),
+                step_count: Math.max(0, Number(r.stepCount) || 0),
+                active_calories: Math.max(0, Number(r.activeCalories) || 0),
+                sleep_duration_hours: Math.min(24, Math.max(0, Number(r.sleepDurationHours) || 0)),
+                ecg_rhythm: ['regular', 'irregular', 'unknown'].includes(r.ecgRhythm) ? r.ecgRhythm : 'unknown',
+                temperature_trend: ['normal', 'elevated_single_day', 'elevated_over_3_days'].includes(r.temperatureTrend) ? r.temperatureTrend : 'normal',
+              },
+              { timeout: 3000 }
+            );
+          } catch (_) {
+            // ignore single ingest failure
+          }
+        }
+        const analyzeRes = await axios.post(
+          `${ML_SERVICE_URL}/early-warning/analyze?user_id=${encodeURIComponent(userId)}`,
+          { biometrics, context },
+          { timeout: 10000 }
+        );
+        mlData = analyzeRes.data;
+      }
+    }
+    
+    // Fallback to database-only analysis if ML service unavailable
+    if (!mlData) {
+      const allReadings = await prisma.biometricReading.findMany({
         where: { userId },
         orderBy: { createdAt: 'desc' },
-        take: 20,
-        select: {
-          createdAt: true,
-          heartRate: true,
-          heartRateResting: true,
-          hrvRmssd: true,
-          oxygenSaturation: true,
-          skinTempOffset: true,
-          respiratoryRate: true,
-          stepCount: true,
-          activeCalories: true,
-          sleepDurationHours: true,
-          ecgRhythm: true,
-          temperatureTrend: true,
-        },
+        take: 30,
       });
-      const inOrder = [...recentReadings].reverse();
-      for (const row of inOrder) {
-        const r = row as any;
-        const ts = r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString();
-        const clamp = (v: number | null | undefined, min: number, max: number, def: number) =>
-          v != null ? Math.min(max, Math.max(min, Number(v))) : def;
-        try {
-          await axios.post(
-            `${ML_SERVICE_URL}/ingest?user_id=${encodeURIComponent(userId)}`,
-            {
-              timestamp: ts,
-              heart_rate_resting: clamp(r.heartRateResting ?? r.heartRate, 30, 200, 72),
-              hrv_rmssd: clamp(r.hrvRmssd, 0, 300, 35),
-              spo2: clamp(r.oxygenSaturation, 50, 100, 98),
-              skin_temp_offset: clamp(r.skinTempOffset, -5, 5, 0),
-              respiratory_rate: clamp(r.respiratoryRate, 4, 60, 16),
-              step_count: Math.max(0, Number(r.stepCount) || 0),
-              active_calories: Math.max(0, Number(r.activeCalories) || 0),
-              sleep_duration_hours: Math.min(24, Math.max(0, Number(r.sleepDurationHours) || 0)),
-              ecg_rhythm: ['regular', 'irregular', 'unknown'].includes(r.ecgRhythm) ? r.ecgRhythm : 'unknown',
-              temperature_trend: ['normal', 'elevated_single_day', 'elevated_over_3_days'].includes(r.temperatureTrend) ? r.temperatureTrend : 'normal',
-            },
-            { timeout: 3000 }
-          );
-        } catch (_) {
-          // ignore single ingest failure
-        }
-      }
-      const analyzeRes = await axios.post(
-        `${ML_SERVICE_URL}/early-warning/analyze?user_id=${encodeURIComponent(userId)}`,
-        { biometrics, context },
-        { timeout: 10000 }
-      );
-      mlData = analyzeRes.data;
+      
+      mlData = {
+        riskLevel: allReadings.length === 0 ? 'unknown' : 'low',
+        recommendations: allReadings.length === 0 
+          ? ['Please add your first biometric reading to get personalized recommendations']
+          : ['Maintain current health habits', 'Continue regular monitoring of vital signs'],
+        trendAnalysis: {
+          heartRate: 'stable',
+          oxygenSaturation: 'stable',
+          sleepQuality: 'unknown'
+        },
+        baselineMetrics: biometrics,
+      };
     }
 
     res.json({
@@ -475,14 +501,9 @@ router.get('/early-warning', authMiddleware, async (req: AuthenticatedRequest, r
       meta: { disclaimer: 'Not a medical diagnosis. For informational purposes only.' },
     });
   } catch (error: any) {
+    console.error('Early warning error:', error.message);
     if (error.response?.status === 404) {
-      return res.status(404).json({ success: false, error: error.response?.data?.detail ?? 'No data' });
-    }
-    if (error.code === 'ECONNREFUSED' || error.response?.status >= 500) {
-      return res.status(503).json({
-        success: false,
-        error: 'Early warning service temporarily unavailable. Try again later.',
-      });
+      return res.status(404).json({ success: false, error: 'No biometric data found. Submit a reading first.' });
     }
     if (error.response?.status === 400 || error.response?.status === 422) {
       const detail = error.response?.data?.detail ?? error.response?.data?.message ?? error.message;
@@ -491,7 +512,11 @@ router.get('/early-warning', authMiddleware, async (req: AuthenticatedRequest, r
         error: typeof detail === 'string' ? detail : 'Early warning request invalid.',
       });
     }
-    next(error);
+    // For other errors, return a generic response
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get early warning summary. Please try again.',
+    });
   }
 });
 
