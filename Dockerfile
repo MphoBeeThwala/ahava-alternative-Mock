@@ -25,14 +25,11 @@ ENV NODE_ENV=production
 # Copy installed dependencies
 COPY --from=deps /app/node_modules ./node_modules
 
-# Copy workspace files  
-COPY workspace ./workspace
-COPY apps/backend/package.json ./apps/backend/
-COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
+# Copy all source files
+COPY . .
 
-# Build the frontend
-WORKDIR /app/workspace
-RUN ../../node_modules/.bin/next build
+# Build using pnpm (respects workspace configuration)
+RUN pnpm --filter workspace build
 
 # ============================================================================
 # RUNTIME STAGE
