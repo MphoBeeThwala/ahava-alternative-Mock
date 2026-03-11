@@ -31,8 +31,10 @@ COPY . .
 # Set PATH to find 'next' in root node_modules/.bin
 # Build Next.js directly from workspace directory without pnpm
 WORKDIR /app/workspace
-ENV PATH="/app/node_modules/.bin:${PATH}"
-RUN npm run build
+ENV PATH="/app/node_modules/.bin:${PATH}" \
+    NODE_PATH=/app/node_modules
+# Use npx to find next binary in parent node_modules
+RUN npx next build
 
 # ============================================================================
 # RUNTIME STAGE - Minimal production image
