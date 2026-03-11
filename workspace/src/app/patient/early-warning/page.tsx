@@ -21,7 +21,7 @@ function MetricRow({ label, value, unit }: { label: string; value: string | numb
 }
 
 export default function EarlyWarningPage() {
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [demoStarted, setDemoStarted] = useState(false);
