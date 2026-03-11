@@ -37,8 +37,8 @@ COPY workspace/package.json ./workspace/
 # Copy source code
 COPY workspace ./workspace
 
-# Build the frontend using pnpm filter (uses root node_modules)
-RUN pnpm --filter workspace build
+# Build the frontend - use explicit path to next binary
+RUN cd /app/workspace && /app/node_modules/.bin/next build
 
 # ============================================================================
 # RUNTIME STAGE - Minimal production image
