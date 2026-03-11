@@ -21,7 +21,7 @@ const searchSchema = Joi.object({
 });
 
 // Toggle Availability & Update Location
-router.post('/availability', authMiddleware, rateLimiter, async (req, res, next) => {
+router.post('/availability', rateLimiter, authMiddleware, async (req, res, next) => {
     try {
         const { error, value } = updateLocationSchema.validate(req.body);
         if (error) {

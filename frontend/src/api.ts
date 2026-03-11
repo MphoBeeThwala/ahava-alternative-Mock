@@ -17,8 +17,10 @@ export async function register(email: string, password: string, role: string) {
 }
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-
+const API_BASE_URL =
+  typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.VITE_API_URL
+    ? (import.meta as any).env.VITE_API_URL
+    : 'http://localhost:3000';
 
 export async function getVisits(token?: string) {
   const res = await axios.get(`${API_BASE_URL}/visits`, {

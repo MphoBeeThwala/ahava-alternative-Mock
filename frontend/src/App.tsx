@@ -12,6 +12,7 @@ import RegisterPage from './pages/RegisterPage';
 import ProfilePage from './pages/ProfilePage';
 import AdminPage from './pages/AdminPage';
 import VisitDetailsPage from './pages/VisitDetailsPage';
+import EarlyWarningPage from './pages/EarlyWarningPage';
 import { AuthProvider, useAuth } from './AuthContext';
 
 
@@ -34,6 +35,7 @@ export default function App() {
             <Route path="/visits" element={<ProtectedRoute><VisitsPage /></ProtectedRoute>} />
             <Route path="/visits/:id" element={<ProtectedRoute><VisitDetailsPage /></ProtectedRoute>} />
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+            <Route path="/early-warning" element={<ProtectedRoute><EarlyWarningPage /></ProtectedRoute>} />
             <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
             <Route path="/admin" element={<ProtectedRoute><AdminPage /></ProtectedRoute>} />
           </Routes>

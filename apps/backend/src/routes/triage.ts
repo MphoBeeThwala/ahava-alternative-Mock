@@ -8,7 +8,7 @@ const router: Router = Router();
 const prisma = new PrismaClient();
 
 // POST /api/triage – run AI triage and create a case for doctor review
-router.post('/', authMiddleware, rateLimiter, async (req: AuthenticatedRequest, res, next) => {
+router.post('/', rateLimiter, authMiddleware, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { symptoms, imageBase64 } = req.body;
         const patientId = req.user?.id;

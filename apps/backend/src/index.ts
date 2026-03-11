@@ -61,7 +61,7 @@ const corsOrigins = process.env.CORS_ORIGIN
         'https://ahava-healthcare-admin.railway.app',
         'https://ahava-healthcare-doctor.railway.app',
       ]
-    : ['http://localhost:3000', 'http://127.0.0.1:3000'];
+    : ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:3003', 'http://127.0.0.1:3003'];
 app.use(cors({
   origin: corsOrigins,
   credentials: true,

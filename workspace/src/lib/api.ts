@@ -1,11 +1,9 @@
 import axios, { AxiosInstance } from 'axios';
 
-// In development, call the backend directly so the Authorization header is sent (Next.js rewrites
-// do not forward it, which causes 401 and logout when using services). In production, use same-origin /api.
+// Always use same-origin /api - Next.js rewrites handle the proxy to backend
+// This avoids CORS issues entirely and works in both dev and production
 function getApiBaseUrl(): string {
-  if (typeof window === 'undefined') return '/api';
-  if (process.env.NODE_ENV !== 'development') return '/api';
-  return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
+  return '/api';
 }
 
 // Create axios instance with default config
@@ -31,19 +29,101 @@ apiClient.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response interceptor to handle errors
+// Track if we're already attempting refresh to avoid infinite loops
+let isRefreshing = false;
+let failedQueue: Array<{
+  onSuccess: (token: string) => void;
+  onFailure: (error: any) => void;
+}> = [];
+
+const processQueue = (error: any, token: string | null = null) => {
+  failedQueue.forEach((prom) => {
+    if (error) {
+      prom.onFailure(error);
+    } else {
+      prom.onSuccess(token!);
+    }
+  });
+  failedQueue = [];
+};
+
+// Response interceptor with automatic token refresh
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
+    const originalRequest = error.config;
+
     if (error.response?.status === 401 && typeof window !== 'undefined') {
-      // Avoid redirect loop if already on login/signup
       const path = window.location.pathname || '';
-      if (!path.startsWith('/auth/')) {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        window.location.href = '/auth/login';
+      
+      // Don't attempt refresh if already on auth pages
+      if (path.startsWith('/auth/')) {
+        return Promise.reject(error);
       }
+
+      // Prevent multiple simultaneous refresh attempts
+      if (!isRefreshing) {
+        isRefreshing = true;
+        const refreshToken = localStorage.getItem('refreshToken');
+
+        if (refreshToken) {
+          try {
+            console.log('[API] Attempting to refresh token...');
+            
+            // Attempt to refresh token
+            const response = await apiClient.post('/auth/refresh', { refreshToken });
+            const { accessToken, refreshToken: newRefreshToken } = response.data;
+            
+            console.log('[API] Token refreshed successfully');
+            
+            // Update stored tokens
+            localStorage.setItem('token', accessToken);
+            localStorage.setItem('refreshToken', newRefreshToken);
+            
+            // Update the original request with new token
+            if (originalRequest.headers) {
+              originalRequest.headers.Authorization = `Bearer ${accessToken}`;
+            }
+            
+            // Process queued requests with new token
+            processQueue(null, accessToken);
+            
+            // Retry original request with new token
+            return apiClient(originalRequest);
+          } catch (refreshError) {
+            console.error('[API] Token refresh failed:', refreshError);
+            
+            // Refresh failed, log out
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            localStorage.removeItem('refreshToken');
+            
+            processQueue(refreshError, null);
+            
+            // Redirect to login
+            window.location.href = '/auth/login';
+            return Promise.reject(refreshError);
+          } finally {
+            isRefreshing = false;
+          }
+        } else {
+          console.warn('[API] No refresh token available, logging out');
+          
+          // No refresh token available, log out
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          window.location.href = '/auth/login';
+          
+          return Promise.reject(error);
+        }
+      }
+
+      // If already refreshing, queue this request
+      return new Promise((onSuccess, onFailure) => {
+        failedQueue.push({ onSuccess, onFailure });
+      });
     }
+
     return Promise.reject(error);
   }
 );

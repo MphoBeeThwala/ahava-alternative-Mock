@@ -27,6 +27,17 @@ export default function NavBar() {
             <Button color="inherit" component={RouterLink} to="/dashboard">
               Dashboard
             </Button>
+            <Button 
+              color="inherit" 
+              component={RouterLink} 
+              to="/early-warning"
+              sx={{ 
+                backgroundColor: 'rgba(255,255,255,0.2)',
+                '&:hover': { backgroundColor: 'rgba(255,255,255,0.3)' }
+              }}
+            >
+              🏥 Early Warning
+            </Button>
             {user.role === 'ADMIN' && (
               <Button color="inherit" component={RouterLink} to="/admin">Admin</Button>
             )}

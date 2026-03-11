@@ -58,6 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     
     if (typeof window !== 'undefined') {
       localStorage.setItem('token', response.accessToken);
+      localStorage.setItem('refreshToken', response.refreshToken);
       localStorage.setItem('user', JSON.stringify(response.user));
     }
     
@@ -70,6 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     
     if (typeof window !== 'undefined') {
       localStorage.setItem('token', response.accessToken);
+      localStorage.setItem('refreshToken', response.refreshToken);
       localStorage.setItem('user', JSON.stringify(response.user));
     }
     
@@ -77,11 +79,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(response.user as User);
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      // Call backend logout to invalidate refresh token in database
+      // Use a direct API call without the interceptor to avoid redirect loop
+      const token = localStorage.getItem('token');
+      if (token) {
+        await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api'}/auth/logout`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+      }
+    } catch (error) {
+      console.warn('Server logout failed, clearing local storage anyway');
+    }
+    
     if (typeof window !== 'undefined') {
       localStorage.removeItem('token');
+      localStorage.removeItem('refreshToken');
       localStorage.removeItem('user');
     }
+    
     setToken(null);
     setUser(null);
     router.push('/auth/login');

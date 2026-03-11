@@ -49,7 +49,7 @@ const submitTriageWithBiometricsSchema = Joi.object({
 });
 
 // Submit biometrics (from wearable or manual entry)
-router.post('/biometrics', authMiddleware, rateLimiter, async (req: AuthenticatedRequest, res, next) => {
+router.post('/biometrics', rateLimiter, authMiddleware, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { error, value } = submitBiometricsSchema.validate(req.body);
     if (error) {
@@ -519,7 +519,7 @@ router.patch('/risk-profile', authMiddleware, async (req: AuthenticatedRequest, 
 });
 
 // Enhanced triage with biometrics
-router.post('/triage', authMiddleware, rateLimiter, async (req: AuthenticatedRequest, res, next) => {
+router.post('/triage', rateLimiter, authMiddleware, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { error, value } = submitTriageWithBiometricsSchema.validate(req.body);
     if (error) {
