@@ -725,18 +725,12 @@ router.get('/anomaly-timeline', authMiddleware, async (req: AuthenticatedRequest
   }
 });
 
-// POST /api/demo/start-stream
+// POST /api/patient/demo/start-stream
 // DEMO ONLY - Streams realistic biometric progression for investor demo
-router.post('/demo/start-stream', async (req, res) => {
-  if (process.env.NODE_ENV === 'production') {
-    return res.status(403).json({ error: 'Demo mode disabled in production' });
-  }
-
-  const { userId, durationSeconds = 300, intervalSeconds = 30 } = req.query;
-  
-  if (!userId) {
-    return res.status(400).json({ error: 'userId required' });
-  }
+// Works in production but requires authentication
+router.post('/demo/start-stream', authMiddleware, async (req: AuthenticatedRequest, res) => {
+  const userId = req.user!.id;
+  const { durationSeconds = 300, intervalSeconds = 30 } = req.query;
 
   try {
     startDemoStream(

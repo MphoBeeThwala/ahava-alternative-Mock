@@ -301,6 +301,10 @@ export const patientApi = {
     if (!data || res.data?.success === false) throw new Error(res.data?.error ?? 'Failed to load');
     return data;
   },
+  startDemoStream: async (durationSeconds: number = 300, intervalSeconds: number = 30) => {
+    const res = await apiClient.post(`/patient/demo/start-stream?durationSeconds=${durationSeconds}&intervalSeconds=${intervalSeconds}`);
+    return res.data;
+  },
   updateRiskProfile: async (profile: RiskProfile) => {
     const res = await apiClient.patch('/patient/risk-profile', profile);
     return res.data;

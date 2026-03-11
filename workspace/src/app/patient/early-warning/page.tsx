@@ -25,6 +25,7 @@ export default function EarlyWarningPage() {
   const [summary, setSummary] = useState<EarlyWarningSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [demoStarted, setDemoStarted] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -37,7 +38,32 @@ export default function EarlyWarningPage() {
         const err = e as { response?: { status: number; data?: { error?: string } } };
         if (!cancelled) {
           if (err.response?.status === 404) {
-            setError(err.response?.data?.error ?? "No biometric data yet.");
+            // No data yet - offer to start demo
+            if (!demoStarted) {
+              setError(
+                "No biometric data yet. Starting demo simulation to populate data... This will take about 5 minutes."
+              );
+              // Automatically start demo stream in background
+              patientApi.startDemoStream(300, 30).then(() => {
+                setDemoStarted(true);
+                // Retry early warning check after a short delay
+                setTimeout(() => {
+                  patientApi
+                    .getEarlyWarningSummary()
+                    .then((data) => {
+                      if (!cancelled) setSummary(data);
+                    })
+                    .catch(() => {
+                      if (!cancelled)
+                        setError(
+                          "Demo running... Early warning data will appear shortly. Refresh this page in 30-60 seconds."
+                        );
+                    });
+                }, 3000);
+              });
+            } else {
+              setError(err.response?.data?.error ?? "Waiting for demo data...");
+            }
           } else if (err.response?.status === 503) {
             setError("Early warning service is temporarily unavailable. Try again later.");
           } else if (err.response?.status === 400) {
