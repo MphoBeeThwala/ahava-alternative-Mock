@@ -22,17 +22,17 @@ ARG NEXT_PUBLIC_API_URL=http://localhost:4000/api
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NODE_ENV=production
 
-# Copy dependencies and workspace configs
+# Copy dependencies from deps stage
 COPY --from=deps /app/node_modules ./node_modules
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY apps/backend/package.json ./apps/backend/
-COPY workspace ./workspace
 
-# Re-install to ensure proper symlinks for workspace (very fast from cache)
-RUN pnpm install --frozen-lockfile
+# Copy all source files
+COPY . .
 
-# Build Next.js using workspace's build script
-RUN pnpm --filter workspace build
+# Set PATH to find 'next' in root node_modules/.bin
+# Build Next.js directly from workspace directory without pnpm
+WORKDIR /app/workspace
+ENV PATH="/app/node_modules/.bin:${PATH}"
+RUN npm run build
 
 # ============================================================================
 # RUNTIME STAGE - Minimal production image
