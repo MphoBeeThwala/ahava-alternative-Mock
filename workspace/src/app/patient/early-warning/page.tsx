@@ -3,81 +3,63 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import RoleGuard, { UserRole } from "../../../components/RoleGuard";
-import { patientApi, EarlyWarningSummary } from "../../../lib/api";
+import { patientApi } from "../../../lib/api";
 import DashboardLayout from "../../../components/DashboardLayout";
 import { Card, CardHeader, CardTitle } from "../../../components/ui/Card";
-import { StatusBadge } from "../../../components/ui/StatusBadge";
 
-function MetricRow({ label, value, unit, baseline }: { label: string; value: string | number; unit?: string; baseline?: string }) {
+function MetricRow({ label, value, unit }: { label: string; value: string | number | null | undefined; unit?: string }) {
+  const displayValue = value ?? "—";
   return (
     <div className="flex justify-between items-baseline py-1.5 border-b border-slate-200 last:border-b-0">
       <span className="text-sm text-[var(--muted)]">{label}</span>
       <span className="font-medium text-[var(--foreground)]">
-        {value}
+        {displayValue}
         {unit && <span className="text-[var(--muted)] font-normal ml-1">{unit}</span>}
-        {baseline && <span className="text-xs text-[var(--muted)] ml-2">(baseline: {baseline})</span>}
       </span>
     </div>
   );
 }
 
 export default function EarlyWarningPage() {
-  const [summary, setSummary] = useState<EarlyWarningSummary | null>(null);
+  const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [demoStarted, setDemoStarted] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    
+    const loadData = async () => {
       try {
         setError(null);
-        const data = await patientApi.getEarlyWarningSummary();
-        if (!cancelled) setSummary(data);
+        const result = await patientApi.getEarlyWarningSummary();
+        if (!cancelled) setData(result);
       } catch (e: unknown) {
         const err = e as { response?: { status: number; data?: { error?: string } } };
         if (!cancelled) {
-          if (err.response?.status === 404) {
-            // No data yet - offer to start demo
-            if (!demoStarted) {
-              setError(
-                "No biometric data yet. Starting demo simulation to populate data... This will take about 5 minutes."
-              );
-              // Automatically start demo stream in background
-              patientApi.startDemoStream(300, 30).then(() => {
-                setDemoStarted(true);
-                // Retry early warning check after a short delay
-                setTimeout(() => {
-                  patientApi
-                    .getEarlyWarningSummary()
-                    .then((data) => {
-                      if (!cancelled) setSummary(data);
-                    })
-                    .catch(() => {
-                      if (!cancelled)
-                        setError(
-                          "Demo running... Early warning data will appear shortly. Refresh this page in 30-60 seconds."
-                        );
-                    });
-                }, 3000);
-              });
-            } else {
-              setError(err.response?.data?.error ?? "Waiting for demo data...");
+          if (err.response?.status === 404 && !demoStarted) {
+            // Auto-start demo
+            setError("No biometric data. Starting demo simulation...");
+            try {
+              await patientApi.startDemoStream(300, 30);
+              setDemoStarted(true);
+              // Retry after delay
+              setTimeout(() => loadData(), 3000);
+            } catch (demoErr) {
+              setError("Failed to start demo. Try submitting biometrics on the dashboard.");
             }
-          } else if (err.response?.status === 503) {
-            setError("Early warning service is temporarily unavailable. Try again later.");
-          } else if (err.response?.status === 400) {
-            setError(err.response?.data?.error ?? "Invalid request. Submit biometrics on the dashboard first.");
           } else {
-            setError("Failed to load Early Warning summary. Please try again.");
+            setError(err.response?.data?.error ?? "Unable to load early warning data.");
           }
         }
       } finally {
         if (!cancelled) setLoading(false);
       }
-    })();
+    };
+
+    loadData();
     return () => { cancelled = true; };
-  }, []);
+  }, [demoStarted]);
 
   return (
     <RoleGuard allowedRoles={[UserRole.PATIENT]}>
@@ -98,165 +80,135 @@ export default function EarlyWarningPage() {
             </div>
 
             <p className="text-sm text-[var(--muted)] mb-6 max-w-2xl">
-              Resting heart rate, HRV, sleep, activity, single-lead ECG, and temperature trend are combined with
-              validated risk models (Framingham, QRISK3) and a custom ML model. Not a medical diagnosis — for
-              informational purposes only. Always follow clinical advice.
+              AI-powered health analysis combining resting heart rate, HRV, sleep, activity, ECG rhythm, and temperature trend
+              with validated risk models (Framingham, QRISK3). Not a medical diagnosis — for informational purposes only.
             </p>
 
             {loading && (
               <div className="py-12 text-center text-[var(--muted)]">Loading your Early Warning summary…</div>
             )}
 
-            {error && !loading && (
+            {error && !loading && !data && (
               <Card className="mb-8">
                 <div className="py-6 text-center space-y-4">
                   <p className="text-[var(--muted)]">{error}</p>
-                  <p className="text-sm text-[var(--muted)] max-w-md mx-auto">
-                    To see the full Early Warning demo with risk scores and baselines, submit biometrics on the dashboard, or run the seed with history: in <code className="bg-slate-100 px-1 rounded">apps/backend</code> run{" "}
-                    <code className="bg-slate-100 px-1 rounded text-xs">MOCK_WITH_HISTORY=1 MOCK_PATIENT_COUNT=50 pnpm run seed:mock-patients</code>, then log in as <code className="bg-slate-100 px-1 rounded">patient_0001@mock.ahava.test</code> / <code className="bg-slate-100 px-1 rounded">MockPatient1!</code>.
-                  </p>
                   <Link
                     href="/patient/dashboard"
                     className="btn-primary inline-block px-4 py-2 rounded-xl font-medium"
                   >
-                    Go to dashboard & submit biometrics
+                    Go to dashboard
                   </Link>
                 </div>
               </Card>
             )}
 
-            {summary && !loading && (
-              <>
-                {/* Alert level & fusion message */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Status</CardTitle>
-                    </CardHeader>
-                    <div className="flex items-center justify-between flex-wrap gap-4">
-                      <StatusBadge
-                        variant={
-                          summary.alert_level === "GREEN"
-                            ? "success"
-                            : summary.alert_level === "YELLOW"
-                              ? "warning"
-                              : "danger"
-                        }
-                      >
-                        {summary.alert_level}
-                      </StatusBadge>
-                      <span className="text-sm text-[var(--muted)]">
-                        Last updated: {new Date(summary.processed_at).toLocaleString()}
+            {data && !loading && (
+              <div className="space-y-6">
+                {/* Risk Level */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Health Status</CardTitle>
+                  </CardHeader>
+                  <div className="p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-[var(--muted)]">Risk Level</span>
+                      <span className={`font-bold px-3 py-1 rounded-full text-white ${
+                        data.riskLevel === 'high' ? 'bg-red-500' :
+                        data.riskLevel === 'moderate' ? 'bg-yellow-500' :
+                        'bg-green-500'
+                      }`}>
+                        {data.riskLevel?.toUpperCase() || 'STABLE'}
                       </span>
                     </div>
-                    {summary.fusion.alert_triggered && summary.fusion.alert_message && (
-                      <div className="mt-4 p-4 rounded-lg bg-amber-50 border border-amber-200">
-                        <p className="text-sm font-medium text-amber-900">{summary.fusion.alert_message}</p>
-                      </div>
-                    )}
-                  </Card>
-
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Risk trajectory</CardTitle>
-                    </CardHeader>
-                    <p className="text-sm text-[var(--muted)] mb-2">
-                      If current trends persist, estimated 2-year cardiovascular risk:
-                    </p>
-                    <p className="text-2xl font-bold text-[var(--foreground)]">
-                      {summary.fusion.trajectory_risk_2y_pct != null
-                        ? `${summary.fusion.trajectory_risk_2y_pct}%`
-                        : "—"}
-                    </p>
-                  </Card>
-                </div>
-
-                {/* Current metrics */}
-                <Card className="mb-8">
-                  <CardHeader>
-                    <CardTitle>Current metrics (from latest reading)</CardTitle>
-                  </CardHeader>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                    <div>
-                      <MetricRow
-                        label="Resting heart rate"
-                        value={summary.heart_rate_resting}
-                        unit="bpm"
-                        baseline={summary.hr_baseline != null ? `${summary.hr_baseline} bpm` : undefined}
-                      />
-                      <MetricRow label="Heart rate variability" value={summary.hrv_rmssd} unit="ms" baseline={summary.hrv_baseline != null ? `${summary.hrv_baseline} ms` : undefined} />
-                      <MetricRow label="Blood oxygen (SpO₂)" value={summary.spo2} unit="%" />
-                    </div>
-                    <div>
-                      <MetricRow label="Sleep duration" value={summary.sleep_duration_hours ? `${summary.sleep_duration_hours} h/night` : "—"} />
-                      <MetricRow label="Activity (steps)" value={summary.step_count ?? "—"} />
-                      <MetricRow label="ECG (single-lead)" value={summary.ecg_rhythm} />
-                    </div>
-                    <div>
-                      <MetricRow label="Temperature trend" value={summary.temperature_trend.replace(/_/g, " ")} />
-                      {summary.hr_trend_2w && (
-                        <MetricRow label="HR trend (2 weeks)" value={summary.hr_trend_2w} />
-                      )}
-                      {summary.sleep_pattern && (
-                        <MetricRow label="Sleep pattern" value={summary.sleep_pattern} />
-                      )}
-                    </div>
                   </div>
                 </Card>
-
-                {/* Risk scores */}
-                <Card className="mb-8">
-                  <CardHeader>
-                    <CardTitle>10-year cardiovascular risk</CardTitle>
-                  </CardHeader>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="p-4 rounded-lg border bg-slate-50/50" style={{ borderColor: "var(--border)" }}>
-                      <p className="text-xs font-medium text-[var(--muted)] uppercase tracking-wide">Framingham (adapted)</p>
-                      <p className="text-xl font-bold text-[var(--foreground)] mt-1">{summary.risk_scores.framingham_10y_pct}%</p>
-                    </div>
-                    <div className="p-4 rounded-lg border bg-slate-50/50" style={{ borderColor: "var(--border)" }}>
-                      <p className="text-xs font-medium text-[var(--muted)] uppercase tracking-wide">QRISK3 (adapted)</p>
-                      <p className="text-xl font-bold text-[var(--foreground)] mt-1">{summary.risk_scores.qrisk3_10y_pct}%</p>
-                    </div>
-                    <div className="p-4 rounded-lg border bg-slate-50/50" style={{ borderColor: "var(--border)" }}>
-                      <p className="text-xs font-medium text-[var(--muted)] uppercase tracking-wide">ML model</p>
-                      <p className="text-xl font-bold text-[var(--foreground)] mt-1">{summary.risk_scores.ml_cvd_risk_pct}%</p>
-                      <p className="text-xs text-[var(--muted)]">{(summary.risk_scores.ml_confidence * 100).toFixed(0)}% confidence</p>
-                    </div>
-                  </div>
-                </Card>
-
-                {/* Clinical flags & anomalies */}
-                {(summary.clinical_flags.length > 0 || summary.anomalies.length > 0) && (
-                  <Card className="mb-8">
-                    <CardHeader>
-                      <CardTitle>Clinical flags &amp; anomalies</CardTitle>
-                    </CardHeader>
-                    <ul className="list-disc list-inside space-y-1 text-sm text-[var(--foreground)]">
-                      {summary.clinical_flags.map((f, i) => (
-                        <li key={`flag-${i}`}>{f}</li>
-                      ))}
-                      {summary.anomalies.map((a, i) => (
-                        <li key={`anom-${i}`}>{a}</li>
-                      ))}
-                    </ul>
-                  </Card>
-                )}
 
                 {/* Recommendations */}
-                {summary.recommendations.length > 0 && (
+                {data.recommendations && data.recommendations.length > 0 && (
                   <Card>
                     <CardHeader>
                       <CardTitle>Recommendations</CardTitle>
                     </CardHeader>
-                    <ul className="list-disc list-inside space-y-2 text-sm text-[var(--foreground)]">
-                      {summary.recommendations.map((r, i) => (
-                        <li key={i}>{r}</li>
-                      ))}
-                    </ul>
+                    <div className="p-4">
+                      <ul className="space-y-2">
+                        {data.recommendations.map((rec: string, i: number) => (
+                          <li key={i} className="flex items-start gap-2">
+                            <span className="text-[var(--primary)] font-bold mt-1">•</span>
+                            <span className="text-sm text-[var(--foreground)]">{rec}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   </Card>
                 )}
-              </>
+
+                {/* Trend Analysis */}
+                {data.trendAnalysis && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Trend Analysis</CardTitle>
+                    </CardHeader>
+                    <div className="p-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <div className="p-3 rounded-lg bg-slate-50">
+                          <div className="text-xs text-[var(--muted)] mb-1">Heart Rate</div>
+                          <div className="font-semibold text-[var(--foreground)]">
+                            {data.trendAnalysis.heartRate || 'Stable'}
+                          </div>
+                        </div>
+                        <div className="p-3 rounded-lg bg-slate-50">
+                          <div className="text-xs text-[var(--muted)] mb-1">Blood Oxygen</div>
+                          <div className="font-semibold text-[var(--foreground)]">
+                            {data.trendAnalysis.oxygenSaturation || 'Normal'}
+                          </div>
+                        </div>
+                        <div className="p-3 rounded-lg bg-slate-50">
+                          <div className="text-xs text-[var(--muted)] mb-1">Sleep Quality</div>
+                          <div className="font-semibold text-[var(--foreground)]">
+                            {data.trendAnalysis.sleepQuality || 'Calibrating'}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+                )}
+
+                {/* Current Metrics */}
+                {data.baselineMetrics && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Current Biometrics</CardTitle>
+                    </CardHeader>
+                    <div className="p-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <div>
+                          <MetricRow label="Heart Rate (resting)" value={Math.round(data.baselineMetrics.heart_rate_resting || 0)} unit="bpm" />
+                          <MetricRow label="HRV (RMSSD)" value={Math.round(data.baselineMetrics.hrv_rmssd || 0)} unit="ms" />
+                          <MetricRow label="Blood Oxygen" value={Math.round(data.baselineMetrics.spo2 || 0)} unit="%" />
+                        </div>
+                        <div>
+                          <MetricRow label="Respiratory Rate" value={Math.round(data.baselineMetrics.respiratory_rate || 0)} unit="/min" />
+                          <MetricRow label="Sleep" value={data.baselineMetrics.sleep_duration_hours ? `${data.baselineMetrics.sleep_duration_hours.toFixed(1)}h` : "—"} />
+                          <MetricRow label="Steps" value={data.baselineMetrics.step_count || 0} />
+                        </div>
+                        <div>
+                          <MetricRow label="Active Calories" value={Math.round(data.baselineMetrics.active_calories || 0)} />
+                          <MetricRow label="Skin Temp Offset" value={data.baselineMetrics.skin_temp_offset?.toFixed(1)} unit="°C" />
+                          <MetricRow label="ECG Rhythm" value={data.baselineMetrics.ecg_rhythm || 'Unknown'} />
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+                )}
+
+                {/* Disclaimer */}
+                <div className="p-4 rounded-lg bg-blue-50 border border-blue-200">
+                  <p className="text-xs text-blue-900">
+                    <strong>Important:</strong> This is not a medical diagnosis. AI analysis is for informational purposes only.
+                    Always consult with a healthcare provider for medical advice.
+                  </p>
+                </div>
+              </div>
             )}
           </div>
         </div>
