@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import {
   Container,
   Paper,
@@ -16,8 +17,15 @@ import {
   LinearProgress,
 } from '@mui/material';
 import { useAuth } from '../AuthContext';
-import authApi from '../lib/api';
-import ErrorAlert from '../ErrorAlert';
+
+const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:4000';
+
+// Simple error alert component
+const ErrorAlert = ({ message }: { message: string }) => (
+  <Alert severity="error" sx={{ mb: 3 }}>
+    {message}
+  </Alert>
+);
 
 interface RiskScore {
   framinghamRisk?: number;
@@ -75,17 +83,20 @@ export default function EarlyWarningPage() {
   const loadEarlyWarningData = async () => {
     try {
       setError(null);
+      const token = localStorage.getItem('token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
       // Fetch risk scores
-      const riskResponse = await authApi.get(`/patient/early-warning`);
+      const riskResponse = await axios.get(`${API_BASE_URL}/api/patient/early-warning`, { headers });
       setRiskData(riskResponse.data);
 
       // Fetch biometric history
-      const bioResponse = await authApi.get(`/patient/biometrics/history?limit=10`);
+      const bioResponse = await axios.get(`${API_BASE_URL}/api/patient/biometrics/history?limit=10`, { headers });
       setBiometrics(bioResponse.data);
 
       // Fetch baseline info
       try {
-        const baselineResponse = await authApi.get(`/patient/baseline-info`);
+        const baselineResponse = await axios.get(`${API_BASE_URL}/api/patient/baseline-info`, { headers });
         setBaselineInfo(baselineResponse.data);
       } catch (e) {
         console.warn('Baseline info not available');
@@ -93,7 +104,7 @@ export default function EarlyWarningPage() {
 
       // Fetch anomaly timeline
       try {
-        const timelineResponse = await authApi.get(`/patient/anomaly-timeline?limit=30&days=30`);
+        const timelineResponse = await axios.get(`${API_BASE_URL}/api/patient/anomaly-timeline?limit=30&days=30`, { headers });
         setTimeline(timelineResponse.data);
       } catch (e) {
         console.warn('Timeline not available');
@@ -237,10 +248,10 @@ export default function EarlyWarningPage() {
         </Box>
       )}
 
-      <Grid container spacing={3}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: 'repeat(3, 1fr)' }, gap: 2, mb: 3 }}>
         {/* Baseline Status */}
         {riskData?.baselineStatus && (
-          <Grid item xs={12} sm={6}>
+          <Box>
             <Card sx={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}>
               <CardContent>
                 <Typography color="textSecondary" gutterBottom sx={{ color: 'white' }}>
@@ -256,12 +267,12 @@ export default function EarlyWarningPage() {
                 </Typography>
               </CardContent>
             </Card>
-          </Grid>
+          </Box>
         )}
 
         {/* Readiness Score */}
         {riskData?.readinessScore !== undefined && (
-          <Grid item xs={12} sm={6}>
+          <Box>
             <Card sx={{ background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)' }}>
               <CardContent>
                 <Typography color="textSecondary" gutterBottom sx={{ color: 'white' }}>
@@ -288,12 +299,12 @@ export default function EarlyWarningPage() {
                 </Box>
               </CardContent>
             </Card>
-          </Grid>
+          </Box>
         )}
 
         {/* Framingham Risk */}
         {riskData?.framinghamRisk !== undefined && (
-          <Grid item xs={12} sm={4}>
+          <Box>
             <Card>
               <CardContent>
                 <Typography color="textSecondary" gutterBottom>
@@ -307,12 +318,12 @@ export default function EarlyWarningPage() {
                 </Typography>
               </CardContent>
             </Card>
-          </Grid>
+          </Box>
         )}
 
         {/* QRISK3 Risk */}
         {riskData?.qrisk3Risk !== undefined && (
-          <Grid item xs={12} sm={4}>
+          <Box>
             <Card>
               <CardContent>
                 <Typography color="textSecondary" gutterBottom>
@@ -326,12 +337,12 @@ export default function EarlyWarningPage() {
                 </Typography>
               </CardContent>
             </Card>
-          </Grid>
+          </Box>
         )}
 
         {/* ML Model Risk */}
         {riskData?.mlRisk !== undefined && (
-          <Grid item xs={12} sm={4}>
+          <Box>
             <Card sx={{ border: '2px solid #388e3c' }}>
               <CardContent>
                 <Typography color="textSecondary" gutterBottom>
@@ -345,12 +356,13 @@ export default function EarlyWarningPage() {
                 </Typography>
               </CardContent>
             </Card>
-          </Grid>
+          </Box>
         )}
+      </Box>
 
-        {/* Anomalies & Alerts */}
-        {riskData?.anomalies && riskData.anomalies.length > 0 && (
-          <Grid item xs={12}>
+      {/* Anomalies & Alerts */}
+      {riskData?.anomalies && riskData.anomalies.length > 0 && (
+        <Box sx={{ mb: 3 }}>
             <Card sx={{ backgroundColor: '#fff3cd' }}>
               <CardContent>
                 <Typography variant="h6" gutterBottom>
@@ -369,12 +381,12 @@ export default function EarlyWarningPage() {
                 </Box>
               </CardContent>
             </Card>
-          </Grid>
+          </Box>
         )}
 
         {/* IMPROVEMENT #1: Smart Recommendations */}
         {riskData?.recommendations && riskData.recommendations.length > 0 && (
-          <Grid item xs={12}>
+          <Box sx={{ mb: 3 }}>
             <Card sx={{ 
               backgroundColor: riskData.alertLevel === 'RED' ? '#ffebee' : '#fff3e0',
               borderLeft: `4px solid ${riskData.alertLevel === 'RED' ? '#d32f2f' : '#ff9800'}`
@@ -400,12 +412,12 @@ export default function EarlyWarningPage() {
                 </List>
               </CardContent>
             </Card>
-          </Grid>
+          </Box>
         )}
 
         {/* IMPROVEMENT #2: Anomaly Timeline */}
         {timeline.length > 0 && (
-          <Grid item xs={12}>
+          <Box sx={{ mb: 3 }}>
             <Card sx={{ mb: 3 }}>
               <CardContent>
                 <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -494,12 +506,12 @@ export default function EarlyWarningPage() {
                 </Box>
               </CardContent>
             </Card>
-          </Grid>
+          </Box>
         )}
 
         {/* Recent Biometrics */}
         {biometrics.length > 0 && (
-          <Grid item xs={12}>
+          <Box sx={{ mb: 3 }}>
             <Card>
               <CardContent>
                 <Typography variant="h6" gutterBottom>
@@ -559,19 +571,18 @@ export default function EarlyWarningPage() {
                 </Box>
               </CardContent>
             </Card>
-          </Grid>
+          </Box>
         )}
 
         {/* Info Box */}
-        <Grid item xs={12}>
+        <Box sx={{ mb: 3 }}>
           <Alert severity="info">
             <strong>How it works:</strong> Our ML Early Warning service continuously monitors
             your biometrics against personalized baselines. It uses Framingham and QRISK3
             algorithms combined with machine learning to predict cardiovascular risk and alert
             you to potential health concerns before they become critical.
           </Alert>
-        </Grid>
-      </Grid>
+        </Box>
     </Container>
   );
 }
