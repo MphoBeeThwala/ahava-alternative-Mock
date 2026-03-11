@@ -1,5 +1,6 @@
-# Frontend service configuration
-# Uses root Dockerfile which properly handles pnpm monorepo structure
+# Backend service configuration
+# Uses backend Dockerfile for Express.js API server
 [build]
 builder = "DOCKERFILE"
-dockerfilePath = "Dockerfile"
+dockerfilePath = "apps/backend/Dockerfile"
+buildContext = "."
