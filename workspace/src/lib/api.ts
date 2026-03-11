@@ -203,35 +203,54 @@ export interface BiometricReading {
 }
 
 export interface EarlyWarningSummary {
-  user_id: string;
-  processed_at: string;
-  heart_rate_resting: number;
-  hrv_rmssd: number;
-  spo2: number;
-  sleep_duration_hours: number;
-  step_count: number;
-  ecg_rhythm: string;
-  temperature_trend: string;
+  // Required fields from fallback or ML response
+  riskLevel?: string;
+  alert_level?: 'GREEN' | 'YELLOW' | 'RED';
+  recommendations?: string[];
+  
+  // Trend analysis from fallback or ML response
+  trendAnalysis?: {
+    heartRate?: string;
+    oxygenSaturation?: string;
+    sleepQuality?: string;
+  };
+  
+  // Baseline metrics or current biometrics
+  baselineMetrics?: {
+    timestamp?: string;
+    heart_rate_resting?: number;
+    hrv_rmssd?: number;
+    spo2?: number;
+    skin_temp_offset?: number;
+    respiratory_rate?: number;
+    step_count?: number;
+    active_calories?: number;
+    sleep_duration_hours?: number;
+    ecg_rhythm?: string;
+    temperature_trend?: string;
+  };
+  
+  // Optional ML-specific fields
+  user_id?: string;
+  processed_at?: string;
   hr_baseline?: number;
   hrv_baseline?: number;
   hr_trend_2w?: string;
   hrv_vs_baseline?: string;
   sleep_pattern?: string;
-  risk_scores: {
-    framingham_10y_pct: number;
-    qrisk3_10y_pct: number;
-    ml_cvd_risk_pct: number;
-    ml_confidence: number;
+  risk_scores?: {
+    framingham_10y_pct?: number;
+    qrisk3_10y_pct?: number;
+    ml_cvd_risk_pct?: number;
+    ml_confidence?: number;
   };
-  fusion: {
+  fusion?: {
     trajectory_risk_2y_pct?: number;
-    alert_triggered: boolean;
+    alert_triggered?: boolean;
     alert_message?: string;
   };
-  clinical_flags: string[];
-  alert_level: 'GREEN' | 'YELLOW' | 'RED';
-  anomalies: string[];
-  recommendations: string[];
+  clinical_flags?: string[];
+  anomalies?: string[];
 }
 
 export interface RiskProfile {

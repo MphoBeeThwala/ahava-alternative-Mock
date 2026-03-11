@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import RoleGuard, { UserRole } from "../../../components/RoleGuard";
-import { patientApi } from "../../../lib/api";
+import { patientApi, EarlyWarningSummary } from "../../../lib/api";
 import DashboardLayout from "../../../components/DashboardLayout";
 import { Card, CardHeader, CardTitle } from "../../../components/ui/Card";
 
@@ -21,7 +21,7 @@ function MetricRow({ label, value, unit }: { label: string; value: string | numb
 }
 
 export default function EarlyWarningPage() {
-  const [data, setData] = useState<Record<string, unknown> | null>(null);
+  const [data, setData] = useState<EarlyWarningSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [demoStarted, setDemoStarted] = useState(false);
@@ -33,7 +33,7 @@ export default function EarlyWarningPage() {
       try {
         setError(null);
         const result = await patientApi.getEarlyWarningSummary();
-        if (!cancelled) setData(result as unknown as Record<string, unknown>);
+        if (!cancelled) setData(result as EarlyWarningSummary);
       } catch (e: unknown) {
         const err = e as { response?: { status: number; data?: { error?: string } } };
         if (!cancelled) {
@@ -117,7 +117,7 @@ export default function EarlyWarningPage() {
                         data.riskLevel === 'moderate' ? 'bg-yellow-500' :
                         'bg-green-500'
                       }`}>
-                        {data.riskLevel?.toUpperCase() || 'STABLE'}
+                        {String(data.riskLevel ?? 'STABLE').toUpperCase()}
                       </span>
                     </div>
                   </div>
