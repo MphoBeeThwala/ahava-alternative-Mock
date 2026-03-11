@@ -727,9 +727,13 @@ router.get('/anomaly-timeline', authMiddleware, async (req: AuthenticatedRequest
 
 // POST /api/patient/demo/start-stream
 // DEMO ONLY - Streams realistic biometric progression for investor demo
-// Works in production but requires authentication
-router.post('/demo/start-stream', authMiddleware, async (req: AuthenticatedRequest, res) => {
-  const userId = req.user!.id;
+// Works in production but requires authentication (applied by app.use mount)
+router.post('/demo/start-stream', async (req: AuthenticatedRequest, res) => {
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
   const { durationSeconds = 300, intervalSeconds = 30 } = req.query;
 
   try {
