@@ -1,0 +1,11 @@
+# Frontend service configuration
+# Uses Dockerfile in workspace for Next.js app
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "workspace/Dockerfile"
+buildContext = "."
+
+[deploy]
+startCommand = "node server.js"
+healthcheckPath = "/health"
+healthcheckTimeout = 100
