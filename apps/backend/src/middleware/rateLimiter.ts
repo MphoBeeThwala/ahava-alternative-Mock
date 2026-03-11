@@ -1,4 +1,4 @@
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 
 // General API rate limiter. In development allow 10k/15min so load-test (1000 users × 4 req) works without LOAD_TEST=1.
 const generalMax = process.env.LOAD_TEST === '1' ? 50000 : (process.env.NODE_ENV === 'production' ? 100 : 10000);
@@ -10,9 +10,9 @@ export const rateLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  // Behind proxy (Railway): use X-Forwarded-For but skip validation warnings
+  // Behind proxy (Railway): use proper IPv6-safe IP extraction
   skip: (req) => process.env.NODE_ENV === 'development' && !req.ip,
-  keyGenerator: (req) => req.ip || req.socket.remoteAddress || 'unknown',
+  keyGenerator: ipKeyGenerator,
 });
 
 // Strict rate limiter for auth endpoints (relaxed in dev so load-test can run 1000 logins)
@@ -24,9 +24,9 @@ export const authRateLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  // Behind proxy: use X-Forwarded-For
+  // Behind proxy: use proper IPv6-safe IP extraction
   skip: (req) => process.env.NODE_ENV === 'development' && !req.ip,
-  keyGenerator: (req) => req.ip || req.socket.remoteAddress || 'unknown',
+  keyGenerator: ipKeyGenerator,
 });
 
 // Webhook rate limiter (more lenient)
@@ -38,7 +38,7 @@ export const webhookRateLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  // Behind proxy: use X-Forwarded-For
+  // Behind proxy: use proper IPv6-safe IP extraction
   skip: (req) => process.env.NODE_ENV === 'development' && !req.ip,
-  keyGenerator: (req) => req.ip || req.socket.remoteAddress || 'unknown',
+  keyGenerator: ipKeyGenerator,
 });
