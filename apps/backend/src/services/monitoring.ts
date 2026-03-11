@@ -68,8 +68,8 @@ export async function processBiometricReading(
     const readinessScore = scoreResponse.data.score || 100;
     const baselineStatus = scoreResponse.data.baseline_status || 'STABLE';
 
-    // Generate recommendations based on alert level
-    const recommendations = generateRecommendations(alertLevel, anomalies, baselineStatus);
+    // Generate recommendations based on alert level and actual biometric values
+    const recommendations = generateRecommendations(alertLevel, anomalies, baselineStatus, biometricData);
 
     return {
       alertLevel,
@@ -89,46 +89,95 @@ export async function processBiometricReading(
 
 /**
  * Generate health recommendations based on alert level
+ * IMPROVED: Now returns specific, actionable guidance per anomaly type
  */
 function generateRecommendations(
   alertLevel: 'GREEN' | 'YELLOW' | 'RED',
   anomalies: string[],
-  baselineStatus: string
+  baselineStatus: string,
+  biometricData?: any
 ): string[] {
   const recommendations: string[] = [];
 
   if (baselineStatus === 'CALIBRATING') {
-    recommendations.push('Baseline establishment in progress. Continue regular monitoring.');
+    recommendations.push('📊 Baseline establishment in progress. Continue regular monitoring.');
+    recommendations.push(`Your baseline will be complete after 14 days of consistent data.`);
     return recommendations;
   }
 
-  if (alertLevel === 'RED') {
-    recommendations.push('⚠️ CRITICAL: Seek immediate medical attention');
-    recommendations.push('Contact your healthcare provider or visit emergency services');
-    
-    if (anomalies.some(a => a.includes('heart_rate'))) {
-      recommendations.push('Heart rate anomaly detected - may indicate cardiovascular stress');
+  if (alertLevel === 'GREEN') {
+    recommendations.push('✓ Your metrics look good. Keep up your current routine.');
+    return recommendations;
+  }
+
+  // ===== Heart Rate Specific =====
+  if (anomalies.some(a => a.includes('heart_rate'))) {
+    if (biometricData?.heartRate > 85) {
+      recommendations.push('🔴 Resting heart rate elevated (+15% from baseline)');
+      recommendations.push('   → Reduce caffeine & stress, get 8 hours sleep');
+      recommendations.push('   → Take deep breathing breaks (5 min, 3x/day)');
+    } else if (biometricData?.heartRate < 50) {
+      recommendations.push('🔴 URGENT: Resting heart rate critically low (bradycardia)');
+      recommendations.push('   → Seek medical attention - may indicate serious condition');
+    } else {
+      recommendations.push('⚠️ Heart rate deviations detected');
+      recommendations.push('   → Monitor closely, rest for next hour');
     }
-    if (anomalies.some(a => a.includes('spo2') || a.includes('oxygen'))) {
-      recommendations.push('Oxygen saturation low - may indicate respiratory issues');
+  }
+
+  // ===== HRV Specific =====
+  if (anomalies.some(a => a.includes('hrv'))) {
+    recommendations.push('⚠️ Heart Rate Variability below normal (-20% from baseline)');
+    recommendations.push('   → Indicates: High stress, poor recovery, or infection');
+    recommendations.push('   → Action: Reduce activity, increase rest (48 hours)');
+  }
+
+  // ===== SpO2 Specific =====
+  if (anomalies.some(a => a.includes('spo2') || a.includes('oxygen'))) {
+    if (biometricData?.spo2 < 92) {
+      recommendations.push('🔴 CRITICAL: Oxygen saturation dangerously low (<92%)');
+      recommendations.push('   → CALL 911 or seek immediate emergency care');
+      recommendations.push('   → Check for: breathing difficulty, chest pain, dizziness');
+    } else if (biometricData?.spo2 < 95) {
+      recommendations.push('⚠️ Oxygen saturation below normal (95%)');
+      recommendations.push('   → May indicate: Respiratory infection or lung issue');
+      recommendations.push('   → See doctor if combined with cough or breathing difficulty');
     }
-    if (anomalies.some(a => a.includes('respiratory'))) {
-      recommendations.push('Respiratory rate elevated - monitor for signs of infection');
+  }
+
+  // ===== Respiratory Rate Specific =====
+  if (anomalies.some(a => a.includes('respiratory'))) {
+    if (biometricData?.respiratoryRate > 20) {
+      recommendations.push('⚠️ Rapid breathing detected (+25% from baseline)');
+      recommendations.push('   → Can indicate: Anxiety, infection, or physical exertion');
+      recommendations.push('   → Monitor for other symptoms (fever, cough, chest pain)');
     }
-  } else if (alertLevel === 'YELLOW') {
-    recommendations.push('⚠️ WARNING: Biometric deviations detected');
-    recommendations.push('Monitor symptoms closely and consider consulting healthcare provider');
-    recommendations.push('Continue regular monitoring and report any worsening symptoms');
-    
-    if (anomalies.some(a => a.includes('heart_rate'))) {
-      recommendations.push('Heart rate variations detected - rest and monitor');
+  }
+
+  // ===== Temperature Specific =====
+  if (biometricData?.temperature > 37.5) {
+    recommendations.push('🔴 Fever detected (38.0°C / 100.4°F)');
+    recommendations.push('   → Sign of infection - likely bacterial or viral');
+    recommendations.push('   → Action: Stay hydrated, rest, monitor symptoms');
+    recommendations.push('   → See doctor if temp >39.5°C or persists >3 days');
+  }
+
+  // ===== Multiple Anomalies - High Risk =====
+  if (anomalies.length > 2 && alertLevel === 'RED') {
+    recommendations.unshift('🚨 MULTIPLE ANOMALIES DETECTED:');
+    recommendations.push('   → Your body is showing significant stress');
+    recommendations.push('   → STRONGLY recommend medical consultation within 24 hours');
+  }
+
+  // Default message if no specific recommendations
+  if (recommendations.length === 0) {
+    if (alertLevel === 'YELLOW') {
+      recommendations.push('📊 One or more metrics slightly elevated.');
+      recommendations.push('   → Monitor closely over next 24-48 hours.');
+    } else if (alertLevel === 'RED') {
+      recommendations.push('🚨 Multiple metrics significantly abnormal.');
+      recommendations.push('   → Consider consulting healthcare provider today.');
     }
-    if (anomalies.some(a => a.includes('hrv'))) {
-      recommendations.push('Heart rate variability decreased - may indicate stress or fatigue');
-    }
-  } else {
-    recommendations.push('✅ Biometrics within normal range');
-    recommendations.push('Continue regular monitoring');
   }
 
   return recommendations;
@@ -183,7 +232,7 @@ function fallbackAnalysis(biometricData: any): MonitoringResult {
     anomalies,
     readinessScore: alertLevel === 'GREEN' ? 100 : alertLevel === 'YELLOW' ? 70 : 40,
     baselineStatus: 'STABLE',
-    recommendations: generateRecommendations(alertLevel, anomalies, 'STABLE'),
+    recommendations: generateRecommendations(alertLevel, anomalies, 'STABLE', biometricData),
   };
 }
 

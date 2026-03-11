@@ -9,7 +9,45 @@ import DashboardLayout from '../../../components/DashboardLayout';
 import { Card } from '../../../components/ui/Card';
 import { KpiCard } from '../../../components/ui/KpiCard';
 import { Modal } from '../../../components/ui/Modal';
+import { Modal } from '../../../components/ui/Modal';
 import { StatusBadge } from '../../../components/ui/StatusBadge';
+
+// Helper function to calculate urgency level based on time (IMPROVEMENT #3)
+function getUrgencyLevel(createdAt: string): { level: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT'; color: string; hoursAgo: number; label: string } {
+  const created = new Date(createdAt).getTime();
+  const now = new Date().getTime();
+  const hoursAgo = Math.floor((now - created) / (1000 * 60 * 60));
+
+  let level: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT' = 'LOW';
+  let color = '#4caf50'; // green
+  let label = 'ROUTINE';
+
+  if (hoursAgo >= 24) {
+    level = 'URGENT';
+    color = '#d32f2f'; // red
+    label = '[URGENT]';
+  } else if (hoursAgo >= 6) {
+    level = 'HIGH';
+    color = '#ff6f00'; // orange
+    label = '[HIGH]';
+  } else if (hoursAgo >= 1) {
+    level = 'MEDIUM';
+    color = '#fbc02d'; // yellow
+    label = '[MEDIUM]';
+  } else {
+    label = '[NEW]';
+  }
+
+  return { level, color, hoursAgo, label };
+}
+
+function formatTimeAgo(hours: number): string {
+  if (hours === 0) return 'just now';
+  if (hours < 1) return '< 1 hour ago';
+  if (hours === 1) return '1 hour ago';
+  if (hours < 24) return `${hours} hours ago`;
+  return `${Math.floor(hours / 24)} days ago`;
+}
 
 export default function DoctorDashboard() {
     const { user } = useAuth();
@@ -128,20 +166,29 @@ export default function DoctorDashboard() {
                     <section className="mb-10">
                         <h2 className="text-xl font-bold text-[var(--foreground)] mb-4">AI Triage Queue (remote)</h2>
                         <div className="grid gap-6">
-                            {triageCases.map((tc) => (
-                                <Card key={tc.id}>
+                            {triageCases.map((tc) => {
+                              const { level, color, hoursAgo, label } = getUrgencyLevel(tc.createdAt);
+                              
+                              return (
+                                <Card key={tc.id} style={{ borderLeft: `4px solid ${color}` }}>
                                     <div className="flex justify-between items-start mb-4">
                                         <div>
                                             <h3 className="text-xl font-bold text-[var(--foreground)]">
-                                                {tc.patient?.firstName} {tc.patient?.lastName}
+                                                {label} {tc.patient?.firstName} {tc.patient?.lastName}
                                             </h3>
                                             <p className="text-sm text-[var(--muted)]">
-                                                {new Date(tc.createdAt).toLocaleString()}
+                                                {formatTimeAgo(hoursAgo)} • {tc.specialty || 'General'}
                                             </p>
                                         </div>
-                                        <StatusBadge variant={tc.aiTriageLevel <= 2 ? 'danger' : 'warning'}>
-                                            Level {tc.aiTriageLevel}
-                                        </StatusBadge>
+                                        <div style={{ 
+                                          backgroundColor: color, 
+                                          color: 'white',
+                                          padding: '8px 12px',
+                                          borderRadius: '6px',
+                                          fontWeight: 'bold'
+                                        }}>
+                                          {level}
+                                        </div>
                                     </div>
                                     <p className="text-slate-700 mb-2"><strong>Symptoms:</strong> {tc.symptoms}</p>
                                     <p className="text-slate-600 text-sm mb-2"><strong>AI recommendation:</strong> {tc.aiRecommendedAction}</p>
@@ -151,25 +198,28 @@ export default function DoctorDashboard() {
                                         <button
                                             onClick={() => handleApproveTriage(tc.id)}
                                             className="px-4 py-2 rounded-lg font-medium text-white transition"
-                                            style={{ backgroundColor: 'var(--success)' }}
+                                            style={{ backgroundColor: '#4caf50' }}
                                         >
-                                            Approve (agree with AI)
+                                            ✓ Approve
                                         </button>
                                         <button
                                             onClick={() => setOverrideModal({ caseId: tc.id, notes: '', diagnosis: '' })}
-                                            className="px-4 py-2 rounded-lg font-medium text-white transition bg-amber-600 hover:bg-amber-700"
+                                            className="px-4 py-2 rounded-lg font-medium text-white transition"
+                                            style={{ backgroundColor: '#ff9800' }}
                                         >
-                                            Add my diagnosis
+                                            ✎ Diagnose
                                         </button>
                                         <button
                                             onClick={() => setReferModal({ caseId: tc.id, referredTo: '', notes: '' })}
-                                            className="px-4 py-2 rounded-lg font-medium text-white bg-slate-600 hover:bg-slate-700 transition"
+                                            className="px-4 py-2 rounded-lg font-medium text-white transition"
+                                            style={{ backgroundColor: '#2196f3' }}
                                         >
-                                            Refer (in-person / partner)
+                                            📋 Refer
                                         </button>
                                     </div>
                                 </Card>
-                            ))}
+                              );
+                            })}
                         </div>
                     </section>
                 )}

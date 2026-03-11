@@ -5,6 +5,7 @@ import { rateLimiter } from '../middleware/rateLimiter';
 import axios from 'axios';
 import Joi from 'joi';
 import { processBiometricReading, getMonitoringSummary, detectEarlyWarningSigns } from '../services/monitoring';
+import { startDemoStream } from '../services/demoStream';
 
 const router: Router = Router();
 const prisma = new PrismaClient();
@@ -597,6 +598,139 @@ router.post('/triage', rateLimiter, authMiddleware, async (req: AuthenticatedReq
     });
   } catch (error) {
     next(error);
+  }
+});
+
+// GET /api/patient/baseline-info
+// Returns baseline establishment progress (days toward 14-day requirement)
+router.get('/baseline-info', authMiddleware, async (req: AuthenticatedRequest, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+
+    const firstReading = await prisma.biometricReading.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'asc' },
+      select: { createdAt: true }
+    });
+
+    if (!firstReading) {
+      return res.json({ daysEstablished: 0, daysRequired: 14, isComplete: false });
+    }
+
+    const daysDiff = Math.floor(
+      (new Date().getTime() - new Date(firstReading.createdAt).getTime()) / (1000 * 60 * 60 * 24)
+    ) + 1;
+
+    const daysEstablished = Math.min(daysDiff, 14);
+    const isComplete = daysEstablished >= 14;
+
+    res.json({ daysEstablished, daysRequired: 14, isComplete });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to get baseline info' });
+  }
+});
+
+// GET /api/patient/anomaly-timeline
+// Returns daily anomaly timeline (last 30 days)
+router.get('/anomaly-timeline', authMiddleware, async (req: AuthenticatedRequest, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+
+    const limit = Math.min(parseInt(req.query.limit as string) || 30, 100);
+    const daysBack = parseInt(req.query.days as string) || 30;
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+
+    // Get daily summaries (one reading per day, preferring worst alert level)
+    const readings = await prisma.biometricReading.findMany({
+      where: {
+        userId,
+        createdAt: { gte: cutoffDate },
+        alertLevel: { not: 'GREEN' }  // Only non-normal readings
+      },
+      select: {
+        createdAt: true,
+        alertLevel: true,
+        anomalies: true,
+        heartRate: true,
+        oxygenSaturation: true,
+        temperature: true,
+        respiratoryRate: true
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit
+    });
+
+    // Group by day, keeping worst alert level per day
+    const timeline: any[] = [];
+    const dayMap = new Map<string, any>();
+
+    readings.forEach(r => {
+      const day = new Date(r.createdAt).toISOString().split('T')[0];
+      const existing = dayMap.get(day);
+      
+      // Keep RED over YELLOW over GREEN
+      const alertPriority = { 'RED': 3, 'YELLOW': 2, 'GREEN': 1 };
+      if (!existing || alertPriority[r.alertLevel || 'GREEN'] > alertPriority[existing.alertLevel || 'GREEN']) {
+        dayMap.set(day, r);
+      }
+    });
+
+    // Convert to array and sort
+    dayMap.forEach((value, key) => {
+      timeline.push({
+        date: key,
+        alertLevel: value.alertLevel,
+        anomalies: value.anomalies as string[],
+        heartRate: value.heartRate,
+        spo2: value.oxygenSaturation,
+        temperature: value.temperature,
+        respiratoryRate: value.respiratoryRate
+      });
+    });
+
+    timeline.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    res.json(timeline);
+  } catch (e) {
+    console.error('Error loading timeline:', e);
+    res.status(500).json({ error: 'Failed to load timeline' });
+  }
+});
+
+// POST /api/demo/start-stream
+// DEMO ONLY - Streams realistic biometric progression for investor demo
+router.post('/demo/start-stream', async (req, res) => {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(403).json({ error: 'Demo mode disabled in production' });
+  }
+
+  const { userId, durationSeconds = 300, intervalSeconds = 30 } = req.query;
+  
+  if (!userId) {
+    return res.status(400).json({ error: 'userId required' });
+  }
+
+  try {
+    startDemoStream(
+      userId as string,
+      parseInt(durationSeconds as string) || 300,
+      parseInt(intervalSeconds as string) || 30
+    );
+
+    res.json({
+      success: true,
+      message: 'Demo biometric stream started',
+      userId,
+      durationSeconds: parseInt(durationSeconds as string) || 300,
+      intervalSeconds: parseInt(intervalSeconds as string) || 30,
+      note: 'Stream will submit realistic health data every 30 seconds'
+    });
+  } catch (e) {
+    console.error('Error starting demo stream:', e);
+    res.status(500).json({ error: 'Failed to start demo stream' });
   }
 });
 

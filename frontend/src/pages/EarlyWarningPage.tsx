@@ -40,10 +40,28 @@ interface BiometricReading {
   createdAt: string;
 }
 
+interface BaselineInfo {
+  daysEstablished: number;
+  daysRequired: number;
+  isComplete: boolean;
+}
+
+interface TimelineEvent {
+  date: string;
+  alertLevel: 'GREEN' | 'YELLOW' | 'RED';
+  anomalies: string[];
+  heartRate?: number;
+  spo2?: number;
+  temperature?: number;
+  respiratoryRate?: number;
+}
+
 export default function EarlyWarningPage() {
   const { user } = useAuth();
   const [riskData, setRiskData] = useState<RiskScore | null>(null);
   const [biometrics, setBiometrics] = useState<BiometricReading[]>([]);
+  const [baselineInfo, setBaselineInfo] = useState<BaselineInfo | null>(null);
+  const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -64,6 +82,22 @@ export default function EarlyWarningPage() {
       // Fetch biometric history
       const bioResponse = await authApi.get(`/patient/biometrics/history?limit=10`);
       setBiometrics(bioResponse.data);
+
+      // Fetch baseline info
+      try {
+        const baselineResponse = await authApi.get(`/patient/baseline-info`);
+        setBaselineInfo(baselineResponse.data);
+      } catch (e) {
+        console.warn('Baseline info not available');
+      }
+
+      // Fetch anomaly timeline
+      try {
+        const timelineResponse = await authApi.get(`/patient/anomaly-timeline?limit=30&days=30`);
+        setTimeline(timelineResponse.data);
+      } catch (e) {
+        console.warn('Timeline not available');
+      }
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to load Early Warning data');
       console.error('Early Warning Error:', err);
@@ -111,6 +145,36 @@ export default function EarlyWarningPage() {
 
       {error && <ErrorAlert message={error} />}
 
+      {/* IMPROVEMENT #4: Baseline Progress */}
+      {baselineInfo && !baselineInfo.isComplete && (
+        <Paper sx={{ p: 2.5, backgroundColor: '#e3f2fd', borderLeft: '4px solid #2196f3', mb: 3 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
+            <Typography variant="body2" sx={{ fontWeight: 600, color: '#1565c0' }}>
+              📊 Establishing Your Baseline
+            </Typography>
+            <Typography variant="caption" sx={{ backgroundColor: 'white', px: 1.5, py: 0.5, borderRadius: 1 }}>
+              Day {baselineInfo.daysEstablished}/{baselineInfo.daysRequired}
+            </Typography>
+          </Box>
+          <LinearProgress 
+            variant="determinate" 
+            value={(baselineInfo.daysEstablished / baselineInfo.daysRequired) * 100}
+            sx={{ height: 8, borderRadius: 4, mb: 1 }}
+          />
+          <Typography variant="caption" sx={{ color: '#0d47a1', display: 'block' }}>
+            ✓ We're learning your normal patterns. Full early warning alerts will activate on Day 14.
+          </Typography>
+        </Paper>
+      )}
+
+      {baselineInfo?.isComplete && (
+        <Paper sx={{ p: 2, backgroundColor: '#e8f5e9', borderLeft: '4px solid #4caf50', mb: 3 }}>
+          <Typography variant="body2" sx={{ fontWeight: 500, color: '#2e7d32' }}>
+            ✓ Baseline Established - Early warning monitoring is active
+          </Typography>
+        </Paper>
+      )}
+
       {/* Risk Alert Status */}
       {riskData && (
         <Alert
@@ -129,7 +193,51 @@ export default function EarlyWarningPage() {
         </Alert>
       )}
 
-      <Grid container spacing={3}>
+      {/* IMPROVEMENT #5: Demo Stream Button (DEV MODE ONLY) */}
+      {process.env.NODE_ENV !== 'production' && (
+        <Box sx={{ mb: 3, p: 2, backgroundColor: '#f3e5f5', borderRadius: 1, textAlign: 'center' }}>
+          <button
+            onClick={async () => {
+              try {
+                const response = await fetch(`/api/patient/demo/start-stream?userId=${user.id}&duration=300`, {
+                  method: 'POST'
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                  alert('🎬 Demo stream started! Biometrics updating every 30 seconds for 5 minutes');
+                  // Auto-refresh dashboard every 10 seconds during demo
+                  const demoRefresh = setInterval(() => {
+                    loadEarlyWarningData();
+                  }, 10000);
+
+                  // Stop refresh after 5 minutes
+                  setTimeout(() => clearInterval(demoRefresh), 5 * 60 * 1000);
+                }
+              } catch (e) {
+                console.error('Demo stream error:', e);
+              }
+            }}
+            style={{
+              backgroundColor: '#9c27b0',
+              color: 'white',
+              border: 'none',
+              padding: '12px 24px',
+              borderRadius: '8px',
+              fontSize: '16px',
+              fontWeight: 'bold',
+              cursor: 'pointer'
+            }}
+          >
+            🎬 Start 5-Minute Demo Stream
+          </button>
+          <Typography variant="caption" sx={{ display: 'block', mt: 1, color: '#6a1b9a' }}>
+            Simulates 100 days of biometric progression in real-time
+          </Typography>
+        </Box>
+      )}
+
+      {/* Risk Alert Status */}
         {/* Baseline Status */}
         {riskData?.baselineStatus && (
           <Grid item xs={12} sm={6}>
@@ -264,26 +372,126 @@ export default function EarlyWarningPage() {
           </Grid>
         )}
 
-        {/* Recommendations */}
+        {/* IMPROVEMENT #1: Smart Recommendations */}
         {riskData?.recommendations && riskData.recommendations.length > 0 && (
           <Grid item xs={12}>
-            <Card>
+            <Card sx={{ 
+              backgroundColor: riskData.alertLevel === 'RED' ? '#ffebee' : '#fff3e0',
+              borderLeft: `4px solid ${riskData.alertLevel === 'RED' ? '#d32f2f' : '#ff9800'}`
+            }}>
               <CardContent>
-                <Typography variant="h6" gutterBottom>
-                  💡 AI-Generated Recommendations
+                <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  💡 What This Means
                 </Typography>
-                <List>
+                <List sx={{ pl: 2 }}>
                   {riskData.recommendations.map((rec, idx) => (
-                    <ListItem key={idx}>
-                      <ListItemText
+                    <ListItem key={idx} sx={{ pl: 0 }}>
+                      <ListItemText 
                         primary={rec}
-                        primaryTypographyProps={{
-                          sx: { fontWeight: '500' },
+                        sx={{ 
+                          '& .MuiListItemText-primary': { 
+                            fontSize: '0.95rem',
+                            fontWeight: rec.startsWith('🔴') || rec.startsWith('🚨') ? 600 : 500
+                          }
                         }}
                       />
                     </ListItem>
                   ))}
                 </List>
+              </CardContent>
+            </Card>
+          </Grid>
+        )}
+
+        {/* IMPROVEMENT #2: Anomaly Timeline */}
+        {timeline.length > 0 && (
+          <Grid item xs={12}>
+            <Card sx={{ mb: 3 }}>
+              <CardContent>
+                <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  📈 Your Health Timeline (Last 30 Days)
+                </Typography>
+                
+                <Box sx={{ position: 'relative' }}>
+                  {/* Timeline visualization */}
+                  <Box sx={{ display: 'flex', gap: 1, overflowX: 'auto', pb: 2 }}>
+                    {timeline.slice(0, 14).reverse().map((event, idx) => {
+                      const colorsMap = {
+                        'GREEN': '#4caf50',
+                        'YELLOW': '#ff9800',
+                        'RED': '#d32f2f'
+                      };
+                      const dayLabel = new Date(event.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                      
+                      return (
+                        <div key={idx} title={`${dayLabel}: ${event.alertLevel}`}
+                          style={{
+                            width: 40,
+                            height: 40,
+                            borderRadius: '50%',
+                            backgroundColor: colorsMap[event.alertLevel],
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: 'pointer',
+                            flex: '0 0 auto'
+                          }}
+                        >
+                          <Typography sx={{ color: 'white', fontSize: '0.7rem', fontWeight: 'bold' }}>
+                            {dayLabel}
+                          </Typography>
+                        </div>
+                      );
+                    })}
+                  </Box>
+
+                  {/* Detailed list view */}
+                  <hr style={{ margin: '12px 0' }} />
+                  <Typography variant="subtitle2" sx={{ mb: 2 }}>Recent Events:</Typography>
+                  
+                  {timeline.slice(0, 7).map((event, idx) => {
+                    const colorsMap = {
+                      'GREEN': '#4caf50',
+                      'YELLOW': '#ff9800',
+                      'RED': '#d32f2f'
+                    };
+                    const eventDate = new Date(event.date).toLocaleDateString('en-US', { 
+                      weekday: 'short', 
+                      month: 'short', 
+                      day: 'numeric'
+                    });
+
+                    return (
+                      <Box key={idx} sx={{ mb: 2, pb: 2, borderLeft: `3px solid ${colorsMap[event.alertLevel]}`, pl: 2 }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                            {eventDate}
+                          </Typography>
+                          <Chip 
+                            label={event.alertLevel}
+                            size="small"
+                            sx={{ backgroundColor: colorsMap[event.alertLevel], color: 'white' }}
+                          />
+                        </Box>
+                        
+                        <Typography variant="caption" sx={{ display: 'block', mt: 1, color: 'text.secondary' }}>
+                          {event.anomalies.length > 0 
+                            ? `Anomalies: ${event.anomalies.join(', ')}`
+                            : 'No anomalies detected'
+                          }
+                        </Typography>
+                        
+                        {event.heartRate && (
+                          <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
+                            HR: {event.heartRate.toFixed(0)} bpm
+                            {event.spo2 && ` | SpO₂: ${event.spo2.toFixed(1)}%`}
+                            {event.temperature && ` | Temp: ${event.temperature.toFixed(1)}°C`}
+                          </Typography>
+                        )}
+                      </Box>
+                    );
+                  })}
+                </Box>
               </CardContent>
             </Card>
           </Grid>
