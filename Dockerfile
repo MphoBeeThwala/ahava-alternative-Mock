@@ -4,17 +4,14 @@ RUN corepack enable && corepack prepare pnpm@9 --activate
 WORKDIR /app
 
 # ============================================================================
-# DEPENDENCIES STAGE - Copy source first so pnpm understands workspace
+# DEPENDENCIES STAGE
 # ============================================================================
 FROM base AS deps
-# Copy workspace configuration first
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-
-# Copy all package.json files to establish workspace structure
 COPY apps/backend/package.json ./apps/backend/
 COPY workspace/package.json ./workspace/
 
-# Install dependencies - pnpm will understand workspace layout
+# Install dependencies - pnpm understands workspace layout
 RUN pnpm install --frozen-lockfile
 
 # ============================================================================
@@ -25,20 +22,17 @@ ARG NEXT_PUBLIC_API_URL=http://localhost:4000/api
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 ENV NODE_ENV=production
 
-# Copy pnpm config and all dependencies from deps stage
+# Copy dependencies and workspace configs
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/.pnpm-store ./.pnpm-store 2>/dev/null || true
-
-# Copy workspace configuration (needed for pnpm --filter to work)
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/backend/package.json ./apps/backend/
-COPY workspace/package.json ./workspace/
-
-# Copy source code
 COPY workspace ./workspace
 
-# Build the frontend - use explicit path to next binary
-RUN cd /app/workspace && /app/node_modules/.bin/next build
+# Re-install to ensure proper symlinks for workspace (very fast from cache)
+RUN pnpm install --frozen-lockfile
+
+# Build Next.js using workspace's build script
+RUN pnpm --filter workspace build
 
 # ============================================================================
 # RUNTIME STAGE - Minimal production image
