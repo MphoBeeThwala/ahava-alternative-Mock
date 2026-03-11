@@ -1,6 +1,5 @@
-# Applies to services that use repo root as their Root Directory (e.g. frontend).
-# Ensures the Next.js workspace app is built so you get the new UI and Early Warning.
-# Backend/API should use Root Directory "apps/backend" so they use their own Dockerfile.
+# Frontend service configuration
+# Uses root Dockerfile which properly handles pnpm monorepo structure
 [build]
 builder = "DOCKERFILE"
-dockerfilePath = "workspace/Dockerfile"
+dockerfilePath = "Dockerfile"
