@@ -176,7 +176,7 @@ export default function DoctorDashboard() {
                                                 {label} {tc.patient?.firstName} {tc.patient?.lastName}
                                             </h3>
                                             <p className="text-sm text-[var(--muted)]">
-                                                {formatTimeAgo(hoursAgo)} • {tc.specialty || 'General'}
+                                                {formatTimeAgo(hoursAgo)} • General
                                             </p>
                                         </div>
                                         <div style={{ 

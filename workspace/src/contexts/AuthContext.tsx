@@ -35,22 +35,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     // Load user and token from localStorage on mount
-    if (typeof window !== 'undefined') {
-      const storedToken = localStorage.getItem('token');
-      const storedUser = localStorage.getItem('user');
-      
-      if (storedToken && storedUser) {
-        try {
-          setToken(storedToken);
-          setUser(JSON.parse(storedUser));
-        } catch (error) {
-          console.error('Error parsing stored user data:', error);
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
+    const initializeAuth = () => {
+      if (typeof window !== 'undefined') {
+        const storedToken = localStorage.getItem('token');
+        const storedUser = localStorage.getItem('user');
+        
+        if (storedToken && storedUser) {
+          try {
+            const parsedUser = JSON.parse(storedUser);
+            setUser(parsedUser);
+            setToken(storedToken);
+          } catch (error) {
+            console.error('Error parsing stored user data:', error);
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+          }
         }
       }
-    }
-    setLoading(false);
+      setLoading(false);
+    };
+    
+    initializeAuth();
   }, []);
 
   const login = async (email: string, password: string) => {

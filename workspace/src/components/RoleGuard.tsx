@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -19,7 +19,6 @@ interface RoleGuardProps {
 export default function RoleGuard({ children, allowedRoles }: RoleGuardProps) {
     const router = useRouter();
     const { user, loading: authLoading, isAuthenticated } = useAuth();
-    const [authorized, setAuthorized] = useState(false);
 
     useEffect(() => {
         if (authLoading) return;
@@ -29,14 +28,12 @@ export default function RoleGuard({ children, allowedRoles }: RoleGuardProps) {
             return;
         }
 
-        if (allowedRoles.includes(user.role as UserRole)) {
-            setAuthorized(true);
-        } else {
+        if (!allowedRoles.includes(user.role as UserRole)) {
             router.push('/unauthorized');
         }
-    }, [allowedRoles, router, user, isAuthenticated, authLoading]);
+    }, [allowedRoles, authLoading, isAuthenticated, router, user]);
 
-    if (authLoading || !authorized) {
+    if (authLoading) {
         return (
             <div className="min-h-screen flex items-center justify-center">
                 <div className="text-center">
@@ -45,6 +42,10 @@ export default function RoleGuard({ children, allowedRoles }: RoleGuardProps) {
                 </div>
             </div>
         );
+    }
+
+    if (!isAuthenticated || !user || !allowedRoles.includes(user.role as UserRole)) {
+        return null;
     }
 
     return <>{children}</>;

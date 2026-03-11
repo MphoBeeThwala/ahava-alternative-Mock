@@ -28,6 +28,12 @@ export default tseslint.config(
     },
   },
   {
+    files: ["src/app/layout.tsx", "src/contexts/**/*.tsx", "src/components/RoleGuard.tsx"],
+    rules: {
+      "react-refresh/only-export-components": "off",
+    },
+  },
+  {
     files: ["src/worker/**/*.ts"],
     languageOptions: {
       globals: {

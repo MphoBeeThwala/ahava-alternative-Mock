@@ -1,4 +1,4 @@
-import axios, { AxiosInstance } from 'axios';
+import axios, { AxiosInstance, AxiosError } from 'axios';
 
 // Always use same-origin /api - Next.js rewrites handle the proxy to backend
 // This avoids CORS issues entirely and works in both dev and production
@@ -33,10 +33,10 @@ apiClient.interceptors.request.use(
 let isRefreshing = false;
 let failedQueue: Array<{
   onSuccess: (token: string) => void;
-  onFailure: (error: any) => void;
+  onFailure: (error: AxiosError) => void;
 }> = [];
 
-const processQueue = (error: any, token: string | null = null) => {
+const processQueue = (error: AxiosError | null, token: string | null = null) => {
   failedQueue.forEach((prom) => {
     if (error) {
       prom.onFailure(error);
@@ -286,8 +286,9 @@ export const patientApi = {
   getMonitoringSummary: async (): Promise<MonitoringSummary> => {
     const res = await apiClient.get('/patient/monitoring/summary');
     const raw = res.data?.data ?? res.data;
-    if (!raw || typeof raw !== 'object') return { baselineEstablished: false, alertLevel: 'Unknown', recentReadings: [] };
+    if (!raw || typeof raw !== 'object') return { status: 'offline', baselineEstablished: false, alertLevel: 'Unknown', recentReadings: [] };
     return {
+      status: raw.status ?? 'offline',
       baselineEstablished: Boolean(raw.baselineEstablished),
       alertLevel: raw.alertLevel ?? (raw.recentAlerts > 0 ? 'YELLOW' : raw.baselineEstablished ? 'GREEN' : 'Unknown'),
       readinessScore: raw.currentReadinessScore ?? raw.readinessScore,
