@@ -33,8 +33,8 @@ COPY . .
 WORKDIR /app/workspace
 ENV PATH="/app/node_modules/.bin:${PATH}" \
     NODE_PATH=/app/node_modules
-# Use npx to find next binary in parent node_modules
-RUN npx next build
+# Use direct node path to next since it's in root node_modules
+RUN node /app/node_modules/.bin/next build
 
 # ============================================================================
 # RUNTIME STAGE - Minimal production image
