@@ -1,6 +1,0 @@
-# Backend service configuration
-# Uses backend Dockerfile for Express.js API server
-[build]
-builder = "DOCKERFILE"
-dockerfilePath = "apps/backend/Dockerfile"
-buildContext = "."
