@@ -237,7 +237,7 @@ export default function EarlyWarningPage() {
         </Box>
       )}
 
-      {/* Risk Alert Status */}
+      <Grid container spacing={3}>
         {/* Baseline Status */}
         {riskData?.baselineStatus && (
           <Grid item xs={12} sm={6}>
