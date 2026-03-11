@@ -9,7 +9,6 @@ import DashboardLayout from '../../../components/DashboardLayout';
 import { Card } from '../../../components/ui/Card';
 import { KpiCard } from '../../../components/ui/KpiCard';
 import { Modal } from '../../../components/ui/Modal';
-import { Modal } from '../../../components/ui/Modal';
 import { StatusBadge } from '../../../components/ui/StatusBadge';
 
 // Helper function to calculate urgency level based on time (IMPROVEMENT #3)
