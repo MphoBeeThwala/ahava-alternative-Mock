@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { useAuth } from "@/react-app/lib/auth-context";
+import { getAuthHeaders } from "@/react-app/lib/auth-context";
 import { useNavigate } from "react-router";
-import { FileText, Calendar, User, Brain, Stethoscope, AlertCircle, ChevronRight, ArrowLeft } from "lucide-react";
+import { getApiBase } from "@/react-app/lib/native";
+import DashboardLayout from "@/react-app/components/DashboardLayout";
 
 interface DiagnosticReport {
   id: number;
@@ -17,7 +18,6 @@ interface DiagnosticReport {
 }
 
 export default function DiagnosticVault() {
-  const { logout } = useAuth();
   const navigate = useNavigate();
   const [reports, setReports] = useState<DiagnosticReport[]>([]);
   const [selectedReport, setSelectedReport] = useState<DiagnosticReport | null>(null);
@@ -28,9 +28,11 @@ export default function DiagnosticVault() {
   }, []);
 
   const loadReports = async () => {
+    const base = getApiBase();
+    const headers = getAuthHeaders();
     try {
-      const response = await fetch("/api/patient/diagnostic-reports");
-      const data = await response.json();
+      const response = await fetch(`${base}/api/patient/diagnostic-reports`, { headers });
+      const data = await response.json() as any;
       setReports(data.reports || []);
     } catch (error) {
       console.error("Failed to load reports:", error);
@@ -41,253 +43,146 @@ export default function DiagnosticVault() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-[#004aad]"></div>
+      <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2" style={{ borderColor: "var(--primary)" }} />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Navigation */}
-      <nav className="bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center space-x-3">
-              <img 
-                src="https://019beed4-58f9-79ea-8acd-d59b2c121f81.mochausercontent.com/Ahava-on-88-logo.png"
-                alt="Ahava Healthcare"
-                className="h-10"
-              />
-              <span className="text-xl font-semibold text-[#004aad]">Ahava Healthcare</span>
-            </div>
-            <div className="flex items-center space-x-4">
-              <button
-                onClick={logout}
-                className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors"
+    <DashboardLayout>
+      {/* ── HERO ── */}
+      <div className="hero-card header-PATIENT" style={{ position: "relative", zIndex: 1 }}>
+        <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
+          <div>
+            <button
+              onClick={() => navigate("/patient/dashboard")}
+              style={{ background: "rgba(255,255,255,0.15)", border: "none", color: "white", borderRadius: 8, padding: "4px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", marginBottom: 10, fontFamily: "inherit" }}
+            >
+              ← Back to Dashboard
+            </button>
+            <div style={{ fontSize: 22, fontWeight: 800 }}>📁 Diagnostic Vault</div>
+            <div style={{ fontSize: 13, opacity: 0.8, marginTop: 4 }}>Your medical reports reviewed by licensed professionals</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 32, fontWeight: 900, lineHeight: 1 }}>{reports.length}</div>
+            <div style={{ fontSize: 11, opacity: 0.75, textTransform: "uppercase", letterSpacing: "0.05em" }}>Reports</div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── DISCLAIMER ── */}
+      <div style={{ background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: "var(--radius)", padding: "14px 18px", marginBottom: 20, display: "flex", alignItems: "flex-start", gap: 12 }}>
+        <div style={{ fontSize: 20, flexShrink: 0 }}>⚠️</div>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 13, color: "#78350f", marginBottom: 2 }}>Medical Disclaimer</div>
+          <div style={{ fontSize: 12, color: "#92400e" }}>
+            All reports have been reviewed by licensed professionals and are for informational purposes only. Always consult your healthcare provider for treatment decisions.
+          </div>
+        </div>
+      </div>
+
+      {!selectedReport ? (
+        /* ── REPORT LIST ── */
+        reports.length > 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {reports.map((report) => (
+              <div
+                key={report.id}
+                className="vault-card"
+                onClick={() => setSelectedReport(report)}
               >
-                Logout
-              </button>
-            </div>
-          </div>
-        </div>
-      </nav>
-
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Header */}
-        <div className="mb-8">
-          <button
-            onClick={() => navigate("/patient/dashboard")}
-            className="flex items-center text-gray-600 hover:text-gray-900 mb-4 transition-colors"
-          >
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back to Dashboard
-          </button>
-          <div className="flex items-center space-x-4 mb-2">
-            <div className="w-14 h-14 bg-purple-100 rounded-xl flex items-center justify-center">
-              <FileText className="w-7 h-7 text-purple-600" />
-            </div>
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">Diagnostic Vault</h1>
-              <p className="text-gray-600">Your medical reports and health insights</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Medical Disclaimer */}
-        <div className="mb-6 bg-amber-50 border border-amber-200 rounded-xl p-4">
-          <div className="flex items-start space-x-3">
-            <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-            <div>
-              <h3 className="font-semibold text-amber-900 mb-1">Medical Disclaimer</h3>
-              <p className="text-sm text-amber-800">
-                All reports shown here have been reviewed and validated by licensed medical professionals. 
-                These reports are for informational purposes. Always consult with your healthcare provider 
-                for medical advice and treatment decisions.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {!selectedReport ? (
-          <>
-            {/* Reports List */}
-            {reports.length > 0 ? (
-              <div className="grid gap-4">
-                {reports.map((report) => (
-                  <button
-                    key={report.id}
-                    onClick={() => setSelectedReport(report)}
-                    className="bg-white rounded-xl border border-gray-200 p-6 hover:shadow-lg hover:border-purple-200 transition-all text-left"
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-3 mb-3">
-                          <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
-                            <FileText className="w-6 h-6 text-purple-600" />
-                          </div>
-                          <div>
-                            <h3 className="text-lg font-semibold text-gray-900">{report.report_type}</h3>
-                            <div className="flex items-center space-x-4 mt-1">
-                              <div className="flex items-center text-sm text-gray-500">
-                                <Calendar className="w-4 h-4 mr-1" />
-                                {new Date(report.released_at).toLocaleDateString()}
-                              </div>
-                              {report.ai_confidence && (
-                                <div className="flex items-center text-sm text-gray-500">
-                                  <Brain className="w-4 h-4 mr-1" />
-                                  AI Confidence: {(report.ai_confidence * 100).toFixed(0)}%
-                                </div>
-                              )}
-                            </div>
-                          </div>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+                      <div style={{ fontSize: 28 }}>📋</div>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 16 }}>{report.report_type}</div>
+                        <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
+                          Released {new Date(report.released_at).toLocaleDateString("en-ZA")}
+                          {report.ai_confidence && (
+                            <span style={{ marginLeft: 12, background: "#eff6ff", color: "var(--primary)", padding: "1px 8px", borderRadius: 20, fontWeight: 600 }}>
+                              🤖 AI {(report.ai_confidence * 100).toFixed(0)}%
+                            </span>
+                          )}
                         </div>
-                        {report.diagnosis && (
-                          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-2">
-                            <p className="text-sm font-medium text-blue-900">Diagnosis</p>
-                            <p className="text-sm text-blue-800 line-clamp-2">{report.diagnosis}</p>
-                          </div>
-                        )}
                       </div>
-                      <ChevronRight className="w-6 h-6 text-gray-400 ml-4 flex-shrink-0" />
                     </div>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
-                <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <FileText className="w-10 h-10 text-gray-400" />
-                </div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">No Reports Yet</h3>
-                <p className="text-gray-600 mb-6 max-w-md mx-auto">
-                  When you request a symptom analysis, it will be reviewed by a doctor and appear here 
-                  once released.
-                </p>
-                <button
-                  onClick={() => navigate("/patient/dashboard")}
-                  className="px-6 py-3 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 transition-colors"
-                >
-                  Go to Dashboard
-                </button>
-              </div>
-            )}
-          </>
-        ) : (
-          /* Report Detail View */
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            {/* Report Header */}
-            <div className="bg-gradient-to-r from-purple-600 to-purple-700 p-6">
-              <button
-                onClick={() => setSelectedReport(null)}
-                className="flex items-center text-white/90 hover:text-white mb-4 transition-colors"
-              >
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                Back to Reports
-              </button>
-              <h2 className="text-2xl font-bold text-white mb-2">{selectedReport.report_type}</h2>
-              <div className="flex items-center space-x-4 text-white/90 text-sm">
-                <div className="flex items-center">
-                  <Calendar className="w-4 h-4 mr-1" />
-                  Released: {new Date(selectedReport.released_at).toLocaleDateString()}
-                </div>
-                {selectedReport.ai_confidence && (
-                  <div className="flex items-center">
-                    <Brain className="w-4 h-4 mr-1" />
-                    AI Confidence: {(selectedReport.ai_confidence * 100).toFixed(0)}%
+                    {report.diagnosis && (
+                      <div className="ai-panel" style={{ padding: "10px 14px" }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Diagnosis</div>
+                        <div style={{ fontSize: 13, color: "#1e40af", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{report.diagnosis}</div>
+                      </div>
+                    )}
                   </div>
+                  <div style={{ fontSize: 18, color: "var(--text-light)", flexShrink: 0 }}>›</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="dash-card" style={{ textAlign: "center", padding: "60px 20px" }}>
+            <div style={{ fontSize: 48, marginBottom: 16 }}>📂</div>
+            <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 8 }}>No Reports Yet</div>
+            <div style={{ fontSize: 13, color: "var(--text-muted)", maxWidth: 360, margin: "0 auto 20px" }}>
+              When you request a symptom analysis, it will be reviewed by a doctor and appear here once released.
+            </div>
+            <button
+              onClick={() => navigate("/patient/dashboard")}
+              style={{ background: "var(--primary)", color: "white", border: "none", borderRadius: 8, padding: "10px 24px", fontWeight: 600, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}
+            >
+              Go to Dashboard
+            </button>
+          </div>
+        )
+      ) : (
+        /* ── REPORT DETAIL ── */
+        <div className="dash-card">
+          <button
+            onClick={() => setSelectedReport(null)}
+            style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 13, fontWeight: 600, marginBottom: 16, padding: 0, fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6 }}
+          >
+            ← Back to Reports
+          </button>
+
+          <div className="hero-card header-PATIENT" style={{ marginBottom: 20 }}>
+            <div style={{ position: "relative", zIndex: 1 }}>
+              <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>{selectedReport.report_type}</div>
+              <div style={{ fontSize: 13, opacity: 0.85 }}>
+                Released: {new Date(selectedReport.released_at).toLocaleDateString("en-ZA")}
+                {selectedReport.ai_confidence && (
+                  <span style={{ marginLeft: 14 }}>🤖 AI Confidence: {(selectedReport.ai_confidence * 100).toFixed(0)}%</span>
                 )}
               </div>
             </div>
-
-            <div className="p-6 space-y-6">
-              {/* Symptoms */}
-              {selectedReport.symptoms && (
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center">
-                    <div className="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center mr-2">
-                      <AlertCircle className="w-5 h-5 text-gray-600" />
-                    </div>
-                    Reported Symptoms
-                  </h3>
-                  <div className="bg-gray-50 rounded-lg p-4">
-                    <p className="text-gray-700 whitespace-pre-wrap">{selectedReport.symptoms}</p>
-                  </div>
-                </div>
-              )}
-
-              {/* AI Analysis */}
-              {selectedReport.ai_analysis && (
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center">
-                    <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center mr-2">
-                      <Brain className="w-5 h-5 text-purple-600" />
-                    </div>
-                    AI Preliminary Analysis
-                  </h3>
-                  <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-                    <p className="text-gray-700 whitespace-pre-wrap">{selectedReport.ai_analysis}</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Doctor's Diagnosis */}
-              {selectedReport.diagnosis && (
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center">
-                    <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center mr-2">
-                      <Stethoscope className="w-5 h-5 text-blue-600" />
-                    </div>
-                    Doctor's Diagnosis
-                  </h3>
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <p className="text-gray-700 whitespace-pre-wrap">{selectedReport.diagnosis}</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Doctor's Notes */}
-              {selectedReport.doctor_notes && (
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center">
-                    <div className="w-8 h-8 bg-teal-100 rounded-lg flex items-center justify-center mr-2">
-                      <User className="w-5 h-5 text-teal-600" />
-                    </div>
-                    Doctor's Notes
-                  </h3>
-                  <div className="bg-teal-50 border border-teal-200 rounded-lg p-4">
-                    <p className="text-gray-700 whitespace-pre-wrap">{selectedReport.doctor_notes}</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Recommendations */}
-              {selectedReport.recommendations && (
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center">
-                    <div className="w-8 h-8 bg-emerald-100 rounded-lg flex items-center justify-center mr-2">
-                      <FileText className="w-5 h-5 text-emerald-600" />
-                    </div>
-                    Recommendations
-                  </h3>
-                  <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
-                    <p className="text-gray-700 whitespace-pre-wrap">{selectedReport.recommendations}</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Footer Disclaimer */}
-              <div className="pt-4 border-t border-gray-200">
-                <p className="text-xs text-gray-500 text-center">
-                  This report was created on {new Date(selectedReport.created_at).toLocaleDateString()} and 
-                  released by a licensed medical professional on {new Date(selectedReport.released_at).toLocaleDateString()}.
-                </p>
-              </div>
-            </div>
           </div>
-        )}
-      </main>
-    </div>
+
+          {[
+            { key: "symptoms",       icon: "🩺", label: "Reported Symptoms",      bg: "#f8fafc", border: "#e2e8f0" },
+            { key: "ai_analysis",   icon: "🤖", label: "AI Preliminary Analysis", bg: "#eff6ff", border: "#bfdbfe" },
+            { key: "diagnosis",     icon: "📋", label: "Doctor's Diagnosis",      bg: "#eff6ff", border: "#bfdbfe" },
+            { key: "doctor_notes",  icon: "👨‍⚕️", label: "Doctor's Notes",         bg: "#f0fdfa", border: "#99f6e4" },
+            { key: "recommendations", icon: "💊", label: "Recommendations",       bg: "#f0fdf4", border: "#bbf7d0" },
+          ].map(({ key, icon, label, bg, border }) => {
+            const val = (selectedReport as any)[key];
+            if (!val) return null;
+            return (
+              <div key={key} style={{ marginBottom: 18 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                  <span>{icon}</span>{label}
+                </div>
+                <div style={{ background: bg, border: `1px solid ${border}`, borderRadius: "var(--radius)", padding: "14px 16px", fontSize: 13, color: "var(--text)", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>
+                  {val}
+                </div>
+              </div>
+            );
+          })}
+
+          <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--border)", fontSize: 11, color: "var(--text-muted)", textAlign: "center" }}>
+            Created {new Date(selectedReport.created_at).toLocaleDateString("en-ZA")} · Released {new Date(selectedReport.released_at).toLocaleDateString("en-ZA")}
+          </div>
+        </div>
+      )}
+    </DashboardLayout>
   );
 }

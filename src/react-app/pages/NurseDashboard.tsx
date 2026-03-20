@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { useAuth } from "@/react-app/lib/auth-context";
+import { useAuth, getAuthHeaders } from "@/react-app/lib/auth-context";
 import { useNavigate } from "react-router";
-import { MapPin, Clock, AlertOctagon, User, ToggleLeft, ToggleRight } from "lucide-react";
+import DashboardLayout from "@/react-app/components/DashboardLayout";
 import PanicButton from "../components/PanicButton";
+import { getApiBase } from "@/react-app/lib/native";
 
 interface Profile {
   full_name: string;
@@ -23,7 +24,7 @@ interface Appointment {
 }
 
 export default function NurseDashboard() {
-  const { logout } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -43,15 +44,12 @@ export default function NurseDashboard() {
   }, [isOnline, profile]);
 
   const loadProfile = async () => {
+    const base = getApiBase();
+    const headers = getAuthHeaders();
     try {
-      const response = await fetch("/api/profile");
-      const data = await response.json();
-
-      if (data.profile?.role !== "NURSE") {
-        navigate("/onboarding");
-        return;
-      }
-
+      const response = await fetch(`${base}/api/profile`, { headers });
+      const data = await response.json() as any;
+      if (data.profile?.role !== "NURSE") { navigate("/onboarding"); return; }
       setProfile(data.profile);
       setIsOnline(data.profile.is_online === 1);
     } catch (error) {
@@ -62,9 +60,11 @@ export default function NurseDashboard() {
   };
 
   const loadNearbyRequests = async () => {
+    const base = getApiBase();
+    const headers = getAuthHeaders();
     try {
-      const response = await fetch("/api/appointments/nearby");
-      const data = await response.json();
+      const response = await fetch(`${base}/api/appointments/nearby`, { headers });
+      const data = await response.json() as any;
       setNearbyRequests(data.appointments || []);
     } catch (error) {
       console.error("Failed to load requests:", error);
@@ -72,10 +72,10 @@ export default function NurseDashboard() {
   };
 
   const acceptAppointment = async (appointmentId: number) => {
+    const base = getApiBase();
+    const headers = getAuthHeaders();
     try {
-      await fetch(`/api/appointments/${appointmentId}/accept`, {
-        method: "POST",
-      });
+      await fetch(`${base}/api/appointments/${appointmentId}/accept`, { method: "POST", headers });
       loadNearbyRequests();
     } catch (error) {
       console.error("Failed to accept appointment:", error);
@@ -83,192 +83,168 @@ export default function NurseDashboard() {
   };
 
   const toggleAvailability = async () => {
+    const base = getApiBase();
+    const headers = { ...getAuthHeaders(), "Content-Type": "application/json" };
     try {
       const newStatus = !isOnline;
-      await fetch("/api/nurse/availability", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      await fetch(`${base}/api/nurse/availability`, {
+        method: "POST", headers,
         body: JSON.stringify({ is_online: newStatus }),
       });
-
       setIsOnline(newStatus);
     } catch (error) {
       console.error("Failed to update availability:", error);
     }
   };
 
+  const firstName = user?.firstName || profile?.full_name?.split(" ")[0] || "Nurse";
+
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-[#34d399]"></div>
+      <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2" style={{ borderColor: "var(--nurse)" }} />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Navigation */}
-      <nav className="bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center space-x-3">
-              <img 
-                src="https://019beed4-58f9-79ea-8acd-d59b2c121f81.mochausercontent.com/Ahava-on-88-logo.png"
-                alt="Ahava Healthcare"
-                className="h-10"
-              />
-              <span className="text-xl font-semibold text-[#004aad]">Ahava Healthcare</span>
-            </div>
-            <div className="flex items-center space-x-4">
-              <PanicButton />
-              <span className="text-sm text-gray-600">{profile?.full_name}</span>
-              <button
-                onClick={logout}
-                className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors"
-              >
-                Logout
-              </button>
-            </div>
-          </div>
-        </div>
-      </nav>
-
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Welcome Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            Welcome, {profile?.full_name?.split(" ")[0]}
-          </h1>
-          <p className="text-gray-600">Manage your appointments and availability</p>
-        </div>
-
-        {/* Status Card */}
-        <div className="bg-gradient-to-br from-[#34d399] to-[#10b981] rounded-xl p-8 text-white mb-8">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-2xl font-bold mb-2">Your Status</h2>
-              <p className="text-white/90">
-                {isOnline ? "You're online and available for appointments" : "You're currently offline"}
-              </p>
-            </div>
-            <button
-              onClick={toggleAvailability}
-              className="bg-white/20 backdrop-blur-sm rounded-2xl p-4 hover:bg-white/30 transition-all"
-            >
+    <DashboardLayout>
+      {/* ── HERO ── */}
+      <div className="hero-card header-NURSE" style={{ position: "relative", zIndex: 1 }}>
+        <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
+          <div>
+            <div style={{ fontSize: 13, opacity: 0.8, marginBottom: 4 }}>Welcome, {firstName} 👋</div>
+            <div style={{ fontSize: 22, fontWeight: 800 }}>Nurse Dashboard</div>
+            <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               {isOnline ? (
-                <ToggleRight className="w-16 h-16 text-white" />
+                <span className="pulse-alert" style={{ background: "rgba(255,255,255,0.25)", color: "white", padding: "6px 14px", borderRadius: 30, fontWeight: 700, fontSize: 13 }}>
+                  🟢 Online — Accepting Requests
+                </span>
               ) : (
-                <ToggleLeft className="w-16 h-16 text-white/60" />
+                <span style={{ background: "rgba(0,0,0,0.2)", color: "white", padding: "6px 14px", borderRadius: 30, fontWeight: 700, fontSize: 13 }}>
+                  ⚫ Offline
+                </span>
               )}
-            </button>
+              {profile?.sanc_id && <span style={{ fontSize: 12, opacity: 0.8 }}>SANC: {profile.sanc_id}</span>}
+            </div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 32, fontWeight: 900, lineHeight: 1 }}>{nearbyRequests.length}</div>
+            <div style={{ fontSize: 11, opacity: 0.75, textTransform: "uppercase", letterSpacing: "0.05em" }}>Requests</div>
           </div>
         </div>
+      </div>
 
-        {/* Verification Status */}
-        {profile?.is_verified === 0 && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6 mb-8">
-            <div className="flex items-start">
-              <AlertOctagon className="w-6 h-6 text-yellow-600 mr-3 flex-shrink-0 mt-1" />
-              <div>
-                <h3 className="font-bold text-yellow-900 mb-1">Verification Pending</h3>
-                <p className="text-yellow-800 text-sm">
-                  Your SANC registration ({profile?.sanc_id}) is being verified. You'll be able to accept appointments once verified.
-                </p>
+      {/* ── TOP ROW: PANIC + AVAILABILITY ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 20 }}>
+        <div className="dash-card" style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <div style={{ fontSize: 32 }}>🚨</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Emergency Panic</div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 10 }}>Alert control centre immediately</div>
+            <PanicButton />
+          </div>
+        </div>
+        <div
+          className={`availability-toggle${isOnline ? " online" : ""}`}
+          onClick={toggleAvailability}
+          style={{ justifyContent: "space-between" }}
+        >
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 14, color: isOnline ? "var(--nurse)" : "var(--text)" }}>
+              {isOnline ? "You're Online" : "You're Offline"}
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>
+              {isOnline ? "Receiving appointment requests" : "Toggle to start receiving requests"}
+            </div>
+          </div>
+          <div className={`toggle-track${isOnline ? " on" : ""}`}>
+            <div className="toggle-knob" />
+          </div>
+        </div>
+      </div>
+
+      {/* ── VERIFICATION WARNING ── */}
+      {profile?.is_verified === 0 && (
+        <div style={{ background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: "var(--radius)", padding: "14px 18px", marginBottom: 20, display: "flex", alignItems: "center", gap: 14 }}>
+          <div style={{ fontSize: 24 }}>⚠️</div>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 14, color: "#78350f" }}>SANC Verification Pending</div>
+            <div style={{ fontSize: 13, color: "#92400e", marginTop: 2 }}>
+              Registration <strong>{profile?.sanc_id}</strong> is being verified. Appointments unlock after verification.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── VISIT WORKFLOW ── */}
+      <div className="dash-card" style={{ marginBottom: 20 }}>
+        <div className="card-section-title">📍 Visit Workflow</div>
+        <div className="visit-steps">
+          {["Dispatched", "En Route", "On Site", "Treating", "Complete"].map((step, i) => (
+            <div key={step} className={`visit-step${i === 0 ? " done" : i === 1 ? " active" : ""}`}>
+              <div className="step-dot">{i < 1 ? "✓" : i + 1}</div>
+              <div className="step-label">{step}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 6, textAlign: "center" }}>
+          No active visit — go online to accept requests
+        </div>
+      </div>
+
+      {/* ── REQUESTS + STATS ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div className="dash-card">
+          <div className="card-section-title">📊 Your Stats</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            {[
+              { icon: "👤", label: "Total Patients", value: "0" },
+              { icon: "✅", label: "Completed Visits", value: "0" },
+              { icon: "📍", label: "Service Radius", value: "5 km" },
+              { icon: "⭐", label: "Rating", value: "—" },
+            ].map(({ icon, label, value }) => (
+              <div key={label} style={{ background: "var(--bg)", borderRadius: 10, padding: "14px", textAlign: "center" }}>
+                <div style={{ fontSize: 22, marginBottom: 6 }}>{icon}</div>
+                <div style={{ fontSize: 22, fontWeight: 700 }}>{value}</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>{label}</div>
               </div>
-            </div>
+            ))}
           </div>
-        )}
+        </div>
 
-        {/* Incoming Requests */}
-        <div className="grid md:grid-cols-2 gap-6 mb-8">
-          {/* Requests Map */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold text-gray-900">Nearby Requests</h3>
-              <MapPin className="w-5 h-5 text-gray-400" />
-            </div>
-            <div className="bg-gray-100 rounded-lg h-64 flex items-center justify-center">
-              <p className="text-gray-500">Map view coming soon</p>
-            </div>
-          </div>
-
-          {/* Request List */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h3 className="text-xl font-bold text-gray-900 mb-4">Active Requests</h3>
-            <div className="space-y-4">
-              {profile?.is_verified === 0 ? (
-                <p className="text-gray-500 text-center py-8">
-                  Complete verification to see appointment requests
-                </p>
-              ) : !isOnline ? (
-                <p className="text-gray-500 text-center py-8">
-                  Toggle availability on to see requests
-                </p>
-              ) : nearbyRequests.length === 0 ? (
-                <p className="text-gray-500 text-center py-8">
-                  No active requests in your area
-                </p>
-              ) : (
-                nearbyRequests.map((request) => (
-                  <div key={request.id} className="border border-gray-200 rounded-lg p-4 hover:border-[#34d399] transition-colors">
-                    <div className="flex items-start justify-between mb-3">
-                      <div>
-                        <h4 className="font-semibold text-gray-900 mb-1">
-                          {request.service_type.replace(/_/g, " ")}
-                        </h4>
-                        <p className="text-sm text-gray-600 flex items-center">
-                          <MapPin className="w-4 h-4 mr-1" />
-                          {request.patient_address}
-                        </p>
-                      </div>
-                      <span className="text-xs text-gray-500">
-                        {new Date(request.created_at).toLocaleTimeString()}
-                      </span>
-                    </div>
-                    {request.notes && (
-                      <p className="text-sm text-gray-600 mb-3 italic">"{request.notes}"</p>
-                    )}
-                    <button
-                      onClick={() => acceptAppointment(request.id)}
-                      className="w-full px-4 py-2 bg-[#34d399] text-white rounded-lg font-medium hover:bg-[#10b981] transition-colors"
-                    >
-                      Accept Appointment
-                    </button>
+        <div className="dash-card" style={{ overflowY: "auto", maxHeight: 400 }}>
+          <div className="card-section-title">🏥 Active Requests</div>
+          {profile?.is_verified === 0 ? (
+            <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "28px 0", fontSize: 13 }}>Complete verification to see requests</div>
+          ) : !isOnline ? (
+            <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "28px 0", fontSize: 13 }}>Toggle availability on to see requests</div>
+          ) : nearbyRequests.length === 0 ? (
+            <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "28px 0", fontSize: 13 }}>No active requests in your area</div>
+          ) : (
+            nearbyRequests.map((request) => (
+              <div key={request.id} style={{ background: "var(--bg)", borderRadius: "var(--radius)", padding: "14px", marginBottom: 12, border: "1.5px solid var(--border)" }}>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 14 }}>{request.service_type.replace(/_/g, " ")}</div>
+                    <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>📍 {request.patient_address}</div>
                   </div>
-                ))
-              )}
-            </div>
-          </div>
+                  <div style={{ fontSize: 11, color: "var(--text-light)", whiteSpace: "nowrap" }}>{new Date(request.created_at).toLocaleTimeString("en-ZA")}</div>
+                </div>
+                {request.notes && (
+                  <div style={{ fontSize: 13, color: "var(--text-muted)", fontStyle: "italic", marginBottom: 10 }}>"{request.notes}"</div>
+                )}
+                <button
+                  onClick={() => acceptAppointment(request.id)}
+                  style={{ width: "100%", padding: "9px 0", background: "var(--nurse)", color: "white", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}
+                >
+                  Accept Appointment
+                </button>
+              </div>
+            ))
+          )}
         </div>
-
-        {/* Stats Cards */}
-        <div className="grid md:grid-cols-3 gap-6">
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
-              <User className="w-6 h-6 text-blue-600" />
-            </div>
-            <div className="text-3xl font-bold text-gray-900 mb-1">0</div>
-            <p className="text-gray-600">Total Patients</p>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mb-4">
-              <Clock className="w-6 h-6 text-green-600" />
-            </div>
-            <div className="text-3xl font-bold text-gray-900 mb-1">0</div>
-            <p className="text-gray-600">Completed Visits</p>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center mb-4">
-              <MapPin className="w-6 h-6 text-purple-600" />
-            </div>
-            <div className="text-3xl font-bold text-gray-900 mb-1">-</div>
-            <p className="text-gray-600">Service Radius</p>
-          </div>
-        </div>
-      </main>
-    </div>
+      </div>
+    </DashboardLayout>
   );
 }

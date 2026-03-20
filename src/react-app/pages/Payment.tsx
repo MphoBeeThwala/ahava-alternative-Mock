@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router";
-import { useAuth } from "@/react-app/lib/auth-context";
+import { useAuth, getAuthHeaders } from "@/react-app/lib/auth-context";
+import { getApiBase } from "@/react-app/lib/native";
 import { CreditCard, Shield, CheckCircle2 } from "lucide-react";
 
 const SERVICES = [
@@ -35,10 +36,10 @@ export default function PaymentPage() {
       }
 
       // Create payment
-      const response = await fetch("/api/payment/create", {
+      const base = getApiBase();
+      const response = await fetch(`${base}/api/payment/create`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({
           serviceType: service.type,
           amount: service.price,

@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { X, Brain, AlertCircle, Upload, Image as ImageIcon, FileText, Trash2 } from "lucide-react";
 import type { MedicalImageTypeEnum } from "@/shared/types";
+import { getApiBase } from "@/react-app/lib/native";
+import { getAuthHeaders } from "@/react-app/lib/auth-context";
 
 interface SymptomAnalysisModalProps {
   isOpen: boolean;
@@ -173,7 +175,8 @@ export default function SymptomAnalysisModal({ isOpen, onClose, onSuccess }: Sym
         uploadedImages = await uploadImagesToCloudflare();
       }
 
-      const response = await fetch("/api/diagnostic-analysis", {
+      const base = getApiBase();
+      const response = await fetch(`${base}/api/diagnostic-analysis`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 

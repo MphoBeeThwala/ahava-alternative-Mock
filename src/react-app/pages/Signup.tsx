@@ -1,42 +1,36 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router";
 import { useAuth } from "@/react-app/lib/auth-context";
-import { AlertCircle, CheckCircle2 } from "lucide-react";
+import { getApiBase } from "@/react-app/lib/native";
+
+const PW_REQS = ["At least 8 characters", "One uppercase letter", "One lowercase letter", "One number"];
 
 export default function SignupPage() {
   const navigate = useNavigate();
   const { signup } = useAuth();
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [passwordErrors, setPasswordErrors] = useState<string[]>([]);
+  const [name, setName]                   = useState("");
+  const [email, setEmail]                 = useState("");
+  const [password, setPassword]           = useState("");
+  const [confirmPassword, setConfirm]     = useState("");
+  const [error, setError]                 = useState("");
+  const [loading, setLoading]             = useState(false);
+  const [passwordErrors, setPwErrors]     = useState<string[]>([]);
+  const [showPw, setShowPw]               = useState(false);
 
   const validatePassword = (pwd: string) => {
-    const errors: string[] = [];
-    if (pwd.length < 8) errors.push("At least 8 characters");
-    if (!/[A-Z]/.test(pwd)) errors.push("One uppercase letter");
-    if (!/[a-z]/.test(pwd)) errors.push("One lowercase letter");
-    if (!/[0-9]/.test(pwd)) errors.push("One number");
-    setPasswordErrors(errors);
+    const errs: string[] = [];
+    if (pwd.length < 8)         errs.push("At least 8 characters");
+    if (!/[A-Z]/.test(pwd))     errs.push("One uppercase letter");
+    if (!/[a-z]/.test(pwd))     errs.push("One lowercase letter");
+    if (!/[0-9]/.test(pwd))     errs.push("One number");
+    setPwErrors(errs);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-
-    if (password !== confirmPassword) {
-      setError("Passwords do not match");
-      return;
-    }
-
-    if (passwordErrors.length > 0) {
-      setError("Please fix password requirements");
-      return;
-    }
-
+    if (password !== confirmPassword) { setError("Passwords do not match"); return; }
+    if (passwordErrors.length > 0)   { setError("Please fix password requirements"); return; }
     setLoading(true);
     try {
       await signup(email, password, name, "PATIENT");
@@ -51,150 +45,95 @@ export default function SignupPage() {
   const handleGoogleSignup = async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/auth/sign-in/google?json=true", {
-        method: "GET",
-        credentials: "include",
-        headers: { "Accept": "application/json" },
+      const res = await fetch(`${getApiBase()}/api/auth/sign-in/google?json=true`, {
+        method: "GET", credentials: "include", headers: { "Accept": "application/json" },
       });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data.redirectUrl) {
-          window.location.href = data.redirectUrl;
-        }
+      if (res.ok) {
+        const data = await res.json() as any;
+        if (data.redirectUrl) window.location.href = data.redirectUrl;
       }
-    } catch (error) {
+    } catch {
       setError("Failed to initiate Google signup");
       setLoading(false);
     }
   };
 
+  const inp: React.CSSProperties = {
+    width: "100%", padding: "12px 14px", borderRadius: 10,
+    border: "1.5px solid #e2e8f0", fontSize: 14, fontFamily: "inherit",
+    outline: "none", background: "#f8fafc", color: "#0f172a",
+    boxSizing: "border-box", transition: "border-color 0.18s",
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#004aad] to-[#0066cc] flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
-        <div className="text-center mb-8">
-          <img 
+    <div style={{ display: "flex", minHeight: "100vh", fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+
+      {/* ── LEFT BRAND PANEL ── */}
+      <div style={{ flex: "0 0 40%", background: "linear-gradient(160deg,#0a1628 0%,#0d2f5e 55%,#0a3d3a 100%)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "60px 44px", position: "relative", overflow: "hidden" }}>
+        <div style={{ position: "absolute", top: -100, right: -80, width: 300, height: 300, borderRadius: "50%", background: "radial-gradient(circle,rgba(16,185,129,0.15),transparent 70%)", pointerEvents: "none" }} />
+        <div style={{ position: "absolute", bottom: -80, left: -60, width: 260, height: 260, borderRadius: "50%", background: "radial-gradient(circle,rgba(0,74,173,0.2),transparent 70%)", pointerEvents: "none" }} />
+
+        <div style={{ position: "relative", zIndex: 1, textAlign: "center", maxWidth: 300 }}>
+          <img
             src="https://019beed4-58f9-79ea-8acd-d59b2c121f81.mochausercontent.com/Ahava-on-88-logo.png"
-            alt="Ahava Healthcare"
-            className="h-16 mx-auto mb-4"
+            alt="Ahava"
+            style={{ height: 100, marginBottom: 24 }}
+            onError={(e) => ((e.target as HTMLImageElement).style.display = "none")}
           />
-          <h1 className="text-3xl font-bold text-gray-900">Create Account</h1>
-          <p className="text-gray-600 mt-2">Join Ahava Healthcare today</p>
-        </div>
+          <h2 style={{ color: "white", fontSize: 22, fontWeight: 800, marginBottom: 10 }}>Join thousands of South Africans</h2>
+          <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 14, lineHeight: 1.7, marginBottom: 36 }}>
+            Take control of your health with AI monitoring, verified nurses, and doctor oversight.
+          </p>
 
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-start gap-3">
-            <AlertCircle className="text-red-600 flex-shrink-0 mt-0.5" size={20} />
-            <p className="text-red-800 text-sm">{error}</p>
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <div>
-            <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">
-              Full Name
-            </label>
-            <input
-              id="name"
-              type="text"
-              required
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#004aad] focus:border-transparent"
-              placeholder="John Doe"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-              Email Address
-            </label>
-            <input
-              id="email"
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#004aad] focus:border-transparent"
-              placeholder="you@example.com"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              required
-              value={password}
-              onChange={(e) => {
-                setPassword(e.target.value);
-                validatePassword(e.target.value);
-              }}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#004aad] focus:border-transparent"
-              placeholder="••••••••"
-            />
-            {password && (
-              <div className="mt-2 space-y-1">
-                {["At least 8 characters", "One uppercase letter", "One lowercase letter", "One number"].map((req) => {
-                  const isMet = !passwordErrors.includes(req);
-                  return (
-                    <div key={req} className="flex items-center gap-2 text-sm">
-                      {isMet ? (
-                        <CheckCircle2 size={16} className="text-green-600" />
-                      ) : (
-                        <div className="w-4 h-4 rounded-full border-2 border-gray-300" />
-                      )}
-                      <span className={isMet ? "text-green-600" : "text-gray-500"}>{req}</span>
-                    </div>
-                  );
-                })}
+          {/* Feature pills */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {[
+              { icon: "🧠", text: "AI-powered symptom analysis" },
+              { icon: "🏥", text: "On-demand nurse home visits" },
+              { icon: "👨‍⚕️", text: "Doctor-reviewed diagnostics" },
+              { icon: "📊", text: "Real-time biometric tracking" },
+            ].map(({ icon, text }) => (
+              <div key={text} style={{ display: "flex", alignItems: "center", gap: 10, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "9px 14px", textAlign: "left" }}>
+                <span style={{ fontSize: 18 }}>{icon}</span>
+                <span style={{ color: "rgba(255,255,255,0.75)", fontSize: 13, fontWeight: 500 }}>{text}</span>
               </div>
-            )}
+            ))}
           </div>
+        </div>
+      </div>
 
-          <div>
-            <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1">
-              Confirm Password
-            </label>
-            <input
-              id="confirmPassword"
-              type="password"
-              required
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#004aad] focus:border-transparent"
-              placeholder="••••••••"
-            />
-          </div>
-
+      {/* ── RIGHT FORM PANEL ── */}
+      <div style={{ flex: 1, background: "white", display: "flex", alignItems: "center", justifyContent: "center", padding: "48px 40px", overflowY: "auto" }}>
+        <div style={{ width: "100%", maxWidth: 420 }}>
           <button
-            type="submit"
-            disabled={loading || passwordErrors.length > 0}
-            className="w-full bg-[#004aad] text-white py-3 rounded-lg font-semibold hover:bg-[#003d8f] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={() => navigate("/")}
+            style={{ background: "none", border: "none", color: "#94a3b8", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", marginBottom: 32, display: "flex", alignItems: "center", gap: 6, padding: 0 }}
           >
-            {loading ? "Creating account..." : "Create Account"}
+            ← Back to home
           </button>
-        </form>
 
-        <div className="mt-6">
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-gray-300"></div>
-            </div>
-            <div className="relative flex justify-center text-sm">
-              <span className="px-4 bg-white text-gray-500">Or continue with</span>
-            </div>
+          <div style={{ marginBottom: 28 }}>
+            <h1 style={{ fontSize: 26, fontWeight: 900, color: "#0f172a", marginBottom: 6 }}>Create your account</h1>
+            <p style={{ fontSize: 14, color: "#64748b" }}>Free forever · No credit card required</p>
           </div>
 
+          {/* Error */}
+          {error && (
+            <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "12px 16px", marginBottom: 18, display: "flex", alignItems: "flex-start", gap: 10 }}>
+              <span style={{ color: "#ef4444", fontSize: 16, flexShrink: 0 }}>⚠</span>
+              <span style={{ color: "#dc2626", fontSize: 13 }}>{error}</span>
+            </div>
+          )}
+
+          {/* Google */}
           <button
             onClick={handleGoogleSignup}
             disabled={loading}
-            className="mt-4 w-full flex items-center justify-center gap-3 bg-white border border-gray-300 py-3 rounded-lg font-semibold hover:bg-gray-50 transition-colors disabled:opacity-50"
+            style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, background: "white", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "12px 20px", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", marginBottom: 22, color: "#0f172a", boxSizing: "border-box" }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "#f8fafc"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "white"; }}
           >
-            <svg className="w-5 h-5" viewBox="0 0 24 24">
+            <svg width="18" height="18" viewBox="0 0 24 24">
               <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
               <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
               <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
@@ -202,22 +141,92 @@ export default function SignupPage() {
             </svg>
             Sign up with Google
           </button>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 22 }}>
+            <div style={{ flex: 1, height: 1, background: "#f1f5f9" }} />
+            <span style={{ fontSize: 12, color: "#94a3b8", fontWeight: 600 }}>or sign up with email</span>
+            <div style={{ flex: 1, height: 1, background: "#f1f5f9" }} />
+          </div>
+
+          <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {/* Name */}
+            <div>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Full Name</label>
+              <input type="text" required value={name} onChange={(e) => setName(e.target.value)} placeholder="Sipho Ndlovu" style={inp}
+                onFocus={(e) => (e.currentTarget.style.borderColor = "#004aad")}
+                onBlur={(e) => (e.currentTarget.style.borderColor = "#e2e8f0")} />
+            </div>
+
+            {/* Email */}
+            <div>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Email Address</label>
+              <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" style={inp}
+                onFocus={(e) => (e.currentTarget.style.borderColor = "#004aad")}
+                onBlur={(e) => (e.currentTarget.style.borderColor = "#e2e8f0")} />
+            </div>
+
+            {/* Password */}
+            <div>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Password</label>
+              <div style={{ position: "relative" }}>
+                <input type={showPw ? "text" : "password"} required value={password}
+                  onChange={(e) => { setPassword(e.target.value); validatePassword(e.target.value); }}
+                  placeholder="••••••••" style={{ ...inp, paddingRight: 44 }}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = "#004aad")}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = "#e2e8f0")} />
+                <button type="button" onClick={() => setShowPw(!showPw)}
+                  style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#94a3b8", fontSize: 16, padding: 0 }}>
+                  {showPw ? "🙈" : "👁"}
+                </button>
+              </div>
+              {password && (
+                <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 12px" }}>
+                  {PW_REQS.map((req) => {
+                    const met = !passwordErrors.includes(req);
+                    return (
+                      <div key={req} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: met ? "#059669" : "#94a3b8" }}>
+                        <span style={{ fontSize: 14 }}>{met ? "✅" : "○"}</span>{req}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Confirm */}
+            <div>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Confirm Password</label>
+              <input type="password" required value={confirmPassword} onChange={(e) => setConfirm(e.target.value)} placeholder="••••••••" style={{
+                ...inp,
+                borderColor: confirmPassword && confirmPassword !== password ? "#ef4444" : "#e2e8f0",
+              }}
+                onFocus={(e) => (e.currentTarget.style.borderColor = "#004aad")}
+                onBlur={(e) => (e.currentTarget.style.borderColor = (confirmPassword && confirmPassword !== password) ? "#ef4444" : "#e2e8f0")} />
+              {confirmPassword && confirmPassword !== password && (
+                <div style={{ fontSize: 12, color: "#ef4444", marginTop: 4 }}>Passwords don't match</div>
+              )}
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading || passwordErrors.length > 0 || (!!confirmPassword && confirmPassword !== password)}
+              style={{ width: "100%", background: (loading || passwordErrors.length > 0) ? "#94a3b8" : "linear-gradient(135deg,#10b981,#059669)", border: "none", color: "white", borderRadius: 10, padding: "13px 20px", fontSize: 15, fontWeight: 700, cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit", boxShadow: "0 4px 14px rgba(16,185,129,0.3)", marginTop: 4 }}
+            >
+              {loading ? "Creating account…" : "Create Free Account →"}
+            </button>
+          </form>
+
+          <p style={{ textAlign: "center", marginTop: 20, fontSize: 13, color: "#64748b" }}>
+            Already have an account?{" "}
+            <Link to="/login" style={{ color: "#004aad", fontWeight: 700, textDecoration: "none" }}>Sign in</Link>
+          </p>
+          <p style={{ textAlign: "center", marginTop: 12, fontSize: 11, color: "#94a3b8" }}>
+            By signing up you agree to our{" "}
+            <Link to="/terms" style={{ color: "#94a3b8" }}>Terms</Link> &{" "}
+            <Link to="/privacy" style={{ color: "#94a3b8" }}>Privacy Policy</Link>
+          </p>
         </div>
-
-        <p className="mt-8 text-center text-sm text-gray-600">
-          Already have an account?{" "}
-          <Link to="/login" className="text-[#004aad] font-semibold hover:text-[#003d8f]">
-            Sign in
-          </Link>
-        </p>
-
-        <p className="mt-4 text-center text-xs text-gray-500">
-          By signing up, you agree to our{" "}
-          <Link to="/terms" className="underline">Terms</Link> and{" "}
-          <Link to="/privacy" className="underline">Privacy Policy</Link>
-        </p>
       </div>
     </div>
   );
 }
-

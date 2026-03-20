@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router";
+import { getApiBase, } from "@/react-app/lib/native";
+import { getAuthHeaders } from "@/react-app/lib/auth-context";
 import { Activity, Stethoscope, UserRound } from "lucide-react";
 import MedicalDisclaimer from "@/react-app/components/MedicalDisclaimer";
 
@@ -34,9 +36,9 @@ export default function OnboardingPage() {
     setIsSubmitting(true);
 
     try {
-      const response = await fetch("/api/profile", {
+      const response = await fetch(`${getApiBase()}/api/profile`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({
           ...formData,
           role,

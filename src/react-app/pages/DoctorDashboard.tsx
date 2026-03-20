@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { useAuth } from "@/react-app/lib/auth-context";
+import { useAuth, getAuthHeaders } from "@/react-app/lib/auth-context";
 import { useNavigate } from "react-router";
-import { FileText, Clock, CheckCircle, AlertCircle, User } from "lucide-react";
+import DashboardLayout from "@/react-app/components/DashboardLayout";
+import { getApiBase } from "@/react-app/lib/native";
 
 interface Profile {
   full_name: string;
@@ -24,7 +25,7 @@ interface DiagnosticReport {
 }
 
 export default function DoctorDashboard() {
-  const { logout } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [reports, setReports] = useState<DiagnosticReport[]>([]);
@@ -48,8 +49,10 @@ export default function DoctorDashboard() {
   }, [profile, filter]);
 
   const loadProfile = async () => {
+    const base = getApiBase();
+    const headers = getAuthHeaders();
     try {
-      const response = await fetch("/api/profile");
+      const response = await fetch(`${base}/api/profile`, { headers });
       const data = await response.json();
 
       if (data.profile?.role !== "DOCTOR") {
@@ -66,8 +69,10 @@ export default function DoctorDashboard() {
   };
 
   const loadReports = async () => {
+    const base = getApiBase();
+    const headers = getAuthHeaders();
     try {
-      const response = await fetch(`/api/diagnostic-reports?status=${filter}`);
+      const response = await fetch(`${base}/api/diagnostic-reports?status=${filter}`, { headers });
       const data = await response.json();
       setReports(data.reports || []);
     } catch (error) {
@@ -86,14 +91,12 @@ export default function DoctorDashboard() {
 
   const handleReview = async () => {
     if (!selectedReport) return;
-
+    const base = getApiBase();
+    const headers = { ...getAuthHeaders(), "Content-Type": "application/json" };
     try {
-      await fetch(`/api/diagnostic-reports/${selectedReport.id}/review`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(reviewData),
+      await fetch(`${base}/api/diagnostic-reports/${selectedReport.id}/review`, {
+        method: "POST", headers, body: JSON.stringify(reviewData),
       });
-
       loadReports();
       setSelectedReport(null);
     } catch (error) {
@@ -103,17 +106,16 @@ export default function DoctorDashboard() {
 
   const handleRelease = async () => {
     if (!selectedReport) return;
-
     if (!reviewData.doctor_notes || !reviewData.diagnosis) {
       alert("Please complete your review before releasing the report to the patient.");
       return;
     }
-
+    const base = getApiBase();
+    const headers = getAuthHeaders();
     try {
-      await fetch(`/api/diagnostic-reports/${selectedReport.id}/release`, {
-        method: "POST",
+      await fetch(`${base}/api/diagnostic-reports/${selectedReport.id}/release`, {
+        method: "POST", headers,
       });
-
       loadReports();
       setSelectedReport(null);
       setReviewData({ doctor_notes: "", diagnosis: "", recommendations: "" });
@@ -122,246 +124,184 @@ export default function DoctorDashboard() {
     }
   };
 
+  const firstName = user?.firstName || profile?.full_name?.split(" ")[0] || "Doctor";
+
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-[#8b5cf6]"></div>
+      <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2" style={{ borderColor: "var(--doctor)" }} />
       </div>
     );
   }
 
+  const pendingCount = reports.filter(r => r.is_released !== 1).length;
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Navigation */}
-      <nav className="bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center space-x-3">
-              <img 
-                src="https://019beed4-58f9-79ea-8acd-d59b2c121f81.mochausercontent.com/Ahava-on-88-logo.png"
-                alt="Ahava Healthcare"
-                className="h-10"
-              />
-              <span className="text-xl font-semibold text-[#004aad]">Ahava Healthcare</span>
-              <span className="px-3 py-1 bg-purple-100 text-purple-700 text-sm font-medium rounded-full">
-                Doctor Portal
-              </span>
+    <DashboardLayout>
+      {/* ── HERO ── */}
+      <div className="hero-card header-DOCTOR" style={{ position: "relative", zIndex: 1 }}>
+        <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
+          <div>
+            <div style={{ fontSize: 13, opacity: 0.8, marginBottom: 4 }}>Dr. {firstName}</div>
+            <div style={{ fontSize: 22, fontWeight: 800 }}>Triage &amp; Diagnostic Review</div>
+            <div style={{ marginTop: 10, fontSize: 13, opacity: 0.8 }}>Review AI-generated reports and provide expert oversight</div>
+          </div>
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 32, fontWeight: 900, lineHeight: 1 }}>{pendingCount}</div>
+              <div style={{ fontSize: 11, opacity: 0.75, textTransform: "uppercase", letterSpacing: "0.05em" }}>Pending</div>
             </div>
-            <div className="flex items-center space-x-4">
-              <span className="text-sm text-gray-600">{profile?.full_name}</span>
-              <button
-                onClick={logout}
-                className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors"
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 32, fontWeight: 900, lineHeight: 1 }}>{reports.length}</div>
+              <div style={{ fontSize: 11, opacity: 0.75, textTransform: "uppercase", letterSpacing: "0.05em" }}>Total</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── FILTER TABS ── */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+        {(["pending", "all"] as const).map(f => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            style={{
+              padding: "8px 18px", borderRadius: 8, fontWeight: 600, fontSize: 13,
+              cursor: "pointer", border: "1.5px solid", fontFamily: "inherit",
+              background: filter === f ? "var(--doctor)" : "var(--surface)",
+              color: filter === f ? "white" : "var(--text-muted)",
+              borderColor: filter === f ? "var(--doctor)" : "var(--border)",
+              transition: "all 0.18s",
+            }}
+          >
+            {f === "pending" ? `Pending (${pendingCount})` : "All Reports"}
+          </button>
+        ))}
+      </div>
+
+      {/* ── MAIN GRID ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        {/* ── TRIAGE LIST ── */}
+        <div className="dash-card" style={{ overflowY: "auto", maxHeight: 700 }}>
+          <div className="card-section-title">⚕️ {filter === "pending" ? "Pending Reports" : "All Reports"}</div>
+          {reports.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "40px 0", color: "var(--text-muted)", fontSize: 13 }}>
+              📋 {filter === "pending" ? "No pending reports" : "No reports found"}
+            </div>
+          ) : (
+            reports.map((report) => (
+              <div
+                key={report.id}
+                onClick={() => selectReport(report)}
+                className={`triage-case-card${selectedReport?.id === report.id ? " selected" : ""}`}
               >
-                Logout
-              </button>
-            </div>
-          </div>
-        </div>
-      </nav>
-
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Diagnostic Review Portal</h1>
-          <p className="text-gray-600">Review AI-generated diagnostic reports and provide expert oversight</p>
-        </div>
-
-        {/* Filter Tabs */}
-        <div className="flex space-x-2 mb-6">
-          <button
-            onClick={() => setFilter("pending")}
-            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-              filter === "pending"
-                ? "bg-[#8b5cf6] text-white"
-                : "bg-white text-gray-600 hover:bg-gray-50"
-            }`}
-          >
-            Pending Review
-          </button>
-          <button
-            onClick={() => setFilter("all")}
-            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-              filter === "all"
-                ? "bg-[#8b5cf6] text-white"
-                : "bg-white text-gray-600 hover:bg-gray-50"
-            }`}
-          >
-            All Reports
-          </button>
-        </div>
-
-        <div className="grid lg:grid-cols-2 gap-6">
-          {/* Reports List */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            <h3 className="text-xl font-bold text-gray-900 mb-4">
-              {filter === "pending" ? "Pending Reports" : "All Reports"}
-            </h3>
-            
-            {reports.length === 0 ? (
-              <div className="text-center py-12">
-                <FileText className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-                <p className="text-gray-500">
-                  {filter === "pending" ? "No pending reports" : "No reports found"}
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {reports.map((report) => (
-                  <button
-                    key={report.id}
-                    onClick={() => selectReport(report)}
-                    className={`w-full text-left p-4 rounded-lg border transition-all ${
-                      selectedReport?.id === report.id
-                        ? "border-[#8b5cf6] bg-purple-50"
-                        : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <div>
-                        <h4 className="font-semibold text-gray-900 mb-1">
-                          {report.report_type}
-                        </h4>
-                        <p className="text-sm text-gray-600 flex items-center">
-                          <User className="w-4 h-4 mr-1" />
-                          Patient ID: {report.patient_id.slice(0, 8)}...
-                        </p>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>{report.report_type}</div>
+                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>👤 Patient {report.patient_id.slice(0, 8)}…</div>
+                    {report.symptoms && (
+                      <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {report.symptoms}
                       </div>
-                      {report.is_released === 1 ? (
-                        <CheckCircle className="w-5 h-5 text-green-600" />
-                      ) : (
-                        <Clock className="w-5 h-5 text-orange-600" />
-                      )}
-                    </div>
-                    <div className="flex items-center justify-between text-xs text-gray-500">
-                      <span>
-                        {new Date(report.created_at).toLocaleDateString()}
+                    )}
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
+                    {report.is_released === 1 ? (
+                      <span style={{ background: "#dcfce7", color: "#16a34a", padding: "2px 8px", borderRadius: 20, fontSize: 11, fontWeight: 600 }}>✓ Released</span>
+                    ) : (
+                      <span style={{ background: "#fff7ed", color: "#d97706", padding: "2px 8px", borderRadius: 20, fontSize: 11, fontWeight: 600 }}>⏳ Pending</span>
+                    )}
+                    {report.ai_confidence && (
+                      <span style={{ background: "#eff6ff", color: "var(--primary)", padding: "2px 8px", borderRadius: 20, fontSize: 11, fontWeight: 600 }}>
+                        AI {(report.ai_confidence * 100).toFixed(0)}%
                       </span>
-                      {report.ai_confidence && (
-                        <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded">
-                          AI: {(report.ai_confidence * 100).toFixed(0)}%
-                        </span>
-                      )}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Report Detail & Review */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-            {selectedReport ? (
-              <div className="space-y-6">
-                <div>
-                  <h3 className="text-xl font-bold text-gray-900 mb-4">Report Details</h3>
-                  
-                  {/* AI Analysis Section */}
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                    <div className="flex items-center mb-2">
-                      <AlertCircle className="w-5 h-5 text-blue-600 mr-2" />
-                      <h4 className="font-semibold text-blue-900">AI Analysis</h4>
-                    </div>
-                    {selectedReport.symptoms && (
-                      <div className="mb-3">
-                        <p className="text-sm font-medium text-blue-800 mb-1">Symptoms:</p>
-                        <p className="text-sm text-blue-900">{selectedReport.symptoms}</p>
-                      </div>
-                    )}
-                    {selectedReport.ai_analysis && (
-                      <div>
-                        <p className="text-sm font-medium text-blue-800 mb-1">AI Findings:</p>
-                        <p className="text-sm text-blue-900">{selectedReport.ai_analysis}</p>
-                      </div>
-                    )}
-                    {selectedReport.ai_confidence && (
-                      <p className="text-xs text-blue-700 mt-2">
-                        Confidence: {(selectedReport.ai_confidence * 100).toFixed(1)}%
-                      </p>
                     )}
                   </div>
-
-                  {/* Doctor Review Form */}
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Doctor's Notes *
-                      </label>
-                      <textarea
-                        value={reviewData.doctor_notes}
-                        onChange={(e) =>
-                          setReviewData({ ...reviewData, doctor_notes: e.target.value })
-                        }
-                        rows={4}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#8b5cf6] focus:border-transparent resize-none"
-                        placeholder="Your clinical assessment and observations..."
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Diagnosis *
-                      </label>
-                      <textarea
-                        value={reviewData.diagnosis}
-                        onChange={(e) =>
-                          setReviewData({ ...reviewData, diagnosis: e.target.value })
-                        }
-                        rows={3}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#8b5cf6] focus:border-transparent resize-none"
-                        placeholder="Final diagnosis..."
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Recommendations
-                      </label>
-                      <textarea
-                        value={reviewData.recommendations}
-                        onChange={(e) =>
-                          setReviewData({ ...reviewData, recommendations: e.target.value })
-                        }
-                        rows={3}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#8b5cf6] focus:border-transparent resize-none"
-                        placeholder="Treatment plan and follow-up recommendations..."
-                      />
-                    </div>
-                  </div>
-
-                  {/* Action Buttons */}
-                  <div className="flex gap-3 pt-4">
-                    <button
-                      onClick={handleReview}
-                      className="flex-1 px-6 py-3 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
-                    >
-                      Save Review
-                    </button>
-                    <button
-                      onClick={handleRelease}
-                      disabled={selectedReport.is_released === 1}
-                      className="flex-1 px-6 py-3 bg-[#8b5cf6] text-white rounded-lg font-medium hover:bg-[#7c3aed] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {selectedReport.is_released === 1 ? "Released" : "Release to Patient"}
-                    </button>
-                  </div>
-
-                  {selectedReport.is_released === 1 && (
-                    <p className="text-sm text-green-600 text-center mt-2">
-                      ✓ This report has been released to the patient
-                    </p>
-                  )}
                 </div>
+                <div style={{ fontSize: 11, color: "var(--text-light)", marginTop: 8 }}>{new Date(report.created_at).toLocaleString("en-ZA")}</div>
               </div>
-            ) : (
-              <div className="text-center py-12">
-                <FileText className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-                <p className="text-gray-500">Select a report to review</p>
-              </div>
-            )}
-          </div>
+            ))
+          )}
         </div>
-      </main>
-    </div>
+
+        {/* ── REVIEW PANEL ── */}
+        <div className="dash-card">
+          {selectedReport ? (
+            <>
+              <div className="card-section-title">📋 Report Details</div>
+
+              {/* AI Panel */}
+              <div className="ai-panel" style={{ marginBottom: 18 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: "var(--primary)", marginBottom: 10 }}>🤖 AI Analysis</div>
+                {selectedReport.symptoms && (
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 3 }}>Symptoms</div>
+                    <div style={{ fontSize: 13, color: "#1e40af" }}>{selectedReport.symptoms}</div>
+                  </div>
+                )}
+                {selectedReport.ai_analysis && (
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 3 }}>AI Findings</div>
+                    <div style={{ fontSize: 13, color: "#1e40af" }}>{selectedReport.ai_analysis}</div>
+                  </div>
+                )}
+                {selectedReport.ai_confidence && (
+                  <div style={{ fontSize: 12, color: "var(--primary)", marginTop: 6, fontWeight: 600 }}>
+                    Confidence: {(selectedReport.ai_confidence * 100).toFixed(1)}%
+                  </div>
+                )}
+              </div>
+
+              {/* Review form */}
+              {[{ label: "Doctor's Notes *", key: "doctor_notes", placeholder: "Clinical assessment and observations…" },
+                { label: "Diagnosis *", key: "diagnosis", placeholder: "Final diagnosis…" },
+                { label: "Recommendations", key: "recommendations", placeholder: "Treatment plan and follow-up…" }]
+                .map(({ label, key, placeholder }) => (
+                  <div key={key} style={{ marginBottom: 14 }}>
+                    <label style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", display: "block", marginBottom: 6 }}>{label}</label>
+                    <textarea
+                      value={(reviewData as any)[key]}
+                      onChange={(e) => setReviewData({ ...reviewData, [key]: e.target.value })}
+                      rows={3}
+                      placeholder={placeholder}
+                      style={{ width: "100%", padding: "10px 14px", border: "1.5px solid var(--border)", borderRadius: "var(--radius)", fontSize: 13, fontFamily: "inherit", resize: "none", outline: "none", color: "var(--text)", background: "var(--surface)", transition: "border 0.18s" }}
+                      onFocus={(e) => (e.target.style.borderColor = "var(--doctor)")}
+                      onBlur={(e) => (e.target.style.borderColor = "var(--border)")}
+                    />
+                  </div>
+                ))
+              }
+
+              <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
+                <button
+                  onClick={handleReview}
+                  style={{ flex: 1, padding: "10px 0", background: "var(--bg)", color: "var(--text)", border: "1.5px solid var(--border)", borderRadius: 8, fontWeight: 600, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}
+                >
+                  Save Review
+                </button>
+                <button
+                  onClick={handleRelease}
+                  disabled={selectedReport.is_released === 1}
+                  style={{ flex: 1, padding: "10px 0", background: selectedReport.is_released === 1 ? "var(--border)" : "var(--doctor)", color: "white", border: "none", borderRadius: 8, fontWeight: 600, fontSize: 14, cursor: selectedReport.is_released === 1 ? "not-allowed" : "pointer", fontFamily: "inherit" }}
+                >
+                  {selectedReport.is_released === 1 ? "✓ Released" : "Release to Patient"}
+                </button>
+              </div>
+
+              {selectedReport.is_released === 1 && (
+                <div style={{ marginTop: 12, padding: "10px 14px", background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 8, fontSize: 13, color: "#15803d", textAlign: "center", fontWeight: 600 }}>
+                  ✓ This report has been released to the patient
+                </div>
+              )}
+            </>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: 300, color: "var(--text-muted)", fontSize: 13 }}>
+              <div style={{ fontSize: 40, marginBottom: 12 }}>📋</div>
+              Select a case from the queue to review
+            </div>
+          )}
+        </div>
+      </div>
+    </DashboardLayout>
   );
 }

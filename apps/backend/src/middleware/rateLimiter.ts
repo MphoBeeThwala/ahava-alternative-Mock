@@ -1,4 +1,4 @@
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 
 // Custom IPv6-safe key generator that properly extracts IP from X-Forwarded-For
 const getClientIp = (req: any) => {
@@ -8,8 +8,8 @@ const getClientIp = (req: any) => {
     // Take the first IP if multiple (client IP is first)
     return typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : forwarded[0];
   }
-  // Fallback to req.ip (requires trust proxy to be set)
-  return req.ip || req.connection.remoteAddress || '';
+  // Use express-rate-limit's ipKeyGenerator for IPv6-safe fallback
+  return ipKeyGenerator(req);
 };
 
 // General API rate limiter. In development allow 10k/15min so load-test (1000 users × 4 req) works without LOAD_TEST=1.

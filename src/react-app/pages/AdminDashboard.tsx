@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { useAuth } from "@/react-app/lib/auth-context";
+import { useAuth, getAuthHeaders } from "@/react-app/lib/auth-context";
 import { useNavigate } from "react-router";
+import { getApiBase } from "@/react-app/lib/native";
 import { Users, Shield, AlertTriangle, Activity, FileText, CheckCircle } from "lucide-react";
 
 interface Profile {
@@ -86,13 +87,15 @@ export default function AdminDashboard() {
   }, [user, navigate]);
 
   const fetchDashboardData = async () => {
+    const base = getApiBase();
+    const headers = getAuthHeaders();
     try {
       const [usersRes, alertsRes, appointmentsRes, reportsRes, statsRes] = await Promise.all([
-        fetch("/api/admin/users"),
-        fetch("/api/admin/panic-alerts"),
-        fetch("/api/admin/appointments"),
-        fetch("/api/admin/diagnostic-reports"),
-        fetch("/api/admin/stats"),
+        fetch(`${base}/api/admin/users`, { headers }),
+        fetch(`${base}/api/admin/panic-alerts`, { headers }),
+        fetch(`${base}/api/admin/appointments`, { headers }),
+        fetch(`${base}/api/admin/diagnostic-reports`, { headers }),
+        fetch(`${base}/api/admin/stats`, { headers }),
       ]);
 
       if (usersRes.ok) {
