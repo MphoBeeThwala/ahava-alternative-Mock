@@ -1,15 +1,47 @@
 /**
  * React Auth Provider and Hooks
- * Replaces Mocha useAuth hook
+ * JWT token-based auth — tokens stored in localStorage.
  */
 
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
+import { getApiBase } from "@/react-app/lib/native";
+
+const TOKEN_KEY = "ahava_access_token";
+const REFRESH_KEY = "ahava_refresh_token";
+
+/** Read the stored access token (may be null) */
+export function getAccessToken(): string | null {
+  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
+}
+
+/** Bearer Authorization header for use in any fetch call */
+export function getAuthHeaders(): Record<string, string> {
+  const token = getAccessToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+function saveTokens(access: string, refresh: string) {
+  try {
+    localStorage.setItem(TOKEN_KEY, access);
+    localStorage.setItem(REFRESH_KEY, refresh);
+  } catch {}
+}
+
+function clearTokens() {
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(REFRESH_KEY);
+  } catch {}
+}
 
 interface User {
   id: string;
   email: string;
+  firstName: string;
+  lastName: string;
   name: string;
+  role: string;
   emailVerified: boolean;
 }
 
@@ -19,7 +51,7 @@ interface AuthContextType {
   error: string | null;
   login: (email: string, password: string) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
-  signup: (email: string, password: string, name: string) => Promise<void>;
+  signup: (email: string, password: string, name: string, role?: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
@@ -39,25 +71,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const fetchUser = async () => {
     try {
       setLoading(true);
-      const response = await fetch("/api/session", {
-        credentials: "include",
+      const token = getAccessToken();
+      if (!token) {
+        setUser(null);
+        return;
+      }
+      const response = await fetch(`${getApiBase()}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
       });
-
       if (response.ok) {
-        const data = await response.json();
-        console.log("Session API response:", { hasUser: !!data.user, user: data.user });
+        const data = await response.json() as { user: any };
         if (data.user) {
-          setUser(data.user);
+          setUser({
+            id: data.user.id,
+            email: data.user.email,
+            firstName: data.user.firstName ?? "",
+            lastName: data.user.lastName ?? "",
+            name: `${data.user.firstName ?? ""} ${data.user.lastName ?? ""}`.trim(),
+            role: data.user.role ?? "PATIENT",
+            emailVerified: data.user.isVerified ?? false,
+          });
         } else {
-          // Clear user if session returned null
+          clearTokens();
           setUser(null);
         }
       } else {
-        console.error("Session API error:", response.status, response.statusText);
+        clearTokens();
         setUser(null);
       }
     } catch (err) {
       console.error("Failed to fetch user:", err);
+      clearTokens();
       setUser(null);
     } finally {
       setLoading(false);
@@ -69,20 +113,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setError(null);
       setLoading(true);
 
-      const response = await fetch("/api/auth/login", {
+      const response = await fetch(`${getApiBase()}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
-        credentials: "include",
       });
 
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || "Login failed");
-      }
+      const data = await response.json() as any;
+      if (!response.ok) throw new Error(data.error || "Login failed");
 
-      const data = await response.json();
-      setUser(data.user);
+      saveTokens(data.accessToken, data.refreshToken);
+      setUser({
+        id: data.user.id,
+        email: data.user.email,
+        firstName: data.user.firstName ?? "",
+        lastName: data.user.lastName ?? "",
+        name: `${data.user.firstName ?? ""} ${data.user.lastName ?? ""}`.trim(),
+        role: data.user.role ?? "PATIENT",
+        emailVerified: data.user.isVerified ?? false,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Login failed";
       setError(message);
@@ -112,26 +161,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const signup = async (email: string, password: string, name: string) => {
+  const signup = async (email: string, password: string, name: string, role = "PATIENT") => {
     try {
       setError(null);
       setLoading(true);
 
-      const response = await fetch("/api/auth/signup", {
+      const parts = name.trim().split(" ");
+      const firstName = parts[0] ?? name;
+      const lastName = (parts.slice(1).join(" ") || parts[0]) ?? "";
+
+      const response = await fetch(`${getApiBase()}/api/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // Name is collected in profile step, not auth step in backend
-        body: JSON.stringify({ email, password }),
-        credentials: "include",
+        body: JSON.stringify({ email, password, firstName, lastName, role }),
       });
 
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || "Signup failed");
-      }
+      const data = await response.json() as any;
+      if (!response.ok) throw new Error(data.error || "Signup failed");
 
-      const data = await response.json();
-      setUser(data.user);
+      saveTokens(data.accessToken, data.refreshToken);
+      setUser({
+        id: data.user.id,
+        email: data.user.email,
+        firstName: data.user.firstName ?? firstName,
+        lastName: data.user.lastName ?? lastName,
+        name: `${data.user.firstName ?? firstName} ${data.user.lastName ?? lastName}`.trim(),
+        role: data.user.role ?? role,
+        emailVerified: data.user.isVerified ?? false,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Signup failed";
       setError(message);
@@ -144,17 +201,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = async () => {
     try {
       setError(null);
-      
-      await fetch("/api/auth/logout", {
+      const token = getAccessToken();
+      await fetch(`${getApiBase()}/api/auth/logout`, {
         method: "POST",
-        credentials: "include",
-      });
-
+        headers: { "Content-Type": "application/json", ...( token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ refreshToken: localStorage.getItem("ahava_refresh_token") }),
+      }).catch(() => {});
+      clearTokens();
       setUser(null);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Logout failed";
-      setError(message);
-      throw err;
+      clearTokens();
+      setUser(null);
     }
   };
 

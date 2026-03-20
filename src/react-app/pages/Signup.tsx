@@ -5,7 +5,7 @@ import { AlertCircle, CheckCircle2 } from "lucide-react";
 
 export default function SignupPage() {
   const navigate = useNavigate();
-  const { refreshUser } = useAuth();
+  const { signup } = useAuth();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -38,31 +38,11 @@ export default function SignupPage() {
     }
 
     setLoading(true);
-
     try {
-      const response = await fetch("/api/auth/signup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ email, password, name }),
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        // Refresh auth context
-        await refreshUser();
-        // Redirect to onboarding
-        navigate("/onboarding");
-      } else {
-        if (data.details && Array.isArray(data.details)) {
-          setError(data.details.join(", "));
-        } else {
-          setError(data.error || "Signup failed");
-        }
-      }
+      await signup(email, password, name, "PATIENT");
+      navigate("/onboarding");
     } catch (err) {
-      setError("Signup failed. Please try again.");
+      setError(err instanceof Error ? err.message : "Signup failed. Please try again.");
     } finally {
       setLoading(false);
     }

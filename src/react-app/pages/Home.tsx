@@ -1,4 +1,5 @@
 import { useAuth } from "@/react-app/lib/auth-context";
+import { getApiBase, isNative } from "@/react-app/lib/native";
 import { Activity, Heart, Shield, Users } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
@@ -21,7 +22,7 @@ export default function HomePage() {
     
     try {
       // Fetch the redirect URL from the API (bypasses React Router)
-      const response = await fetch("/api/auth/sign-in/google?json=true", {
+      const response = await fetch(`${getApiBase()}/api/auth/sign-in/google?json=true`, {
         method: "GET",
         credentials: "include",
         headers: {
@@ -111,12 +112,31 @@ export default function HomePage() {
               AI-driven health monitoring and on-demand nursing logistics. 
               Your health, our priority.
             </p>
-            <button
-              onClick={handleGoogleLogin}
-              className="px-8 py-4 bg-white text-[#004aad] rounded-lg text-lg font-semibold hover:bg-gray-100 transition-all shadow-2xl hover:shadow-3xl transform hover:scale-105"
-            >
-              Get Started with Google
-            </button>
+            {isNative ? (
+              <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                <a
+                  href="/login"
+                  className="px-8 py-4 bg-white text-[#004aad] rounded-lg text-lg font-semibold hover:bg-gray-100 transition-all shadow-2xl transform hover:scale-105"
+                  onClick={(e) => { e.preventDefault(); navigate("/login"); }}
+                >
+                  Sign In with Email
+                </a>
+                <a
+                  href="/signup"
+                  className="px-8 py-4 bg-transparent border-2 border-white text-white rounded-lg text-lg font-semibold hover:bg-white/10 transition-all shadow-2xl transform hover:scale-105"
+                  onClick={(e) => { e.preventDefault(); navigate("/signup"); }}
+                >
+                  Create Account
+                </a>
+              </div>
+            ) : (
+              <button
+                onClick={handleGoogleLogin}
+                className="px-8 py-4 bg-white text-[#004aad] rounded-lg text-lg font-semibold hover:bg-gray-100 transition-all shadow-2xl hover:shadow-3xl transform hover:scale-105"
+              >
+                Get Started with Google
+              </button>
+            )}
           </div>
         </div>
 

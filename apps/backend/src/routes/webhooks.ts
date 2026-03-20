@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { PrismaClient, PaymentStatus } from '@prisma/client';
 import { Request, Response, NextFunction } from 'express';
 import { notifyPaymentReceipt } from '../services/notifications';
+import { handleTerraWebhook } from './terra';
 
 const router: Router = Router();
 const prisma = new PrismaClient();
@@ -54,6 +55,9 @@ router.post('/payment', async (req: Request, res: Response, next: NextFunction) 
     next(error);
   }
 });
+
+// Terra wearable data webhook
+router.post('/terra', handleTerraWebhook);
 
 // List webhook events (for debugging; optional)
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {

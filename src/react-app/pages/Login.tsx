@@ -5,7 +5,7 @@ import { AlertCircle } from "lucide-react";
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { refreshUser } = useAuth();
+  const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -15,27 +15,11 @@ export default function LoginPage() {
     e.preventDefault();
     setError("");
     setLoading(true);
-
     try {
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ email, password }),
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        // Refresh auth context
-        await refreshUser();
-        // Redirect to onboarding
-        navigate("/onboarding");
-      } else {
-        setError(data.error || "Login failed");
-      }
+      await login(email, password);
+      navigate("/onboarding");
     } catch (err) {
-      setError("Login failed. Please try again.");
+      setError(err instanceof Error ? err.message : "Login failed. Please try again.");
     } finally {
       setLoading(false);
     }

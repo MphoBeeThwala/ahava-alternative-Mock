@@ -5,6 +5,7 @@ import { Activity, Heart, FileText, AlertCircle, MapPin, Brain, TrendingUp } fro
 import RequestNurseModal from "@/react-app/components/RequestNurseModal";
 import SymptomAnalysisModal from "@/react-app/components/SymptomAnalysisModal";
 import BaselineModal from "@/react-app/components/BaselineModal";
+import WearableConnectCard from "@/react-app/components/WearableConnectCard";
 
 interface Profile {
   full_name: string;
@@ -252,6 +253,11 @@ export default function PatientDashboard() {
               <p className="text-gray-500">No data yet</p>
             )}
           </div>
+        </div>
+
+        {/* Wearable / Health Connect */}
+        <div className="mb-8">
+          <WearableConnectCard />
         </div>
 
         {/* Quick Actions */}

@@ -1,4 +1,7 @@
 # Helper: Find Your Railway Production URLs
+# PSScriptAnalyzer suppress rules for demo/development scripts
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
+param()
 
 Write-Host "🔍 Searching for Railway Production URLs..." -ForegroundColor Cyan
 Write-Host ""
@@ -59,7 +62,7 @@ Write-Host ""
 Write-Host "🧪 Testing connection to backend..." -ForegroundColor Yellow
 
 try {
-    $healthCheck = Invoke-RestMethod -Uri "$backendUrl/api/health" -Method GET -TimeoutSec 5 -ErrorAction Stop
+    $null = Invoke-RestMethod -Uri "$backendUrl/api/health" -Method GET -TimeoutSec 5 -ErrorAction Stop
     Write-Host "✅ Backend is reachable and responding" -ForegroundColor Green
     Write-Host ""
 } catch {

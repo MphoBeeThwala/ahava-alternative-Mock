@@ -88,7 +88,17 @@ model User {
 
   // CVD risk context for early warning (POPIA: minimal storage)
   riskProfile       Json?    // { smoker?: boolean, hypertension?: boolean, cholesterolKnown?: boolean }
-  
+
+  // Terra API wearable integration
+  terraUserId       String?  @unique
+  connectedDevices  String[] @default([])
+
+  // SANC verification (nurses)
+  sancId                  String?
+  sancVerificationStatus  String?  // NOT_FOUND | NAME_MISMATCH | EXPIRED | SUSPENDED | Active
+  sancVerificationDate    DateTime?
+  sancCategory            String?  // Professional Nurse | Enrolled Nurse | Enrolled Nursing Auxiliary
+
   // Auth
   passwordHash      String?
   refreshTokens     RefreshToken[]
@@ -103,11 +113,14 @@ model User {
   healthAlerts      HealthAlert[] @relation("UserAlerts")
   triageCasesAsPatient TriageCase[] @relation("TriageCasePatient")
   triageCasesAsDoctor  TriageCase[] @relation("TriageCaseDoctor")
-  
+  doctorSessions       DoctorSession[]
+  consents             PatientConsent[]
+  baseline             UserBaseline?
+
   // Audit
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
-  
+
   @@map("users")
 }
 
@@ -372,16 +385,103 @@ model TriageCase {
   status            TriageCaseStatus  @default(PENDING_REVIEW)
   doctorNotes       String?
   finalDiagnosis    String?          // Set when doctor approves or overrides
-  referredTo        String?           // e.g. "In-person with Dr X" or "Partner clinic near patient"
-  
+  referredTo        String?          // e.g. "In-person with Dr X" or "Partner clinic near patient"
+
+  // SLA & escalation
+  slaDeadline       DateTime?        // Set on creation based on aiTriageLevel
+  escalatedAt       DateTime?
+  escalationLevel   Int              @default(0)  // 0=normal, 1=escalated, 2=critical
+  reviewedWithinSla Boolean?
+
+  // Doctor compensation
+  doctorFeeCents    Int?             // ZAR cents paid to reviewing doctor
+  feePaid           Boolean          @default(false)
+
   patient           User             @relation("TriageCasePatient", fields: [patientId], references: [id], onDelete: Cascade)
   doctor            User?            @relation("TriageCaseDoctor", fields: [doctorId], references: [id], onDelete: SetNull)
-  
+
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
-  
+
   @@index([status])
   @@index([patientId])
   @@index([doctorId])
+  @@index([slaDeadline])
   @@map("triage_cases")
+}
+
+model UserBaseline {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+
+  hrMean          Float?
+  hrStd           Float?
+  hrvMean         Float?
+  hrvStd          Float?
+  spo2Mean        Float?
+  spo2Std         Float?
+  rrMean          Float?
+  rrStd           Float?
+
+  demographicSeed Json?    // { age_group, gender } — SA NDoH reference values
+  dataPointCount  Int      @default(0)
+  confidencePct   Int      @default(0)  // 0-100
+  stage           String   @default("PROVISIONAL") // PROVISIONAL|CALIBRATING|PERSONALISING|PERSONAL
+  lastCalculated  DateTime?
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_baselines")
+}
+
+model SancRegister {
+  id                 String    @id @default(cuid())
+  registrationNumber String    @unique
+  firstName          String
+  lastName           String
+  category           String    // Professional Nurse | Enrolled Nurse | Enrolled Nursing Auxiliary
+  status             String    // Active | Suspended | Cancelled | Lapsed
+  expiryDate         DateTime?
+  importedAt         DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([registrationNumber])
+  @@index([status])
+  @@map("sanc_register")
+}
+
+model PatientConsent {
+  id          String    @id @default(cuid())
+  userId      String
+  consentType String    // AI_TRIAGE | BIOMETRIC_MONITORING | DATA_SHARING | MARKETING
+  version     String    @default("1.0")
+  givenAt     DateTime  @default(now())
+  ipAddress   String?
+  userAgent   String?
+  withdrawn   Boolean   @default(false)
+  withdrawnAt DateTime?
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, consentType, version])
+  @@index([userId, consentType])
+  @@map("patient_consents")
+}
+
+model DoctorSession {
+  id            String    @id @default(cuid())
+  doctorId      String
+  startsAt      DateTime
+  endsAt        DateTime
+  maxCases      Int       @default(20)
+  isActive      Boolean   @default(true)
+  casesReviewed Int       @default(0)
+
+  doctor        User      @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  createdAt     DateTime  @default(now())
+
+  @@index([doctorId, isActive])
+  @@index([startsAt, endsAt])
+  @@map("doctor_sessions")
 }

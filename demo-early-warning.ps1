@@ -1,13 +1,18 @@
 # Early Warning Multi-User Simulation Script
 # Quick reference for common demo scenarios
 
+# PSScriptAnalyzer suppress rules for demo scripts
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '')]
+param()
+
 # ==============================================
 # 1. SETUP: Seed 1000 mock patients with history
 # ==============================================
-function Setup-MockPatients {
+function Invoke-MockPatientSetup {
     param(
         [int]$Count = 1000,
-        [switch]$WithHistory = $true
+        [switch]$WithHistory
     )
     
     Write-Host "🌱 Creating $Count mock patients..." -ForegroundColor Green
@@ -26,7 +31,7 @@ function Setup-MockPatients {
 # ==============================================
 # 2. DEMO A: Load Test (100s of concurrent users)
 # ==============================================
-function Demo-LoadTest {
+function Invoke-LoadTest {
     param(
         [int]$UserCount = 100,
         [int]$Concurrency = 10,
@@ -46,7 +51,7 @@ function Demo-LoadTest {
 # ==============================================
 # 3. DEMO B: Early Warning Test (Anomalies)
 # ==============================================
-function Demo-EarlyWarning {
+function Invoke-EarlyWarningDemo {
     param(
         [int]$UserCount = 50,
         [string]$BaseUrl = "http://localhost:4000"
@@ -67,7 +72,7 @@ function Demo-EarlyWarning {
 # ==============================================
 # 4. DEMO C: Single Patient Demo Stream
 # ==============================================
-function Demo-SinglePatientStream {
+function Invoke-SinglePatientStream {
     param(
         [string]$PatientEmail = "patient_0001@mock.ahava.test",
         [string]$Password = "MockPatient1!",
@@ -115,7 +120,7 @@ function Demo-SinglePatientStream {
 # ==============================================
 # 5. DEMO D: Multiple Patients in Parallel
 # ==============================================
-function Demo-ParallelPatients {
+function Invoke-ParallelPatients {
     param(
         [int]$PatientCount = 10,
         [string]$BaseUrl = "http://localhost:4000",
@@ -198,8 +203,10 @@ function Get-PatientEarlyWarning {
         -Headers @{"Authorization" = "Bearer $token"}
     
     Write-Host "📊 Early Warning Summary for $PatientEmail" -ForegroundColor Cyan
-    Write-Host "  Risk Level: $($ew.data.riskLevel ?? 'N/A')" -ForegroundColor Yellow
-    Write-Host "  Alert Level: $($ew.data.alert_level ?? 'N/A')" -ForegroundColor Yellow
+    $riskLevelDisplay = if ($ew.data.riskLevel) { $ew.data.riskLevel } else { 'N/A' }
+    $alertLevelDisplay = if ($ew.data.alert_level) { $ew.data.alert_level } else { 'N/A' }
+    Write-Host "  Risk Level: $riskLevelDisplay" -ForegroundColor Yellow
+    Write-Host "  Alert Level: $alertLevelDisplay" -ForegroundColor Yellow
     
     if ($ew.data.recommendations) {
         Write-Host "  Recommendations:" -ForegroundColor Green
@@ -217,7 +224,7 @@ function Get-PatientEarlyWarning {
 # ==============================================
 # 7. FULL DEMO: Complete Workflow
 # ==============================================
-function Run-FullDemo {
+function Invoke-FullDemo {
     Write-Host "🎬 Starting Full Early Warning Demo" -ForegroundColor Magenta
     Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor DarkMagenta
     

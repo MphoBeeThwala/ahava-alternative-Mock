@@ -5,7 +5,8 @@ from models import (
     BiometricData, IngestResponse, ReadinessScore, AlertLevel,
     ContextualProfile, EarlyWarningSummary,
 )
-from engine import EarlyWarningEngine, DATA_STORE
+from engine import EarlyWarningEngine, _dict_to_biometric
+import db
 from datetime import datetime
 import os
 from dotenv import load_dotenv
@@ -57,26 +58,14 @@ def ingest_biometrics(data: BiometricData, user_id: str):
 @app.get("/readiness-score/{user_id}", response_model=ReadinessScore)
 def get_readiness_score(user_id: str):
     """
-    Calculate daily readiness score (0-100).
+    Calculate daily readiness score (0-100) using persistent DB history.
     """
-    # Simple logic for MVP: Start at 100, subtract for recent anomalies
-    score = 100
-    baseline_status = "STABLE"
-    
-    # Check last data point
-    if user_id in DATA_STORE and DATA_STORE[user_id]:
-        last_data = DATA_STORE[user_id][-1]
-        _, anomalies = engine.ingest(user_id, last_data)  # Re-eval last point
-        
-        if anomalies:
-            score -= (len(anomalies) * 15)
-            baseline_status = "DEVIATION DETECTED"
-    
+    score, baseline_status, trend = engine.get_readiness_score(user_id)
     return ReadinessScore(
         user_id=user_id,
-        score=max(0, score),
+        score=score,
         baseline_status=baseline_status,
-        trend="STABLE" # Todo: Calculate trend slope
+        trend=trend,
     )
 
 
@@ -98,13 +87,14 @@ def early_warning_analyze(user_id: str, body: EarlyWarningAnalyzeRequest):
 @app.get("/early-warning/summary/{user_id}", response_model=EarlyWarningSummary)
 def early_warning_summary(user_id: str):
     """
-    Return latest early-warning summary for user using last stored biometric point.
-    If no data, returns HTTP 404.
+    Return latest early-warning summary using last stored biometric row from DB.
+    Returns HTTP 404 if no data exists for user.
     """
-    if user_id not in DATA_STORE or not DATA_STORE[user_id]:
+    latest_row = db.load_latest_biometric(user_id)
+    if not latest_row:
         raise HTTPException(status_code=404, detail="No biometric data for user")
-    last = DATA_STORE[user_id][-1]
     try:
+        last = _dict_to_biometric(latest_row)
         summary = engine.full_analysis(user_id, last, engine.get_context(user_id))
         return summary
     except Exception as e:
@@ -116,6 +106,12 @@ def set_early_warning_context(user_id: str, context: ContextualProfile):
     """Store contextual profile (age, smoker, hypertension) for CVD risk algorithms."""
     engine.set_context(user_id, context)
     return {"status": "ok", "user_id": user_id}
+
+
+@app.get("/early-warning/baseline/{user_id}")
+def get_baseline_info(user_id: str):
+    """Return baseline confidence stage and progress for a user."""
+    return engine.get_baseline_info(user_id)
 
 # Middleware / Metadata
 @app.middleware("http")

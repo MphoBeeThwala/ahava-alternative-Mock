@@ -22,6 +22,9 @@ import triageRoutes from './routes/triage';
 import triageCasesRoutes from './routes/triageCases';
 import nurseRoutes from './routes/nurse';
 import patientRoutes from './routes/patient';
+import terraRoutes from './routes/terra';
+import consentRoutes from './routes/consent';
+import healthConnectRoutes from './routes/healthConnect';
 
 // Import middleware
 import { errorHandler } from './middleware/errorHandler';
@@ -32,6 +35,7 @@ import { authMiddleware } from './middleware/auth';
 import { initializeRedis } from './services/redis';
 import { initializeQueue } from './services/queue';
 import { initializeWebSocket } from './services/websocket';
+import { runEscalationCheck } from './jobs/triageEscalation';
 
 const app = express();
 const server = createServer(app);
@@ -61,7 +65,12 @@ const corsOrigins = process.env.CORS_ORIGIN
         'https://ahava-healthcare-admin.railway.app',
         'https://ahava-healthcare-doctor.railway.app',
       ]
-    : ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:3003', 'http://127.0.0.1:3003'];
+    : [
+        'http://localhost:3000', 'http://127.0.0.1:3000',
+        'http://localhost:3003', 'http://127.0.0.1:3003',
+        'https://localhost',      // Capacitor Android WebView origin
+        'capacitor://localhost',  // Capacitor iOS / some Android builds
+      ];
 app.use(cors({
   origin: corsOrigins,
   credentials: true,
@@ -105,6 +114,9 @@ app.use('/api/triage', authMiddleware, triageRoutes);
 app.use('/api/triage-cases', authMiddleware, triageCasesRoutes);
 app.use('/api/nurse', authMiddleware, nurseRoutes);
 app.use('/api/patient', authMiddleware, patientRoutes);
+app.use('/api/terra', authMiddleware, terraRoutes);
+app.use('/api/consent', authMiddleware, consentRoutes);
+app.use('/api/biometrics/health-connect', authMiddleware, healthConnectRoutes);
 app.use('/webhooks', webhookRoutes);
 
 // WebSocket initialization
@@ -136,6 +148,15 @@ async function startServer() {
   } else {
     console.log('⚠️ REDIS_URL not set, skipping Redis/queues (core API will work)');
   }
+
+  // Start SLA escalation cron (every 2 minutes)
+  const ESCALATION_INTERVAL_MS = 2 * 60 * 1000;
+  setInterval(() => {
+    runEscalationCheck().catch((err) =>
+      console.error('[escalation cron] Uncaught error:', err)
+    );
+  }, ESCALATION_INTERVAL_MS);
+  console.log('⏰ Triage escalation cron started (every 2 minutes)');
 
   // Start server
   server.listen(PORT, () => {

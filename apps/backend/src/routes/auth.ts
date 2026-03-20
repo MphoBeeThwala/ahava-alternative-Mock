@@ -4,6 +4,8 @@ import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
 import { authRateLimiter } from '../middleware/rateLimiter';
 import Joi from 'joi';
+import { verifySancRegistration } from '../services/sancVerification';
+import { seedBaselineForUser } from '../services/baselineSeed';
 
 const router: Router = Router();
 const prisma = new PrismaClient();
@@ -22,6 +24,7 @@ const registerSchema = Joi.object({
   dateOfBirth: Joi.date().optional(),
   gender: Joi.string().optional(),
   preferredLanguage: Joi.string().default('en-ZA'),
+  sancRegistrationNumber: Joi.string().when('role', { is: 'NURSE', then: Joi.optional(), otherwise: Joi.forbidden() }),
 });
 
 const loginSchema = Joi.object({
@@ -41,7 +44,7 @@ router.post('/register', authRateLimiter, async (req, res, next) => {
       return res.status(400).json({ error: error.details[0].message });
     }
 
-    const { email, password, firstName, lastName, role, phone, dateOfBirth, gender, preferredLanguage } = value;
+    const { email, password, firstName, lastName, role, phone, dateOfBirth, gender, preferredLanguage, sancRegistrationNumber } = value;
 
     // Check if user already exists
     const existingUser = await prisma.user.findUnique({
@@ -83,11 +86,28 @@ router.post('/register', authRateLimiter, async (req, res, next) => {
     // Generate tokens
     const { accessToken, refreshToken } = generateTokens(user.id, user.role);
 
+    // Post-registration async hooks (non-blocking)
+    setImmediate(async () => {
+      try {
+        if (role === 'PATIENT') {
+          // Seed SA demographic baseline so ML service has Day-1 reference values
+          await seedBaselineForUser(user.id);
+        }
+        if (role === 'NURSE' && sancRegistrationNumber) {
+          // Auto-verify SANC registration against imported register
+          await verifySancRegistration(user.id, sancRegistrationNumber, firstName, lastName);
+        }
+      } catch (hookErr) {
+        console.error('[auth/register] Post-registration hook error:', hookErr);
+      }
+    });
+
     res.status(201).json({
       success: true,
       user,
       accessToken,
       refreshToken,
+      sancVerification: role === 'NURSE' && sancRegistrationNumber ? 'PENDING' : undefined,
     });
   } catch (error) {
     next(error);

@@ -1,5 +1,9 @@
 # Early Warning Demo - Railway Production Deployment Script
 # Run this to demonstrate multi-user simulations on your production Railway deployment
+# PSScriptAnalyzer suppress rules for demo scripts
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '')]
+param()
 
 # ================================================
 # RAILWAY PRODUCTION CONFIGURATION
@@ -145,8 +149,8 @@ function Step-4-CheckEarlyWarning {
         Write-Host "📊 Early Warning Summary" -ForegroundColor Cyan
         Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
         
-        $riskLevel = $ew.data.riskLevel ?? "UNKNOWN"
-        $alertLevel = $ew.data.alert_level ?? "UNKNOWN"
+        $riskLevel = if ($ew.data.riskLevel) { $ew.data.riskLevel } else { "UNKNOWN" }
+        $alertLevel = if ($ew.data.alert_level) { $ew.data.alert_level } else { "UNKNOWN" }
         
         # Color code the risk level
         $riskColor = switch ($riskLevel.ToUpper()) {
@@ -282,7 +286,7 @@ function Step-6-ParallelDemo {
 # ================================================
 # MAIN: Run Complete Demo Workflow
 # ================================================
-function Run-Railway-Demo {
+function Invoke-RailwayDemo {
     Write-Host "🚀 Starting Railway Production Early Warning Demo" -ForegroundColor Magenta
     Write-Host ""
     
