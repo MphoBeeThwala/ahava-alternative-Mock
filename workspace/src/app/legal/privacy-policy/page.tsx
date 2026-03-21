@@ -1,9 +1,11 @@
+import Link from "next/link";
+
 export default function PrivacyPolicyPage() {
   return (
     <div style={{ minHeight: "100vh", background: "#f8fafc", fontFamily: "inherit" }}>
       <div style={{ maxWidth: 800, margin: "0 auto", padding: "48px 24px" }}>
         <div style={{ marginBottom: 40 }}>
-          <a href="/" style={{ color: "#0d9488", fontWeight: 600, fontSize: 14, textDecoration: "none" }}>← Back to Ahava Healthcare</a>
+          <Link href="/" style={{ color: "#0d9488", fontWeight: 600, fontSize: 14, textDecoration: "none" }}>← Back to Ahava Healthcare</Link>
         </div>
         <h1 style={{ fontSize: 36, fontWeight: 900, color: "#0f172a", marginBottom: 8 }}>Privacy Policy</h1>
         <p style={{ color: "#64748b", fontSize: 14, marginBottom: 40 }}>Last updated: March 2026</p>
