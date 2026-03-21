@@ -9,10 +9,10 @@ export default function Home() {
   ];
 
   const stats = [
-    { value: '2 500+', label: 'Patients Served' },
-    { value: '350+', label: 'Verified Nurses' },
-    { value: '80+', label: 'Licensed Doctors' },
-    { value: '< 8 min', label: 'Avg Response Time' },
+    { icon: '❤️', value: 'Patient-Centric', label: 'Care at every step' },
+    { icon: '✅', value: 'Verified Nurses', label: 'SANC registered' },
+    { icon: '⚕️', value: 'Verified Doctors', label: 'HPCSA registered' },
+    { icon: '⚡', value: '< 8 min', label: 'Avg Response Time' },
   ];
 
   const steps = [
@@ -23,6 +23,14 @@ export default function Home() {
 
   return (
     <div style={{ fontFamily: 'var(--font-jakarta, system-ui, sans-serif)', background: '#f5f3ef', color: '#1c1917' }}>
+      <style>{`
+        @keyframes orbit-cw  { to { transform: rotate(360deg);  } }
+        @keyframes orbit-ccw { to { transform: rotate(-360deg); } }
+        @keyframes pill-ccw  { from { transform: translate(-50%,-50%) rotate(0deg);    } to { transform: translate(-50%,-50%) rotate(-360deg); } }
+        @keyframes pill-cw   { from { transform: translate(-50%,-50%) rotate(0deg);    } to { transform: translate(-50%,-50%) rotate(360deg);  } }
+        @keyframes scan-down { 0%{top:0;opacity:0} 4%{opacity:1} 96%{opacity:1} 100%{top:100%;opacity:0} }
+        @keyframes dot-blink { 0%,100%{opacity:1} 50%{opacity:.12} }
+      `}</style>
 
       {/* ── NAV ── */}
       <nav style={{ position: 'sticky', top: 0, zIndex: 100, background: 'rgba(10,22,40,0.96)', backdropFilter: 'blur(12px)', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
@@ -86,31 +94,60 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Right: floating metric cards */}
-          <div style={{ position: 'relative', height: 420, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{ position: 'absolute', background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 24, padding: '28px 36px', textAlign: 'center', zIndex: 2 }}>
-              <div style={{ fontSize: 48, marginBottom: 8 }}>⚕️</div>
-              <div style={{ color: 'rgba(255,255,255,0.8)', fontSize: 16, fontWeight: 800 }}>Ahava Healthcare</div>
-              <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11, marginTop: 4 }}>Revolutionizing Healthcare SA</div>
-            </div>
-            <div style={{ position: 'absolute', top: 30, right: 20, background: 'rgba(255,255,255,0.07)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 16, padding: '14px 18px', zIndex: 3 }}>
-              <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11, fontWeight: 600, marginBottom: 4 }}>❤️ Heart Rate</div>
-              <div style={{ color: '#f87171', fontSize: 26, fontWeight: 900 }}>72 <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>bpm</span></div>
-              <div style={{ color: '#4ade80', fontSize: 11, marginTop: 2 }}>● Normal range</div>
-            </div>
-            <div style={{ position: 'absolute', bottom: 50, right: 10, background: 'rgba(255,255,255,0.07)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 16, padding: '14px 18px', zIndex: 3 }}>
-              <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11, fontWeight: 600, marginBottom: 4 }}>💧 SpO₂</div>
-              <div style={{ color: '#60a5fa', fontSize: 26, fontWeight: 900 }}>98<span style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>%</span></div>
-              <div style={{ color: '#4ade80', fontSize: 11, marginTop: 2 }}>● Optimal</div>
-            </div>
-            <div style={{ position: 'absolute', top: 60, left: 10, background: 'rgba(255,255,255,0.07)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 16, padding: '14px 18px', zIndex: 3 }}>
-              <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11, fontWeight: 600, marginBottom: 4 }}>🏥 Nurse En Route</div>
-              <div style={{ color: '#34d399', fontSize: 22, fontWeight: 900 }}>7 min</div>
-              <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11, marginTop: 2 }}>Sister Nomsa · ⭐ 4.9</div>
-            </div>
-            <div style={{ position: 'absolute', bottom: 30, left: 20, background: 'rgba(13,148,136,0.15)', backdropFilter: 'blur(16px)', border: '1px solid rgba(13,148,136,0.3)', borderRadius: 14, padding: '10px 16px', zIndex: 3 }}>
-              <div style={{ color: '#34d399', fontSize: 12, fontWeight: 700 }}>✅ AI Analysis Complete</div>
-              <div style={{ color: 'rgba(255,255,255,0.45)', fontSize: 11, marginTop: 2 }}>Reviewed by Dr. Khumalo</div>
+          {/* Right: animated orbit system */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ position: 'relative', width: 300, height: 300, flexShrink: 0 }}>
+
+              {/* Scan line */}
+              <div style={{ position: 'absolute', left: 0, right: 0, height: 1, background: 'linear-gradient(90deg,transparent,rgba(13,148,136,0.08),rgba(13,148,136,0.32),rgba(13,148,136,0.08),transparent)', animation: 'scan-down 7s linear infinite', zIndex: 1, pointerEvents: 'none' }} />
+
+              {/* Dashed orbit rings */}
+              <div style={{ position: 'absolute', width: 164, height: 164, borderRadius: '50%', border: '1px dashed rgba(13,148,136,0.28)', top: '50%', left: '50%', transform: 'translate(-50%,-50%)' }} />
+              <div style={{ position: 'absolute', width: 256, height: 256, borderRadius: '50%', border: '1px dashed rgba(13,148,136,0.13)', top: '50%', left: '50%', transform: 'translate(-50%,-50%)' }} />
+
+              {/* Hub */}
+              <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 72, height: 72, borderRadius: '50%', background: 'rgba(7,26,34,0.96)', border: '1.5px solid rgba(13,148,136,0.45)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 10 }}>
+                <span style={{ fontSize: 24 }}>⚕️</span>
+                <span style={{ color: 'rgba(0,220,150,0.75)', fontSize: 7, fontWeight: 700, letterSpacing: '0.1em', marginTop: 2 }}>LIVE</span>
+              </div>
+
+              {/* Inner orbit — clockwise 22 s */}
+              <div style={{ position: 'absolute', width: '100%', height: '100%', top: 0, left: 0, animation: 'orbit-cw 22s linear infinite', transformOrigin: 'center' }}>
+                {[
+                  { t: 'Heart Rate', v: '72', u: 'bpm',  b: 'Normal',      c: '#f87171', a: 0   },
+                  { t: 'SpO₂',      v: '98', u: '%',    b: 'Optimal',     c: '#60a5fa', a: 90  },
+                  { t: 'Nurse ETA', v: '7',  u: 'min',  b: 'En route',    c: '#fbbf24', a: 180 },
+                  { t: 'AI Ready',  v: '✓',  u: 'Done', b: 'Dr. Khumalo', c: '#34d399', a: 270 },
+                ].map(({ t, v, u, b, c, a }) => {
+                  const rad = a * Math.PI / 180;
+                  return (
+                    <div key={t} style={{ position: 'absolute', left: 150 + Math.cos(rad) * 82, top: 150 + Math.sin(rad) * 82, animation: 'pill-ccw 22s linear infinite', animationFillMode: 'both', background: 'rgba(5,20,28,0.93)', border: '1px solid rgba(13,148,136,0.22)', borderRadius: 10, padding: '7px 10px', minWidth: 82, whiteSpace: 'nowrap', zIndex: 6 }}>
+                      <div style={{ fontSize: 9, fontWeight: 600, color: 'rgba(0,220,150,0.72)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 2 }}>{t}</div>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: c, lineHeight: 1.1 }}>{v} <span style={{ fontSize: 9, color: 'rgba(150,200,185,0.45)' }}>{u}</span></div>
+                      <div style={{ fontSize: 8, padding: '2px 6px', borderRadius: 20, marginTop: 3, background: `${c}18`, color: c, border: `0.5px solid ${c}55`, display: 'inline-block' }}>{b}</div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Outer orbit — counter-clockwise 32 s */}
+              <div style={{ position: 'absolute', width: '100%', height: '100%', top: 0, left: 0, animation: 'orbit-ccw 32s linear infinite', transformOrigin: 'center' }}>
+                {[
+                  { t: 'Monitoring', v: '24/7', u: 'always on',  b: 'Live',     c: '#34d399', a: 45  },
+                  { t: 'Results',    v: '3s',   u: 'turnaround', b: 'Quick',    c: '#60a5fa', a: 165 },
+                  { t: 'Rated',      v: '4.9★', u: 'stars',      b: 'Top care', c: '#fbbf24', a: 285 },
+                ].map(({ t, v, u, b, c, a }) => {
+                  const rad = a * Math.PI / 180;
+                  return (
+                    <div key={t} style={{ position: 'absolute', left: 150 + Math.cos(rad) * 128, top: 150 + Math.sin(rad) * 128, animation: 'pill-cw 32s linear infinite', animationFillMode: 'both', background: 'rgba(5,20,28,0.93)', border: '1px solid rgba(13,148,136,0.15)', borderRadius: 10, padding: '7px 10px', minWidth: 78, whiteSpace: 'nowrap', zIndex: 6 }}>
+                      <div style={{ fontSize: 9, fontWeight: 600, color: 'rgba(0,220,150,0.65)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 2 }}>{t}</div>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: c, lineHeight: 1.1 }}>{v} <span style={{ fontSize: 9, color: 'rgba(150,200,185,0.45)' }}>{u}</span></div>
+                      <div style={{ fontSize: 8, padding: '2px 6px', borderRadius: 20, marginTop: 3, background: `${c}14`, color: c, border: `0.5px solid ${c}44`, display: 'inline-block' }}>{b}</div>
+                    </div>
+                  );
+                })}
+              </div>
+
             </div>
           </div>
         </div>
@@ -119,10 +156,11 @@ export default function Home() {
       {/* ── STATS ── */}
       <section style={{ background: 'linear-gradient(135deg,#0d9488,#059669)', padding: '32px 24px' }}>
         <div style={{ maxWidth: 1200, margin: '0 auto', display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 24, textAlign: 'center' }}>
-          {stats.map(({ value, label }) => (
-            <div key={label}>
-              <div style={{ fontSize: 32, fontWeight: 900, color: 'white' }}>{value}</div>
-              <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: 4, fontWeight: 500 }}>{label}</div>
+          {stats.map(({ icon, value, label }) => (
+            <div key={value} style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 22, marginBottom: 6 }}>{icon}</div>
+              <div style={{ fontSize: 17, fontWeight: 800, color: 'white', lineHeight: 1.2 }}>{value}</div>
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 3, fontWeight: 500 }}>{label}</div>
             </div>
           ))}
         </div>
