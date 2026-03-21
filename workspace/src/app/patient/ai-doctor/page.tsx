@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import RoleGuard, { UserRole } from "../../../components/RoleGuard";
-import { patientApi } from "../../../lib/api";
+import { patientApi, consentApi } from "../../../lib/api";
 import { useToast } from "../../../contexts/ToastContext";
 import DashboardLayout from "../../../components/DashboardLayout";
 import { Card, CardHeader, CardTitle } from "../../../components/ui/Card";
@@ -19,6 +19,10 @@ export default function AiDoctorPage() {
   } | null>(null);
   const [loading, setLoading] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [showConsentModal, setShowConsentModal] = useState(false);
+  const [consentChecked, setConsentChecked] = useState(false);
+  const [givingConsent, setGivingConsent] = useState(false);
+  const [pendingSymptoms, setPendingSymptoms] = useState<{ symptoms: string; imageBase64?: string } | null>(null);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -32,26 +36,92 @@ export default function AiDoctorPage() {
     }
   };
 
-  const handleTriage = async () => {
+  const runTriage = async (payload: { symptoms: string; imageBase64?: string }) => {
+    setLoading(true);
     try {
-      setLoading(true);
-      const result = await patientApi.submitTriage({
-        symptoms,
-        imageBase64: selectedImage || undefined,
-      });
+      const result = await patientApi.submitTriage(payload);
       setTriageResult(result.data);
     } catch (error: unknown) {
-      const e = error as { response?: { data?: { error?: string } } };
-      console.error("Triage failed", error);
-      toast.error(e.response?.data?.error || "Failed to analyze symptoms. Please try again.");
+      const e = error as { response?: { data?: { error?: string; consentType?: string } }; status?: number };
+      const status = (e as { response?: { status?: number } }).response?.status;
+      if (status === 403 && e.response?.data?.error === 'CONSENT_REQUIRED') {
+        setPendingSymptoms(payload);
+        setShowConsentModal(true);
+      } else {
+        console.error("Triage failed", error);
+        toast.error(e.response?.data?.error || "Failed to analyze symptoms. Please try again.");
+      }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleTriage = () => runTriage({ symptoms, imageBase64: selectedImage || undefined });
+
+  const handleGiveConsent = async () => {
+    if (!consentChecked) return;
+    setGivingConsent(true);
+    try {
+      await consentApi.give('AI_TRIAGE');
+      setShowConsentModal(false);
+      toast.success('Consent recorded. Running analysis…');
+      if (pendingSymptoms) await runTriage(pendingSymptoms);
+    } catch {
+      toast.error('Failed to record consent. Please try again.');
+    } finally {
+      setGivingConsent(false);
+      setPendingSymptoms(null);
     }
   };
 
   return (
     <RoleGuard allowedRoles={[UserRole.PATIENT]}>
       <DashboardLayout>
+
+        {/* ── HPCSA informed-consent modal ── */}
+        {showConsentModal && (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+            <div style={{ background: 'var(--card)', borderRadius: 20, maxWidth: 520, width: '100%', padding: '32px 28px', boxShadow: '0 16px 60px rgba(0,0,0,0.3)' }}>
+              <h2 style={{ fontSize: 20, fontWeight: 800, color: 'var(--foreground)', marginBottom: 8 }}>Informed Consent Required</h2>
+              <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16, lineHeight: 1.6 }}>
+                In terms of the <strong>Health Professions Act 56 of 1974</strong> and <strong>HPCSA telemedicine guidelines</strong>, you must provide informed consent before using this AI-assisted symptom analysis tool.
+              </p>
+              <ul style={{ fontSize: 13, color: 'var(--foreground)', lineHeight: 1.8, paddingLeft: 20, marginBottom: 20 }}>
+                <li>This tool provides <strong>decision support only</strong> — not a medical diagnosis.</li>
+                <li>Your symptoms will be processed by an AI model and reviewed by a qualified doctor.</li>
+                <li>Your data is handled in accordance with <strong>POPIA</strong> and our Privacy Policy.</li>
+                <li>You may withdraw this consent at any time from your account settings.</li>
+              </ul>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 24, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={consentChecked}
+                  onChange={(e) => setConsentChecked(e.target.checked)}
+                  style={{ marginTop: 2, accentColor: 'var(--primary)', width: 16, height: 16, flexShrink: 0 }}
+                />
+                <span style={{ fontSize: 13, color: 'var(--foreground)', lineHeight: 1.5 }}>
+                  I have read and understood the above. I voluntarily consent to AI-assisted triage analysis of my symptoms.
+                </span>
+              </label>
+              <div style={{ display: 'flex', gap: 12 }}>
+                <button
+                  onClick={handleGiveConsent}
+                  disabled={!consentChecked || givingConsent}
+                  style={{ flex: 2, padding: '13px', borderRadius: 12, border: 'none', background: consentChecked ? 'var(--primary)' : '#94a3b8', color: 'white', fontSize: 15, fontWeight: 700, cursor: consentChecked ? 'pointer' : 'not-allowed', fontFamily: 'inherit', transition: 'background 0.2s' }}
+                >
+                  {givingConsent ? 'Recording consent…' : 'I consent — Continue'}
+                </button>
+                <button
+                  onClick={() => { setShowConsentModal(false); setPendingSymptoms(null); }}
+                  style={{ flex: 1, padding: '13px', borderRadius: 12, border: '1.5px solid var(--border)', background: 'transparent', color: 'var(--muted)', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="p-6 sm:p-8 bg-[var(--background)]">
           <div className="max-w-2xl mx-auto">
             <div className="flex flex-wrap justify-between items-center gap-4 mb-8">

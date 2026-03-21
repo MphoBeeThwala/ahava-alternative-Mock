@@ -533,5 +533,23 @@ export const adminApi = {
   },
 };
 
+// ==================== CONSENT ====================
+export type ConsentType = 'AI_TRIAGE' | 'BIOMETRIC_MONITORING' | 'DATA_SHARING' | 'MARKETING';
+
+export const consentApi = {
+  give: async (consentType: ConsentType, version = '1.0') => {
+    const res = await apiClient.post('/consent', { consentType, version });
+    return res.data;
+  },
+  list: async () => {
+    const res = await apiClient.get('/consent');
+    return res.data as { success: boolean; consents: { consentType: string; withdrawn: boolean }[] };
+  },
+  withdraw: async (consentType: ConsentType) => {
+    const res = await apiClient.delete(`/consent/${consentType}`);
+    return res.data;
+  },
+};
+
 export default apiClient;
 
