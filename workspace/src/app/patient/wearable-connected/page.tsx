@@ -6,12 +6,10 @@ import { terraApi } from "../../../lib/api";
 
 export default function WearableConnectedPage() {
   const [devices, setDevices] = useState<string[]>([]);
-  const [isPopup, setIsPopup] = useState(false);
 
   useEffect(() => {
     terraApi.getStatus().then((s) => setDevices(s.devices ?? [])).catch(() => {});
     if (window.opener) {
-      setIsPopup(true);
       setTimeout(() => window.close(), 3000);
     }
   }, []);
@@ -39,16 +37,12 @@ export default function WearableConnectedPage() {
             Your biometric data (heart rate, sleep, SpO₂) will flow to Ahava automatically. The AI early-warning model will start monitoring within the next sync cycle.
           </p>
         </div>
-        {isPopup ? (
-          <p style={{ fontSize: 13, color: "#a8a29e" }}>This window will close automatically…</p>
-        ) : (
-          <Link
-            href="/patient/wearable"
-            style={{ display: "inline-block", background: "linear-gradient(135deg,#0d9488,#059669)", color: "white", borderRadius: 12, padding: "13px 32px", fontSize: 15, fontWeight: 700, textDecoration: "none", boxShadow: "0 4px 16px rgba(13,148,136,0.35)" }}
-          >
-            Back to Wearable Settings →
-          </Link>
-        )}
+        <Link
+          href="/patient/wearable"
+          style={{ display: "inline-block", background: "linear-gradient(135deg,#0d9488,#059669)", color: "white", borderRadius: 12, padding: "13px 32px", fontSize: 15, fontWeight: 700, textDecoration: "none", boxShadow: "0 4px 16px rgba(13,148,136,0.35)" }}
+        >
+          Back to Wearable Settings →
+        </Link>
       </div>
     </div>
   );
