@@ -148,7 +148,7 @@ export default function NurseDashboard() {
         if (lastMessage.type === 'NURSE_ONLINE_SUCCESS') {
             toast.success('You are now online. Listening for nearby requests.');
         }
-    }, [lastMessage, toast]);
+    }, [lastMessage, toast, loadVisits]);
 
     // Countdown timer when incoming booking arrives
     useEffect(() => {

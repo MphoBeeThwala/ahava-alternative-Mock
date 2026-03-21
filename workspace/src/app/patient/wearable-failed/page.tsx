@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 export default function WearableFailedPage() {
+  const [isPopup, setIsPopup] = useState(false);
+
   useEffect(() => {
-    // Auto-close popup after a delay
     if (window.opener) {
+      setIsPopup(true);
       setTimeout(() => window.close(), 4000);
     }
   }, []);
@@ -28,7 +30,7 @@ export default function WearableFailedPage() {
             • Pop-up blocker prevented the connection window
           </p>
         </div>
-        {window.opener ? (
+        {isPopup ? (
           <p style={{ fontSize: 13, color: "#a8a29e" }}>This window will close automatically…</p>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
