@@ -119,6 +119,30 @@ export default function PatientDashboard() {
                         </div>
                     </div>
 
+                    {/* ── Email verification banner ── */}
+                    {user && !user.isVerified && (
+                        <div style={{ background: '#fffbeb', borderBottom: '1px solid #fde68a', padding: '12px 40px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: 18 }}>📧</span>
+                            <span style={{ fontSize: 14, color: '#92400e', fontWeight: 600, flex: 1 }}>
+                                Please verify your email address to unlock all features.
+                            </span>
+                            <a
+                                href={`/auth/verify-email`}
+                                onClick={async (e) => {
+                                    e.preventDefault();
+                                    try {
+                                        const { authApi: api } = await import('../../../lib/api');
+                                        await api.resendVerification(user.email);
+                                        toast.success('Verification email sent! Check your inbox.');
+                                    } catch { toast.error('Could not resend. Try again later.'); }
+                                }}
+                                style={{ fontSize: 13, fontWeight: 700, color: '#d97706', textDecoration: 'underline', cursor: 'pointer' }}
+                            >
+                                Resend verification email
+                            </a>
+                        </div>
+                    )}
+
                     <div className="p-6 sm:p-8">
                     <div className="max-w-6xl mx-auto">
 

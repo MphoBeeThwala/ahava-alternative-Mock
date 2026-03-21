@@ -152,6 +152,9 @@ export default function LoginPage() {
                                 onFocus={(e) => (e.currentTarget.style.borderColor = '#0d9488')}
                                 onBlur={(e) => (e.currentTarget.style.borderColor = '#e7e5e4')}
                             />
+                            <div style={{ textAlign: 'right', marginTop: 6 }}>
+                                <Link href="/auth/forgot-password" style={{ fontSize: 12, color: '#0d9488', fontWeight: 600, textDecoration: 'none' }}>Forgot password?</Link>
+                            </div>
                         </div>
                         <button
                             type="submit"
@@ -167,6 +170,12 @@ export default function LoginPage() {
                         <Link href="/auth/signup" style={{ color: '#0d9488', fontWeight: 700, textDecoration: 'none' }}>
                             Create one free
                         </Link>
+                    </p>
+                    <p style={{ textAlign: 'center', marginTop: 16, fontSize: 11, color: '#a8a29e' }}>
+                        By signing in you agree to our{' '}
+                        <Link href="/legal/terms" style={{ color: '#a8a29e', textDecoration: 'underline' }}>Terms</Link>
+                        {' '}and{' '}
+                        <Link href="/legal/privacy-policy" style={{ color: '#a8a29e', textDecoration: 'underline' }}>Privacy Policy</Link>
                     </p>
                 </div>
             </div>

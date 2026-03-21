@@ -100,8 +100,11 @@ model User {
   sancCategory            String?  // Professional Nurse | Enrolled Nurse | Enrolled Nursing Auxiliary
 
   // Auth
-  passwordHash      String?
-  refreshTokens     RefreshToken[]
+  passwordHash              String?
+  passwordResetToken        String?   @unique
+  passwordResetExpiry       DateTime?
+  emailVerificationToken    String?   @unique
+  refreshTokens             RefreshToken[]
   
   // Relations
   patientBookings   Booking[] @relation("PatientBookings")

@@ -36,9 +36,24 @@ function terraHeaders() {
 // ---------------------------------------------------------------------------
 // POST /api/terra/connect — generate widget auth URL
 // ---------------------------------------------------------------------------
+const TERRA_USER_LIMIT = parseInt(process.env.TERRA_USER_LIMIT ?? '15', 10);
+
 router.post('/connect', authMiddleware, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user.id;
+
+    // Check if this user is already connected (doesn't count against limit)
+    const currentUser = await prisma.user.findUnique({ where: { id: userId }, select: { terraUserId: true } });
+    if (!currentUser?.terraUserId) {
+      // Count currently connected Terra users
+      const connectedCount = await prisma.user.count({ where: { terraUserId: { not: null } } });
+      if (connectedCount >= TERRA_USER_LIMIT) {
+        return res.status(429).json({
+          success: false,
+          error: `Wearable beta is limited to ${TERRA_USER_LIMIT} testers. Spots are currently full. Check back soon!`,
+        });
+      }
+    }
 
     const body = {
       reference_id: userId,

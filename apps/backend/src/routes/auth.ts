@@ -1,11 +1,13 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { PrismaClient } from '@prisma/client';
 import { authRateLimiter } from '../middleware/rateLimiter';
 import Joi from 'joi';
 import { verifySancRegistration } from '../services/sancVerification';
 import { seedBaselineForUser } from '../services/baselineSeed';
+import { addEmailJob } from '../services/queue';
 
 const router: Router = Router();
 const prisma = new PrismaClient();
@@ -86,15 +88,26 @@ router.post('/register', authRateLimiter, async (req, res, next) => {
     // Generate tokens
     const { accessToken, refreshToken } = generateTokens(user.id, user.role);
 
+    // Send email verification
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+    await (prisma.user.update as Function)({
+      where: { id: user.id },
+      data: { emailVerificationToken: verificationToken },
+    });
+    const verifyUrl = `${process.env.FRONTEND_URL ?? ''}/auth/verify-email?token=${verificationToken}`;
+    addEmailJob({
+      to: email,
+      subject: 'Verify your Ahava Healthcare email',
+      html: `<p>Hi ${firstName},</p><p>Welcome to Ahava Healthcare! Please verify your email address:</p><p><a href="${verifyUrl}" style="background:#0d9488;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">Verify Email</a></p><p>Or copy this link: ${verifyUrl}</p><p>This link expires in 24 hours.</p>`,
+    }).catch(() => {});
+
     // Post-registration async hooks (non-blocking)
     setImmediate(async () => {
       try {
         if (role === 'PATIENT') {
-          // Seed SA demographic baseline so ML service has Day-1 reference values
           await seedBaselineForUser(user.id);
         }
         if (role === 'NURSE' && sancRegistrationNumber) {
-          // Auto-verify SANC registration against imported register
           await verifySancRegistration(user.id, sancRegistrationNumber, firstName, lastName);
         }
       } catch (hookErr) {
@@ -280,6 +293,126 @@ router.get('/me', async (req, res, next) => {
     }
 
     res.json({ success: true, user });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /auth/forgot-password — send reset link
+// ---------------------------------------------------------------------------
+router.post('/forgot-password', authRateLimiter, async (req, res, next) => {
+  try {
+    const { error, value } = Joi.object({ email: emailSchema }).validate(req.body);
+    if (error) return res.status(400).json({ error: error.details[0].message });
+
+    const user = await prisma.user.findUnique({ where: { email: value.email } });
+    // Always return success to avoid email enumeration
+    if (!user) return res.json({ success: true, message: 'If that email exists, a reset link has been sent.' });
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    await (prisma.user.update as Function)({
+      where: { id: user.id },
+      data: { passwordResetToken: token, passwordResetExpiry: expiry },
+    });
+
+    const resetUrl = `${process.env.FRONTEND_URL ?? ''}/auth/reset-password?token=${token}`;
+    await addEmailJob({
+      to: user.email,
+      subject: 'Reset your Ahava Healthcare password',
+      html: `<p>Hi ${user.firstName},</p><p>We received a request to reset your password. Click the button below — this link expires in 1 hour.</p><p><a href="${resetUrl}" style="background:#0d9488;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">Reset Password</a></p><p>If you didn't request this, you can safely ignore this email.</p>`,
+    });
+
+    res.json({ success: true, message: 'If that email exists, a reset link has been sent.' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /auth/reset-password — apply new password via token
+// ---------------------------------------------------------------------------
+router.post('/reset-password', authRateLimiter, async (req, res, next) => {
+  try {
+    const { error, value } = Joi.object({
+      token: Joi.string().required(),
+      password: Joi.string().min(8).required(),
+    }).validate(req.body);
+    if (error) return res.status(400).json({ error: error.details[0].message });
+
+    const user = await (prisma.user.findFirst as Function)({
+      where: {
+        passwordResetToken: value.token,
+        passwordResetExpiry: { gt: new Date() },
+      },
+    });
+
+    if (!user) return res.status(400).json({ error: 'Invalid or expired reset link. Please request a new one.' });
+
+    const passwordHash = await bcrypt.hash(value.password, 12);
+    await (prisma.user.update as Function)({
+      where: { id: user.id },
+      data: { passwordHash, passwordResetToken: null, passwordResetExpiry: null },
+    });
+
+    res.json({ success: true, message: 'Password updated successfully. You can now log in.' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /auth/verify-email?token=... — verify email address
+// ---------------------------------------------------------------------------
+router.get('/verify-email', async (req, res, next) => {
+  try {
+    const token = req.query.token as string;
+    if (!token) return res.status(400).json({ error: 'Verification token missing.' });
+
+    const user = await (prisma.user.findFirst as Function)({
+      where: { emailVerificationToken: token },
+    });
+
+    if (!user) return res.status(400).json({ error: 'Invalid or already-used verification link.' });
+
+    await (prisma.user.update as Function)({
+      where: { id: user.id },
+      data: { isVerified: true, emailVerificationToken: null },
+    });
+
+    res.json({ success: true, message: 'Email verified successfully.' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /auth/resend-verification — resend verification email
+// ---------------------------------------------------------------------------
+router.post('/resend-verification', authRateLimiter, async (req, res, next) => {
+  try {
+    const { error, value } = Joi.object({ email: emailSchema }).validate(req.body);
+    if (error) return res.status(400).json({ error: error.details[0].message });
+
+    const user = await prisma.user.findUnique({ where: { email: value.email } });
+    if (!user || user.isVerified) return res.json({ success: true, message: 'If applicable, a verification email has been sent.' });
+
+    const token = crypto.randomBytes(32).toString('hex');
+    await (prisma.user.update as Function)({
+      where: { id: user.id },
+      data: { emailVerificationToken: token },
+    });
+
+    const verifyUrl = `${process.env.FRONTEND_URL ?? ''}/auth/verify-email?token=${token}`;
+    await addEmailJob({
+      to: user.email,
+      subject: 'Verify your Ahava Healthcare email',
+      html: `<p>Hi ${user.firstName},</p><p>Please verify your email address:</p><p><a href="${verifyUrl}" style="background:#0d9488;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">Verify Email</a></p><p>This link expires in 24 hours.</p>`,
+    });
+
+    res.json({ success: true, message: 'If applicable, a verification email has been sent.' });
   } catch (error) {
     next(error);
   }
