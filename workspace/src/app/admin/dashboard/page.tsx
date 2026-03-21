@@ -7,7 +7,6 @@ import { useAuth } from '../../../contexts/AuthContext';
 import { useToast } from '../../../contexts/ToastContext';
 import DashboardLayout from '../../../components/DashboardLayout';
 import { Card, CardHeader, CardTitle } from '../../../components/ui/Card';
-import { KpiCard } from '../../../components/ui/KpiCard';
 import { StatusBadge } from '../../../components/ui/StatusBadge';
 
 type RoleFilter = 'ALL' | User['role'];

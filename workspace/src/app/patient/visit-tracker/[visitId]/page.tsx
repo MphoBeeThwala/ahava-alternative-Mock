@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, use } from 'react';
+import React, { useState, useEffect, useCallback, use } from 'react';
 import { useRouter } from 'next/navigation';
 import RoleGuard, { UserRole } from '../../../../components/RoleGuard';
 import DashboardLayout from '../../../../components/DashboardLayout';
@@ -48,7 +48,7 @@ export default function VisitTrackerPage({ params }: { params: Promise<{ visitId
 
   const { lastMessage, connected } = useVisitWebSocket(token);
 
-  const loadVisit = async () => {
+  const loadVisit = useCallback(async () => {
     try {
       const data = await visitsApi.getById(visitId);
       setVisit(data.visit ?? data);
@@ -57,14 +57,15 @@ export default function VisitTrackerPage({ params }: { params: Promise<{ visitId
     } finally {
       setLoading(false);
     }
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visitId]);
 
   useEffect(() => {
     loadVisit();
     // Poll every 15s as fallback
     const interval = setInterval(loadVisit, 15000);
     return () => clearInterval(interval);
-  }, [visitId]);
+  }, [visitId, loadVisit]);
 
   // Handle real-time WS updates
   useEffect(() => {
@@ -78,13 +79,12 @@ export default function VisitTrackerPage({ params }: { params: Promise<{ visitId
     }
 
     if (lastMessage.type === 'NURSE_LOCATION_UPDATE') {
-      // Could show "live" indicator — just refresh visit to confirm still active
       const d = lastMessage.data as { visitId?: string };
       if (d.visitId === visitId) {
         loadVisit();
       }
     }
-  }, [lastMessage, visitId]);
+  }, [lastMessage, visitId, loadVisit]);
 
   const handleCancel = async () => {
     if (!visit?.bookingId) return;

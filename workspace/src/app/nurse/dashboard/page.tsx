@@ -28,7 +28,6 @@ export default function NurseDashboard() {
     const toast = useToast();
     const [isAvailable, setIsAvailable] = useState(false);
     const [locationStatus, setLocationStatus] = useState('Unknown');
-    const [currentCoords, setCurrentCoords] = useState<{ lat: number; lng: number } | null>(null);
     const [loading, setLoading] = useState(false);
     const [visits, setVisits] = useState<Visit[]>([]);
     const [statusFilter, setStatusFilter] = useState<VisitStatusFilter>('ALL');
@@ -81,7 +80,6 @@ export default function NurseDashboard() {
                     const lat = position.coords.latitude;
                     const lng = position.coords.longitude;
                     await nurseApi.updateAvailability({ lat, lng, isAvailable: true });
-                    setCurrentCoords({ lat, lng });
                     setIsAvailable(true);
                     setLocationStatus(`Active at ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
                     // Also register in the WS server's onlineNurses map for real-time matching
@@ -104,7 +102,6 @@ export default function NurseDashboard() {
                 send({ type: 'NURSE_GO_OFFLINE' });
                 setIsAvailable(false);
                 setLocationStatus("Offline");
-                setCurrentCoords(null);
                 setIncomingBooking(null);
             } catch (error: unknown) {
                 const e = error as { response?: { data?: { error?: string } } };
@@ -151,7 +148,7 @@ export default function NurseDashboard() {
         if (lastMessage.type === 'NURSE_ONLINE_SUCCESS') {
             toast.success('You are now online. Listening for nearby requests.');
         }
-    }, [lastMessage]);
+    }, [lastMessage, toast]);
 
     // Countdown timer when incoming booking arrives
     useEffect(() => {
@@ -170,7 +167,7 @@ export default function NurseDashboard() {
             }, 1000);
         }
         return () => { if (countdownRef.current) clearInterval(countdownRef.current); };
-    }, [incomingBooking]);
+    }, [incomingBooking, send]);
 
     // When going online via WS, also send NURSE_GO_ONLINE with GPS
     const goOnlineViaWs = useCallback((lat: number, lng: number) => {

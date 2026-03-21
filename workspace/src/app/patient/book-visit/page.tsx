@@ -35,7 +35,7 @@ interface IncomingAccept {
 
 export default function BookVisitPage() {
   const router = useRouter();
-  const { user, token } = useAuth();
+  const { token } = useAuth();
   const toast = useToast();
 
   const [step, setStep] = useState<Step>('form');
@@ -54,7 +54,7 @@ export default function BookVisitPage() {
   const [searchSeconds, setSearchSeconds] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const { send, lastMessage, connected } = useVisitWebSocket(token);
+  const { lastMessage, connected } = useVisitWebSocket(token);
 
   // Minimum date: now + 30 min
   const minDate = new Date(Date.now() + 30 * 60 * 1000).toISOString().slice(0, 16);
