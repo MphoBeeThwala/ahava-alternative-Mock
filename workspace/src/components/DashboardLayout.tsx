@@ -94,6 +94,9 @@ export default function DashboardLayout({
           </Link>
           {user.role === "PATIENT" && (
             <>
+              <Link href="/patient/book-visit" className={linkClass(pathname.startsWith("/patient/book-visit") || pathname.startsWith("/patient/visit-tracker"))} aria-current={pathname.startsWith("/patient/book-visit") ? "page" : undefined}>
+                <span aria-hidden>📅</span>Book a Visit
+              </Link>
               <Link href="/patient/early-warning" className={linkClass(pathname === "/patient/early-warning")} aria-current={pathname === "/patient/early-warning" ? "page" : undefined}>
                 <span aria-hidden>⚠️</span>Early Warning (ML)
               </Link>

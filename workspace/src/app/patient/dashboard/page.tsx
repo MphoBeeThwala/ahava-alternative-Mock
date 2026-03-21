@@ -358,7 +358,7 @@ export default function PatientDashboard() {
                                                     <p className="font-semibold text-[var(--foreground)]">
                                                         {new Date(booking.scheduledDate).toLocaleDateString()}
                                                     </p>
-                                                    <p className="text-sm text-[var(--muted)] mt-1">{booking.address}</p>
+                                                    <p className="text-sm text-[var(--muted)] mt-1">{booking.encryptedAddress ?? '—'}</p>
                                                 </div>
                                                 <StatusBadge
                                                     variant={booking.status === 'CONFIRMED' ? 'success' : 'warning'}

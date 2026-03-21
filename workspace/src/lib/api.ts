@@ -336,24 +336,35 @@ export const patientApi = {
 
 // ==================== BOOKINGS ====================
 export interface CreateBookingData {
-  scheduledDate: string; // ISO date string
-  address: string;
   encryptedAddress: string;
+  scheduledDate: string;
+  estimatedDuration: number;
+  paymentMethod: 'CARD' | 'INSURANCE';
   amountInCents: number;
   patientLat: number;
   patientLng: number;
-  notes?: string;
+  insuranceProvider?: string;
+  insuranceMemberNumber?: string;
 }
 
 export interface Booking {
   id: string;
   patientId: string;
+  nurseId?: string;
   scheduledDate: string;
+  estimatedDuration: number;
+  paymentMethod: string;
+  paymentStatus: string;
   status: string;
-  address: string;
   amountInCents: number;
+  encryptedAddress?: string;
   createdAt: string;
   updatedAt: string;
+  visit?: {
+    id: string;
+    status: string;
+    nurse?: { id: string; firstName: string; lastName: string };
+  };
 }
 
 export const bookingsApi = {

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import RoleGuard, { UserRole } from '../../../components/RoleGuard';
 import { nurseApi, visitsApi, Visit } from '../../../lib/api';
 import { useAuth } from '../../../contexts/AuthContext';
@@ -8,17 +8,35 @@ import { useToast } from '../../../contexts/ToastContext';
 import DashboardLayout from '../../../components/DashboardLayout';
 import { Card, CardHeader, CardTitle } from '../../../components/ui/Card';
 import { StatusBadge } from '../../../components/ui/StatusBadge';
+import { useVisitWebSocket } from '../../../hooks/useVisitWebSocket';
 
 type VisitStatusFilter = 'ALL' | Visit['status'];
 
+interface IncomingBooking {
+  bookingId: string;
+  patientName: string;
+  scheduledDate: string;
+  estimatedDuration: number;
+  amountInCents: number;
+  distanceKm: number;
+}
+
+const ACCEPT_WINDOW_SEC = 30;
+
 export default function NurseDashboard() {
-    const { user } = useAuth();
+    const { user, token } = useAuth();
     const toast = useToast();
     const [isAvailable, setIsAvailable] = useState(false);
     const [locationStatus, setLocationStatus] = useState('Unknown');
+    const [currentCoords, setCurrentCoords] = useState<{ lat: number; lng: number } | null>(null);
     const [loading, setLoading] = useState(false);
     const [visits, setVisits] = useState<Visit[]>([]);
     const [statusFilter, setStatusFilter] = useState<VisitStatusFilter>('ALL');
+    const [incomingBooking, setIncomingBooking] = useState<IncomingBooking | null>(null);
+    const [countdown, setCountdown] = useState(ACCEPT_WINDOW_SEC);
+    const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    const { send, lastMessage, connected } = useVisitWebSocket(token);
 
     useEffect(() => {
         loadProfile();
@@ -60,18 +78,17 @@ export default function NurseDashboard() {
             // Going ONLINE: Need Location
             navigator.geolocation.getCurrentPosition(async (position) => {
                 try {
-                    await nurseApi.updateAvailability({
-                        lat: position.coords.latitude,
-                        lng: position.coords.longitude,
-                        isAvailable: true,
-                    });
-
+                    const lat = position.coords.latitude;
+                    const lng = position.coords.longitude;
+                    await nurseApi.updateAvailability({ lat, lng, isAvailable: true });
+                    setCurrentCoords({ lat, lng });
                     setIsAvailable(true);
-                    setLocationStatus(`Active at ${position.coords.latitude.toFixed(4)}, ${position.coords.longitude.toFixed(4)}`);
-                    loadVisits(); // Refresh visits when going online
+                    setLocationStatus(`Active at ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+                    // Also register in the WS server's onlineNurses map for real-time matching
+                    goOnlineViaWs(lat, lng);
+                    loadVisits();
                 } catch (error: unknown) {
                     const e = error as { response?: { data?: { error?: string } } };
-                    console.error(error);
                     toast.error(e.response?.data?.error || "Failed to go online. Check network.");
                 } finally {
                     setLoading(false);
@@ -83,13 +100,12 @@ export default function NurseDashboard() {
         } else {
             // Going OFFLINE
             try {
-                await nurseApi.updateAvailability({
-                    lat: 0,
-                    lng: 0,
-                    isAvailable: false,
-                });
+                await nurseApi.updateAvailability({ lat: 0, lng: 0, isAvailable: false });
+                send({ type: 'NURSE_GO_OFFLINE' });
                 setIsAvailable(false);
                 setLocationStatus("Offline");
+                setCurrentCoords(null);
+                setIncomingBooking(null);
             } catch (error: unknown) {
                 const e = error as { response?: { data?: { error?: string } } };
                 toast.error(e.response?.data?.error || "Failed to go offline.");
@@ -107,6 +123,71 @@ export default function NurseDashboard() {
             const e = error as { response?: { data?: { error?: string } } };
             toast.error(e.response?.data?.error || "Failed to update visit status.");
         }
+    };
+
+    // ── WebSocket: handle incoming booking notifications ──
+    useEffect(() => {
+        if (!lastMessage) return;
+        if (lastMessage.type === 'NEW_BOOKING_AVAILABLE') {
+            const d = lastMessage.data as unknown as IncomingBooking;
+            setIncomingBooking(d);
+            setCountdown(ACCEPT_WINDOW_SEC);
+            toast.info(`📢 New visit request — ${d.patientName} (${d.distanceKm} km away)`);
+        }
+        if (lastMessage.type === 'BOOKING_TAKEN') {
+            setIncomingBooking(null);
+            if (countdownRef.current) clearInterval(countdownRef.current);
+        }
+        if (lastMessage.type === 'ACCEPT_BOOKING_SUCCESS') {
+            setIncomingBooking(null);
+            if (countdownRef.current) clearInterval(countdownRef.current);
+            toast.success('Visit accepted! Check your visits list.');
+            loadVisits();
+        }
+        if (lastMessage.type === 'ACCEPT_BOOKING_FAILED') {
+            setIncomingBooking(null);
+            toast.error(lastMessage.error || 'Could not accept — booking already taken.');
+        }
+        if (lastMessage.type === 'NURSE_ONLINE_SUCCESS') {
+            toast.success('You are now online. Listening for nearby requests.');
+        }
+    }, [lastMessage]);
+
+    // Countdown timer when incoming booking arrives
+    useEffect(() => {
+        if (incomingBooking) {
+            if (countdownRef.current) clearInterval(countdownRef.current);
+            countdownRef.current = setInterval(() => {
+                setCountdown((c) => {
+                    if (c <= 1) {
+                        clearInterval(countdownRef.current!);
+                        setIncomingBooking(null);
+                        send({ type: 'DECLINE_BOOKING', data: { bookingId: incomingBooking.bookingId } });
+                        return ACCEPT_WINDOW_SEC;
+                    }
+                    return c - 1;
+                });
+            }, 1000);
+        }
+        return () => { if (countdownRef.current) clearInterval(countdownRef.current); };
+    }, [incomingBooking]);
+
+    // When going online via WS, also send NURSE_GO_ONLINE with GPS
+    const goOnlineViaWs = useCallback((lat: number, lng: number) => {
+        send({ type: 'NURSE_GO_ONLINE', data: { lat, lng } });
+    }, [send]);
+
+    const handleAccept = () => {
+        if (!incomingBooking) return;
+        send({ type: 'ACCEPT_BOOKING', data: { bookingId: incomingBooking.bookingId } });
+        if (countdownRef.current) clearInterval(countdownRef.current);
+    };
+
+    const handlePass = () => {
+        if (!incomingBooking) return;
+        send({ type: 'DECLINE_BOOKING', data: { bookingId: incomingBooking.bookingId } });
+        setIncomingBooking(null);
+        if (countdownRef.current) clearInterval(countdownRef.current);
     };
 
     const filteredVisits = statusFilter === 'ALL' ? visits : visits.filter((v) => v.status === statusFilter);
@@ -135,6 +216,91 @@ export default function NurseDashboard() {
                     </div>
 
                 <div className="p-6 sm:p-8">
+
+                {/* ── WS status strip ── */}
+                {isAvailable && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, padding: '10px 16px', borderRadius: 12, background: connected ? 'rgba(5,150,105,0.08)' : 'rgba(217,119,6,0.08)', border: `1px solid ${connected ? 'rgba(5,150,105,0.2)' : 'rgba(217,119,6,0.25)'}` }}>
+                        <div style={{ width: 8, height: 8, borderRadius: '50%', background: connected ? '#059669' : '#d97706', boxShadow: connected ? '0 0 6px #059669' : 'none', animation: connected ? 'pulse 2s infinite' : 'none' }} />
+                        <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}`}</style>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: connected ? '#059669' : '#d97706' }}>
+                            {connected ? '🛰 Live radar active — listening for requests within 10 km' : '⚠️ Reconnecting to live radar…'}
+                        </span>
+                    </div>
+                )}
+
+                {/* ── Incoming booking request card (Uber-style) ── */}
+                {incomingBooking && (
+                    <div style={{ marginBottom: 24, borderRadius: 20, overflow: 'hidden', boxShadow: '0 8px 40px rgba(13,148,136,0.25)', border: '2px solid #0d9488', animation: 'slideIn 0.3s ease-out' }}>
+                        <style>{`@keyframes slideIn{from{transform:translateY(-20px);opacity:0}to{transform:translateY(0);opacity:1}}`}</style>
+
+                        {/* Top bar with countdown */}
+                        <div style={{ background: 'linear-gradient(135deg,#0d9488,#059669)', padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                <span style={{ fontSize: 20 }}>📢</span>
+                                <span style={{ color: 'white', fontWeight: 800, fontSize: 15 }}>New Visit Request!</span>
+                            </div>
+                            {/* Countdown ring */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <svg width="44" height="44" viewBox="0 0 44 44" style={{ transform: 'rotate(-90deg)' }}>
+                                    <circle cx="22" cy="22" r="18" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="4" />
+                                    <circle cx="22" cy="22" r="18" fill="none" stroke="white" strokeWidth="4"
+                                        strokeDasharray={`${2 * Math.PI * 18}`}
+                                        strokeDashoffset={`${2 * Math.PI * 18 * (1 - countdown / ACCEPT_WINDOW_SEC)}`}
+                                        style={{ transition: 'stroke-dashoffset 1s linear' }}
+                                    />
+                                </svg>
+                                <span style={{ position: 'absolute', color: 'white', fontWeight: 800, fontSize: 13, marginLeft: 14 }}>{countdown}</span>
+                            </div>
+                        </div>
+
+                        {/* Request details */}
+                        <div style={{ background: 'white', padding: '20px 24px' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px 8px', marginBottom: 20 }}>
+                                <div>
+                                    <p style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>Patient</p>
+                                    <p style={{ fontSize: 15, fontWeight: 800, color: 'var(--foreground)' }}>{incomingBooking.patientName}</p>
+                                </div>
+                                <div>
+                                    <p style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>Distance</p>
+                                    <p style={{ fontSize: 15, fontWeight: 800, color: 'var(--foreground)' }}>{incomingBooking.distanceKm} km</p>
+                                </div>
+                                <div>
+                                    <p style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>Payout</p>
+                                    <p style={{ fontSize: 15, fontWeight: 800, color: '#059669' }}>R{(incomingBooking.amountInCents / 100).toFixed(0)}</p>
+                                </div>
+                                <div>
+                                    <p style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>Duration</p>
+                                    <p style={{ fontSize: 15, fontWeight: 800, color: 'var(--foreground)' }}>{incomingBooking.estimatedDuration} min</p>
+                                </div>
+                                <div style={{ gridColumn: 'span 2' }}>
+                                    <p style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>Scheduled</p>
+                                    <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--foreground)' }}>
+                                        {new Date(incomingBooking.scheduledDate).toLocaleString('en-ZA', { dateStyle: 'medium', timeStyle: 'short' })}
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* Accept / Pass buttons */}
+                            <div style={{ display: 'flex', gap: 12 }}>
+                                <button
+                                    onClick={handleAccept}
+                                    style={{ flex: 2, padding: '15px', borderRadius: 14, border: 'none', background: 'linear-gradient(135deg,#059669,#047857)', color: 'white', fontSize: 16, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit', boxShadow: '0 4px 16px rgba(5,150,105,0.4)', transition: 'transform 0.15s' }}
+                                    onMouseDown={(e) => (e.currentTarget.style.transform = 'scale(0.97)')}
+                                    onMouseUp={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+                                >
+                                    ✓ Accept
+                                </button>
+                                <button
+                                    onClick={handlePass}
+                                    style={{ flex: 1, padding: '15px', borderRadius: 14, border: '1.5px solid var(--border)', background: 'white', color: 'var(--muted)', fontSize: 15, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}
+                                >
+                                    Pass
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
                     {/* Availability Card */}
                     <div className="lg:col-span-1">
