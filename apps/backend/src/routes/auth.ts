@@ -88,18 +88,22 @@ router.post('/register', authRateLimiter, async (req, res, next) => {
     // Generate tokens
     const { accessToken, refreshToken } = generateTokens(user.id, user.role);
 
-    // Send email verification
-    const verificationToken = crypto.randomBytes(32).toString('hex');
-    await (prisma.user.update as Function)({
-      where: { id: user.id },
-      data: { emailVerificationToken: verificationToken },
-    });
-    const verifyUrl = `${process.env.FRONTEND_URL ?? ''}/auth/verify-email?token=${verificationToken}`;
-    addEmailJob({
-      to: email,
-      subject: 'Verify your Ahava Healthcare email',
-      html: `<p>Hi ${firstName},</p><p>Welcome to Ahava Healthcare! Please verify your email address:</p><p><a href="${verifyUrl}" style="background:#0d9488;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">Verify Email</a></p><p>Or copy this link: ${verifyUrl}</p><p>This link expires in 24 hours.</p>`,
-    }).catch(() => {});
+    // Send email verification (non-fatal — requires DB migration to be applied)
+    try {
+      const verificationToken = crypto.randomBytes(32).toString('hex');
+      await (prisma.user.update as Function)({
+        where: { id: user.id },
+        data: { emailVerificationToken: verificationToken },
+      });
+      const verifyUrl = `${process.env.FRONTEND_URL ?? ''}/auth/verify-email?token=${verificationToken}`;
+      addEmailJob({
+        to: email,
+        subject: 'Verify your Ahava Healthcare email',
+        html: `<p>Hi ${firstName},</p><p>Welcome to Ahava Healthcare! Please verify your email address:</p><p><a href="${verifyUrl}" style="background:#0d9488;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">Verify Email</a></p><p>Or copy this link: ${verifyUrl}</p><p>This link expires in 24 hours.</p>`,
+      }).catch(() => {});
+    } catch (verifyErr) {
+      console.warn('[auth/register] Could not set email verification token (migration pending?):', verifyErr);
+    }
 
     // Post-registration async hooks (non-blocking)
     setImmediate(async () => {
