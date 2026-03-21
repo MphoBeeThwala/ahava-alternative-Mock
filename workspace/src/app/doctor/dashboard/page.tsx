@@ -146,19 +146,30 @@ export default function DoctorDashboard() {
     return (
         <RoleGuard allowedRoles={[UserRole.DOCTOR]}>
             <DashboardLayout>
-                <div className="p-6 sm:p-8 bg-[var(--background)] min-h-screen">
-                <header className="flex flex-wrap justify-between items-center gap-4 mb-8">
-                    <div>
-                        <h1 className="text-2xl sm:text-3xl font-bold text-[var(--foreground)] tracking-tight">Doctor Portal</h1>
-                        <p className="text-[var(--muted)] font-medium mt-1">Welcome, Dr. {user?.lastName}</p>
+                <div style={{ background: 'var(--background)', minHeight: '100vh' }}>
+
+                    {/* ── Hero banner ── */}
+                    <div style={{ background: 'linear-gradient(135deg,#0a1628 0%,#0d2f5e 55%,#1e3a5f 100%)', padding: '32px 40px 28px', position: 'relative', overflow: 'hidden' }}>
+                        <div style={{ position: 'absolute', top: -50, right: -50, width: 200, height: 200, borderRadius: '50%', background: 'radial-gradient(circle,rgba(37,99,235,0.2),transparent 70%)', pointerEvents: 'none' }} />
+                        <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+                            <div>
+                                <p style={{ color: 'rgba(147,197,253,0.8)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6 }}>Doctor Portal</p>
+                                <h1 style={{ color: 'white', fontSize: 'clamp(22px,3vw,30px)', fontWeight: 900, margin: 0 }}>
+                                    Welcome, Dr. {user?.lastName} 👨‍⚕️
+                                </h1>
+                                <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginTop: 4 }}>Review AI triage cases, approve diagnoses, and manage patient care.</p>
+                            </div>
+                            <div style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 16, padding: '16px 24px', textAlign: 'center', minWidth: 140 }}>
+                                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>Active Queue</div>
+                                <div style={{ fontSize: 36, fontWeight: 900, color: totalPending > 0 ? '#fbbf24' : '#34d399', lineHeight: 1 }}>{totalPending}</div>
+                                <div style={{ fontSize: 11, fontWeight: 600, marginTop: 6, padding: '3px 10px', borderRadius: 20, background: totalPending > 0 ? 'rgba(251,191,36,0.15)' : 'rgba(52,211,153,0.15)', color: totalPending > 0 ? '#fbbf24' : '#34d399', display: 'inline-block' }}>
+                                    {totalPending} pending
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                    <KpiCard
-                        label="Active Queue"
-                        value={totalPending}
-                        badge={`${totalPending} pending`}
-                        badgeVariant={totalPending > 0 ? 'warning' : 'success'}
-                    />
-                </header>
+
+                <div className="p-6 sm:p-8">
 
                 {/* AI-assisted remote triage (sent from patient dashboard) */}
                 {triageCases.length > 0 && (
@@ -407,7 +418,8 @@ export default function DoctorDashboard() {
                         </div>
                     </div>
                 </Modal>
-                </div>
+                </div>{/* p-6 */}
+                </div>{/* outer bg */}
             </DashboardLayout>
         </RoleGuard>
     );

@@ -82,35 +82,62 @@ export default function PatientDashboard() {
         }
     };
 
+    const alertColor = monitoringSummary?.alertLevel === 'GREEN'
+        ? '#059669' : monitoringSummary?.alertLevel === 'YELLOW' ? '#d97706' : '#dc2626';
+    const alertBg = monitoringSummary?.alertLevel === 'GREEN'
+        ? 'rgba(5,150,105,0.1)' : monitoringSummary?.alertLevel === 'YELLOW' ? 'rgba(217,119,6,0.1)' : 'rgba(220,38,38,0.1)';
+
     return (
         <RoleGuard allowedRoles={[UserRole.PATIENT]}>
             <DashboardLayout>
-                <div className="p-6 sm:p-8 bg-[var(--background)]">
+                <div style={{ background: 'var(--background)', minHeight: '100vh' }}>
+
+                    {/* ── Hero banner ── */}
+                    <div style={{ background: 'linear-gradient(135deg,#0a1628 0%,#0d2f5e 55%,#0a3d3a 100%)', padding: '32px 40px 28px', position: 'relative', overflow: 'hidden' }}>
+                        <div style={{ position: 'absolute', top: -60, right: -60, width: 220, height: 220, borderRadius: '50%', background: 'radial-gradient(circle,rgba(13,148,136,0.18),transparent 70%)', pointerEvents: 'none' }} />
+                        <div style={{ maxWidth: 1100, margin: '0 auto' }}>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+                                <div>
+                                    <p style={{ color: 'rgba(94,234,212,0.8)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6 }}>Patient Portal</p>
+                                    <h1 style={{ color: 'white', fontSize: 'clamp(22px,3vw,30px)', fontWeight: 900, margin: 0 }}>
+                                        Welcome back, {user?.firstName} 👋
+                                    </h1>
+                                    <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginTop: 4 }}>Track your health, log biometrics, and get AI-powered care.</p>
+                                </div>
+                                {monitoringSummary && (
+                                    <div style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 16, padding: '14px 22px', textAlign: 'center', minWidth: 140 }}>
+                                        <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>Readiness</div>
+                                        <div style={{ fontSize: 32, fontWeight: 900, color: 'white', lineHeight: 1 }}>{monitoringSummary.readinessScore ?? '—'}</div>
+                                        <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, padding: '3px 10px', borderRadius: 20, background: alertBg, color: alertColor, display: 'inline-block' }}>
+                                            {monitoringSummary.alertLevel ?? 'N/A'}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="p-6 sm:p-8">
                     <div className="max-w-6xl mx-auto">
-                        {/* Unmissable ML Early Warning strip — first thing on the page */}
+
+                        {/* ML Early Warning strip */}
                         <Link
                             href="/patient/early-warning"
                             className="flex items-center justify-between gap-3 mb-6 px-4 py-3 rounded-xl border-2 w-full text-left transition hover:opacity-95"
                             style={{ borderColor: 'var(--primary)', backgroundColor: 'var(--primary-soft)' }}
                         >
-                            <span className="text-sm font-semibold text-[var(--primary)] uppercase tracking-wide">
-                                ML Early Warning Service
-                            </span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{ fontSize: 16 }}>⚠️</span>
+                                <span className="text-sm font-semibold text-[var(--primary)] uppercase tracking-wide">
+                                    ML Early Warning Service
+                                </span>
+                            </div>
                             <span className="text-sm font-medium text-[var(--foreground)]">
                                 Cardiovascular &amp; wellness risk scores →
                             </span>
                         </Link>
 
-                        <div className="flex flex-wrap justify-between items-center gap-4 mb-8">
-                            <h1 className="text-2xl sm:text-3xl font-bold text-[var(--foreground)] tracking-tight">
-                                Patient Portal
-                            </h1>
-                            <p className="text-sm sm:text-base font-medium text-[var(--muted)]">
-                                Welcome, {user?.firstName} {user?.lastName}
-                            </p>
-                        </div>
-
-                        {/* Early Warning — prominent card (also in sidebar as "Early Warning") */}
+                        {/* Early Warning — prominent card */}
                         <Link
                             href="/patient/early-warning"
                             className="card-interactive block mb-8 p-6 rounded-[var(--radius-lg)] border-2"
@@ -345,8 +372,9 @@ export default function PatientDashboard() {
                                 </div>
                             )}
                         </Card>
-                    </div>
-                </div>
+                    </div>{/* max-w-6xl */}
+                    </div>{/* p-6 sm:p-8 */}
+                </div>{/* outer bg */}
             </DashboardLayout>
         </RoleGuard>
     );

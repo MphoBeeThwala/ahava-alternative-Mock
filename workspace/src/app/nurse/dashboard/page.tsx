@@ -114,41 +114,54 @@ export default function NurseDashboard() {
     return (
         <RoleGuard allowedRoles={[UserRole.NURSE]}>
             <DashboardLayout>
-                <div className="p-6 sm:p-8 bg-[var(--background)] min-h-screen">
-                <div className="mb-8">
-                    <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight mb-2">Nurse Portal</h1>
-                    <p className="text-slate-700 font-medium">Welcome, {user?.firstName} {user?.lastName}</p>
-                </div>
+                <div style={{ background: 'var(--background)', minHeight: '100vh' }}>
 
+                    {/* ── Hero banner ── */}
+                    <div style={{ background: isAvailable ? 'linear-gradient(135deg,#064e3b 0%,#065f46 60%,#047857 100%)' : 'linear-gradient(135deg,#0a1628 0%,#1e293b 60%,#0f2027 100%)', padding: '32px 40px 28px', position: 'relative', overflow: 'hidden', transition: 'background 0.5s ease' }}>
+                        <div style={{ position: 'absolute', top: -60, right: -60, width: 200, height: 200, borderRadius: '50%', background: 'radial-gradient(circle,rgba(255,255,255,0.06),transparent 70%)', pointerEvents: 'none' }} />
+                        <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+                            <div>
+                                <p style={{ color: 'rgba(167,243,208,0.8)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6 }}>Nurse Portal</p>
+                                <h1 style={{ color: 'white', fontSize: 'clamp(22px,3vw,30px)', fontWeight: 900, margin: 0 }}>
+                                    Welcome, {user?.firstName} {user?.lastName} 👩‍⚕️
+                                </h1>
+                                <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginTop: 4 }}>Manage your availability, track visits, and serve patients near you.</p>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 14, padding: '10px 18px' }}>
+                                <div style={{ width: 10, height: 10, borderRadius: '50%', background: isAvailable ? '#34d399' : '#6b7280', boxShadow: isAvailable ? '0 0 8px #34d399' : 'none', transition: 'all 0.3s' }} />
+                                <span style={{ color: 'white', fontSize: 13, fontWeight: 700 }}>{isAvailable ? 'Online — Accepting visits' : 'Offline'}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                <div className="p-6 sm:p-8">
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
                     {/* Availability Card */}
                     <div className="lg:col-span-1">
-                        <div className="max-w-md mx-auto bg-white rounded-2xl shadow-lg overflow-hidden">
-                            <div className={`h-32 flex items-center justify-center transition-colors duration-500 ${
-                                isAvailable ? 'bg-emerald-500' : 'bg-slate-700'
-                            }`}>
-                                <span className="text-4xl">{isAvailable ? '🟢' : '⚫'}</span>
+                        <div style={{ background: 'white', borderRadius: 20, border: '1.5px solid var(--border)', overflow: 'hidden', boxShadow: 'var(--shadow)' }}>
+                            {/* Status header */}
+                            <div style={{ height: 100, background: isAvailable ? 'linear-gradient(135deg,#059669,#047857)' : 'linear-gradient(135deg,#374151,#1f2937)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, transition: 'background 0.4s ease' }}>
+                                <span style={{ fontSize: 32 }}>{isAvailable ? '🟢' : '⚫'}</span>
+                                <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                                    {isAvailable ? 'SANC Verified · Active' : 'Currently Unavailable'}
+                                </span>
                             </div>
 
-                            <div className="p-8 text-center">
-                                <h2 className="text-2xl font-bold text-slate-900 mb-2">
+                            <div style={{ padding: '24px', textAlign: 'center' }}>
+                                <h2 style={{ fontSize: 22, fontWeight: 800, color: 'var(--foreground)', marginBottom: 6 }}>
                                     {isAvailable ? 'You are Online' : 'You are Offline'}
                                 </h2>
-                                <p className="text-slate-600 font-medium mb-8">{locationStatus}</p>
+                                <p style={{ color: 'var(--muted)', fontSize: 13, fontWeight: 500, marginBottom: 24 }}>{locationStatus}</p>
 
                                 <button
                                     onClick={toggleAvailability}
                                     disabled={loading}
-                                    className={`w-full py-4 text-lg font-bold rounded-xl text-white shadow-lg transform transition active:scale-95 ${
-                                        isAvailable
-                                            ? 'bg-red-500 hover:bg-red-600 shadow-red-200'
-                                            : 'bg-green-600 hover:bg-green-700 shadow-green-200'
-                                    }`}
+                                    style={{ width: '100%', padding: '14px', fontSize: 15, fontWeight: 700, borderRadius: 12, border: 'none', color: 'white', cursor: loading ? 'not-allowed' : 'pointer', background: isAvailable ? 'linear-gradient(135deg,#ef4444,#dc2626)' : 'linear-gradient(135deg,#059669,#047857)', boxShadow: isAvailable ? '0 4px 14px rgba(239,68,68,0.3)' : '0 4px 14px rgba(5,150,105,0.35)', fontFamily: 'inherit', transition: 'all 0.2s', opacity: loading ? 0.6 : 1 }}
                                 >
                                     {loading ? 'Updating...' : (isAvailable ? 'GO OFFLINE' : 'GO ONLINE')}
                                 </button>
 
-                                <p className="mt-6 text-xs text-slate-600">
+                                <p style={{ marginTop: 16, fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
                                     Going online makes you visible to patients within 10km.
                                     <br />Battery usage may increase due to GPS.
                                 </p>
@@ -243,9 +256,10 @@ export default function NurseDashboard() {
                                 </div>
                             )}
                         </Card>
-                    </div>
-                </div>
-                </div>
+                    </div>{/* col-span-2 */}
+                </div>{/* grid */}
+                </div>{/* p-6 */}
+                </div>{/* outer bg */}
             </DashboardLayout>
         </RoleGuard>
     );

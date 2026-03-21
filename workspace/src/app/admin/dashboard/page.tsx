@@ -70,26 +70,36 @@ export default function AdminDashboard() {
     return (
         <RoleGuard allowedRoles={[UserRole.ADMIN]}>
             <DashboardLayout>
-                <div className="p-6 sm:p-8 bg-[var(--background)] min-h-screen">
-                <div className="mb-8">
-                    <h1 className="text-2xl sm:text-3xl font-bold text-[var(--foreground)] tracking-tight mb-2">Admin Console</h1>
-                    <p className="text-[var(--muted)] font-medium">Welcome, {user?.firstName} {user?.lastName}</p>
-                </div>
+                <div style={{ background: 'var(--background)', minHeight: '100vh' }}>
 
-                {/* KPI row */}
-                {stats && (
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-                        <KpiCard label="Total Users" value={stats.totalUsers ?? users.length} />
-                        <KpiCard
-                            label="Active Users"
-                            value={users.filter((u) => u.isActive).length}
-                            badge="Active"
-                            badgeVariant="success"
-                        />
-                        <KpiCard label="Patients" value={users.filter((u) => u.role === 'PATIENT').length} />
-                        <KpiCard label="Healthcare Workers" value={users.filter((u) => u.role === 'NURSE' || u.role === 'DOCTOR').length} />
+                    {/* ── Hero banner ── */}
+                    <div style={{ background: 'linear-gradient(135deg,#0a1628 0%,#1e1b4b 55%,#2d1b5e 100%)', padding: '32px 40px 28px', position: 'relative', overflow: 'hidden' }}>
+                        <div style={{ position: 'absolute', top: -50, right: -50, width: 200, height: 200, borderRadius: '50%', background: 'radial-gradient(circle,rgba(124,58,237,0.2),transparent 70%)', pointerEvents: 'none' }} />
+                        <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+                            <div>
+                                <p style={{ color: 'rgba(196,181,253,0.8)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6 }}>Admin Console</p>
+                                <h1 style={{ color: 'white', fontSize: 'clamp(22px,3vw,30px)', fontWeight: 900, margin: 0 }}>
+                                    Welcome, {user?.firstName} {user?.lastName} 🛡️
+                                </h1>
+                                <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginTop: 4 }}>Manage users, monitor platform health, and oversee all activity.</p>
+                            </div>
+                            <div style={{ display: 'flex', gap: 12 }}>
+                                {[
+                                    { label: 'Total', value: stats?.totalUsers ?? users.length, color: '#a78bfa' },
+                                    { label: 'Active', value: users.filter((u) => u.isActive).length, color: '#34d399' },
+                                    { label: 'Patients', value: users.filter((u) => u.role === 'PATIENT').length, color: '#60a5fa' },
+                                    { label: 'Staff', value: users.filter((u) => u.role === 'NURSE' || u.role === 'DOCTOR').length, color: '#fbbf24' },
+                                ].map(({ label, value, color }) => (
+                                    <div key={label} style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12, padding: '12px 16px', textAlign: 'center', minWidth: 64 }}>
+                                        <div style={{ fontSize: 22, fontWeight: 900, color, lineHeight: 1 }}>{value}</div>
+                                        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.45)', fontWeight: 600, marginTop: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
                     </div>
-                )}
+
+                <div className="p-6 sm:p-8">
 
                 {/* User Management Table */}
                 <Card className="overflow-hidden p-0">
@@ -187,7 +197,8 @@ export default function AdminDashboard() {
                         <div className="p-12 text-center font-medium text-[var(--muted)]">No users found.</div>
                     )}
                 </Card>
-                </div>
+                </div>{/* p-6 */}
+                </div>{/* outer bg */}
             </DashboardLayout>
         </RoleGuard>
     );
