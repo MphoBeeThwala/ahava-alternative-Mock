@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import RoleGuard, { UserRole } from '../../../components/RoleGuard';
 import { doctorApi, visitsApi, Visit, TriageCase } from '../../../lib/api';
 import { useAuth } from '../../../contexts/AuthContext';
@@ -56,12 +56,7 @@ export default function DoctorDashboard() {
     const [referModal, setReferModal] = useState<{ caseId: string; referredTo: string; notes: string } | null>(null);
     const [overrideModal, setOverrideModal] = useState<{ caseId: string; notes: string; diagnosis: string } | null>(null);
 
-    useEffect(() => {
-        loadPendingVisits();
-        loadTriageCases();
-    }, []);
-
-    const loadPendingVisits = async () => {
+    const loadPendingVisits = useCallback(async () => {
         try {
             setLoading(true);
             const data = await doctorApi.getPendingVisits();
@@ -71,16 +66,21 @@ export default function DoctorDashboard() {
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
 
-    const loadTriageCases = async () => {
+    const loadTriageCases = useCallback(async () => {
         try {
             const data = await doctorApi.getTriageCases('PENDING_REVIEW');
             setTriageCases(data.cases || []);
         } catch (error) {
             console.error('Failed to load triage cases:', error);
         }
-    };
+    }, []);
+
+    useEffect(() => {
+        loadPendingVisits();
+        loadTriageCases();
+    }, [loadPendingVisits, loadTriageCases]);
 
     const handleApprove = async (visitId: string) => {
         try {
@@ -260,7 +260,7 @@ export default function DoctorDashboard() {
                                         <p className="text-sm text-[var(--muted)]">
                                             {visit.createdAt ? new Date(visit.createdAt).toLocaleString() : 'Date TBD'}
                                         </p>
-                                        <p className="text-sm text-[var(--muted)] mt-1">{visit.booking?.address}</p>
+                                        <p className="text-sm text-[var(--muted)] mt-1">{visit.booking?.encryptedAddress ?? 'Address on file'}</p>
                                     </div>
                                     <StatusBadge variant={visit.triageLevel <= 2 ? 'danger' : 'warning'}>
                                         {visit.triageLevel ? `Level ${visit.triageLevel}` : visit.status}

@@ -37,32 +37,32 @@ export default function NurseDashboard() {
 
     const { send, lastMessage, connected } = useVisitWebSocket(token);
 
-    useEffect(() => {
-        loadProfile();
-        loadVisits();
-    }, []);
-
-    const loadProfile = async () => {
+    const loadProfile = useCallback(async () => {
         try {
             const data = await nurseApi.getProfile();
-            const user = data.user || data;
-            setIsAvailable(user.isAvailable || false);
-            if (user.lastKnownLat && user.lastKnownLng) {
-                setLocationStatus(`Active at ${user.lastKnownLat.toFixed(4)}, ${user.lastKnownLng.toFixed(4)}`);
+            const profileUser = data.user || data;
+            setIsAvailable(profileUser.isAvailable || false);
+            if (profileUser.lastKnownLat && profileUser.lastKnownLng) {
+                setLocationStatus(`Active at ${profileUser.lastKnownLat.toFixed(4)}, ${profileUser.lastKnownLng.toFixed(4)}`);
             }
         } catch (error) {
             console.error('Failed to load profile:', error);
         }
-    };
+    }, []);
 
-    const loadVisits = async () => {
+    const loadVisits = useCallback(async () => {
         try {
             const data = await nurseApi.getMyVisits();
             setVisits(data.visits || []);
         } catch (error) {
             console.error('Failed to load visits:', error);
         }
-    };
+    }, []);
+
+    useEffect(() => {
+        loadProfile();
+        loadVisits();
+    }, [loadProfile, loadVisits]);
 
     const toggleAvailability = async () => {
         setLoading(true);
@@ -369,7 +369,7 @@ export default function NurseDashboard() {
                                                             ? new Date(visit.booking.scheduledDate).toLocaleString()
                                                             : 'Date TBD'}
                                                     </p>
-                                                    <p className="text-sm text-[var(--muted)]">{visit.booking?.address}</p>
+                                                    <p className="text-sm text-[var(--muted)]">{visit.booking?.encryptedAddress ?? 'Address on file'}</p>
                                                 </div>
                                                 <StatusBadge
                                                     variant={visit.status === 'COMPLETED' ? 'success' : 'warning'}

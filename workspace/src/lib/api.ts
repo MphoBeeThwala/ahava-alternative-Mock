@@ -408,9 +408,9 @@ export interface Visit {
   treatment?: { medications?: { name: string; dosage: string }[]; notes?: string };
   nurseReport?: string;
   booking?: {
-    address?: string;
-    patient?: { firstName?: string; lastName?: string };
+    encryptedAddress?: string;
     scheduledDate?: string;
+    patient?: { firstName?: string; lastName?: string };
   };
 }
 

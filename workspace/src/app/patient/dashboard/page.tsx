@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import RoleGuard, { UserRole } from '../../../components/RoleGuard';
 import { patientApi, bookingsApi, BiometricReading, MonitoringSummary, Booking } from '../../../lib/api';
@@ -25,22 +25,16 @@ export default function PatientDashboard() {
         source: 'manual',
     });
 
-    useEffect(() => {
-        loadMonitoringSummary();
-        loadBiometricHistory();
-        loadBookings();
-    }, []);
-
-    const loadMonitoringSummary = async () => {
+    const loadMonitoringSummary = useCallback(async () => {
         try {
             const summary = await patientApi.getMonitoringSummary();
             setMonitoringSummary(summary);
         } catch (error) {
             console.error('Failed to load monitoring summary:', error);
         }
-    };
+    }, []);
 
-    const loadBiometricHistory = async () => {
+    const loadBiometricHistory = useCallback(async () => {
         try {
             const res = await patientApi.getBiometricHistory(20);
             const list = (res?.data?.history ?? res?.history ?? res) as Array<Record<string, unknown>>;
@@ -48,16 +42,22 @@ export default function PatientDashboard() {
         } catch (error) {
             console.error('Failed to load biometric history:', error);
         }
-    };
+    }, []);
 
-    const loadBookings = async () => {
+    const loadBookings = useCallback(async () => {
         try {
             const data = await bookingsApi.getMyBookings();
             setBookings(data?.bookings ?? data?.data ?? []);
         } catch (error) {
             console.error('Failed to load bookings:', error);
         }
-    };
+    }, []);
+
+    useEffect(() => {
+        loadMonitoringSummary();
+        loadBiometricHistory();
+        loadBookings();
+    }, [loadMonitoringSummary, loadBiometricHistory, loadBookings]);
 
     const handleBiometricSubmit = async () => {
         try {

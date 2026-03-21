@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import RoleGuard, { UserRole } from '../../../components/RoleGuard';
 import { adminApi, User } from '../../../lib/api';
 import { useAuth } from '../../../contexts/AuthContext';
@@ -21,12 +21,7 @@ export default function AdminDashboard() {
     const [roleFilter, setRoleFilter] = useState<RoleFilter>('ALL');
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
 
-    useEffect(() => {
-        loadUsers();
-        loadStats();
-    }, []);
-
-    const loadUsers = async () => {
+    const loadUsers = useCallback(async () => {
         try {
             setLoading(true);
             const data = await adminApi.getAllUsers();
@@ -36,16 +31,21 @@ export default function AdminDashboard() {
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
 
-    const loadStats = async () => {
+    const loadStats = useCallback(async () => {
         try {
             const data = await adminApi.getStats();
             setStats(data);
         } catch (error) {
             console.error('Failed to load stats:', error);
         }
-    };
+    }, []);
+
+    useEffect(() => {
+        loadUsers();
+        loadStats();
+    }, [loadUsers, loadStats]);
 
     const toggleUserStatus = async (userId: string, currentStatus: boolean) => {
         try {

@@ -90,7 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Use a direct API call without the interceptor to avoid redirect loop
       const token = localStorage.getItem('token');
       if (token) {
-        await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api'}/auth/logout`, {
+        await fetch('/api/auth/logout', {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
