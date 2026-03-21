@@ -32,16 +32,18 @@ apiClient.interceptors.request.use(
 // Track if we're already attempting refresh to avoid infinite loops
 let isRefreshing = false;
 let failedQueue: Array<{
-  onSuccess: (token: string) => void;
-  onFailure: (error: AxiosError) => void;
+  resolve: (response: unknown) => void;
+  reject: (error: unknown) => void;
+  config: ReturnType<typeof Object.assign>;
 }> = [];
 
 const processQueue = (error: AxiosError | null, token: string | null = null) => {
-  failedQueue.forEach((prom) => {
+  failedQueue.forEach(({ resolve, reject, config }) => {
     if (error) {
-      prom.onFailure(error);
-    } else {
-      prom.onSuccess(token!);
+      reject(error);
+    } else if (token && config) {
+      if (config.headers) config.headers.Authorization = `Bearer ${token}`;
+      resolve(apiClient(config));
     }
   });
   failedQueue = [];
@@ -118,9 +120,9 @@ apiClient.interceptors.response.use(
         }
       }
 
-      // If already refreshing, queue this request
-      return new Promise((onSuccess, onFailure) => {
-        failedQueue.push({ onSuccess, onFailure });
+      // If already refreshing, queue this request and retry it when token is ready
+      return new Promise((resolve, reject) => {
+        failedQueue.push({ resolve, reject, config: originalRequest });
       });
     }
 

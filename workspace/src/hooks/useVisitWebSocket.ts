@@ -24,6 +24,8 @@ export function useVisitWebSocket(token: string | null) {
   const intentionalClose = useRef(false);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectDelay = useRef(3000);
+  const retryCount = useRef(0);
+  const MAX_RETRIES = 8;
 
   const connectRef = useRef<(() => void) | null>(null);
 
@@ -38,6 +40,7 @@ export function useVisitWebSocket(token: string | null) {
       ws.onopen = () => {
         setConnected(true);
         reconnectDelay.current = 3000;
+        retryCount.current = 0;
         if (reconnectTimer.current) {
           clearTimeout(reconnectTimer.current);
           reconnectTimer.current = null;
@@ -46,7 +49,8 @@ export function useVisitWebSocket(token: string | null) {
 
       ws.onclose = () => {
         setConnected(false);
-        if (!intentionalClose.current) {
+        if (!intentionalClose.current && retryCount.current < MAX_RETRIES) {
+          retryCount.current += 1;
           reconnectTimer.current = setTimeout(() => {
             reconnectDelay.current = Math.min(reconnectDelay.current * 1.5, 30000);
             connectRef.current?.();

@@ -53,7 +53,7 @@ export default function PatientDashboard() {
     const loadBookings = async () => {
         try {
             const data = await bookingsApi.getMyBookings();
-            setBookings(data.bookings || []);
+            setBookings(data?.bookings ?? data?.data ?? []);
         } catch (error) {
             console.error('Failed to load bookings:', error);
         }
