@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import RoleGuard, { UserRole } from '../../../components/RoleGuard';
-import { patientApi, bookingsApi, BiometricReading, MonitoringSummary, Booking } from '../../../lib/api';
+import { patientApi, bookingsApi, terraApi, TerraStatus, BiometricReading, MonitoringSummary, Booking } from '../../../lib/api';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useToast } from '../../../contexts/ToastContext';
 import DashboardLayout from '../../../components/DashboardLayout';
@@ -17,6 +17,7 @@ export default function PatientDashboard() {
     const [monitoringSummary, setMonitoringSummary] = useState<MonitoringSummary | null>(null);
     const [biometricHistory, setBiometricHistory] = useState<Array<Record<string, unknown>>>([]);
     const [bookings, setBookings] = useState<Booking[]>([]);
+    const [wearable, setWearable] = useState<TerraStatus | null>(null);
     const [biometricData, setBiometricData] = useState<BiometricReading>({
         heartRate: undefined,
         bloodPressure: { systolic: 0, diastolic: 0 },
@@ -57,6 +58,7 @@ export default function PatientDashboard() {
         loadMonitoringSummary();
         loadBiometricHistory();
         loadBookings();
+        terraApi.getStatus().then(setWearable).catch(() => {});
     }, [loadMonitoringSummary, loadBiometricHistory, loadBookings]);
 
     const handleBiometricSubmit = async () => {
@@ -306,6 +308,32 @@ export default function PatientDashboard() {
                                 </Link>
                             </Card>
                         </div>
+
+                        {/* Wearable connect card */}
+                        <Link
+                            href="/patient/wearable"
+                            className="flex items-center justify-between gap-3 mb-6 px-5 py-4 rounded-2xl border w-full text-left transition hover:opacity-90"
+                            style={{ borderColor: wearable?.connected ? 'var(--success)' : 'var(--border)', backgroundColor: wearable?.connected ? 'rgba(5,150,105,0.06)' : 'var(--card)', boxShadow: 'var(--shadow)' }}
+                        >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                <div style={{ width: 40, height: 40, borderRadius: 12, background: wearable?.connected ? 'rgba(5,150,105,0.12)' : 'rgba(148,163,184,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
+                                    ⌚
+                                </div>
+                                <div>
+                                    <p className="text-sm font-bold text-[var(--foreground)]">
+                                        {wearable?.connected ? 'Smartwatch Connected' : 'Connect Your Smartwatch'}
+                                    </p>
+                                    <p className="text-xs text-[var(--muted)] mt-0.5">
+                                        {wearable?.connected
+                                            ? `${wearable.devices.join(', ')} · syncing automatically`
+                                            : 'Apple Watch, Fitbit, Garmin, Samsung & more — enable auto biometric sync'}
+                                    </p>
+                                </div>
+                            </div>
+                            <span className="text-sm font-semibold shrink-0" style={{ color: wearable?.connected ? 'var(--success)' : 'var(--primary)' }}>
+                                {wearable?.connected ? 'Manage →' : 'Set up →'}
+                            </span>
+                        </Link>
 
                         {/* Recent biometric readings */}
                         <Card className="card-interactive mb-8">

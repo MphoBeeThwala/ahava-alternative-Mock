@@ -103,6 +103,9 @@ export default function DashboardLayout({
               <Link href="/patient/ai-doctor" className={linkClass(pathname === "/patient/ai-doctor")} aria-current={pathname === "/patient/ai-doctor" ? "page" : undefined}>
                 <span aria-hidden>🩺</span>AI Doctor
               </Link>
+              <Link href="/patient/wearable" className={linkClass(pathname.startsWith("/patient/wearable"))} aria-current={pathname.startsWith("/patient/wearable") ? "page" : undefined}>
+                <span aria-hidden>⌚</span>Smartwatch
+              </Link>
             </>
           )}
           {user.role === "NURSE" && (

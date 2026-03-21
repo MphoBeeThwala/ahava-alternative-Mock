@@ -551,5 +551,27 @@ export const consentApi = {
   },
 };
 
+// ==================== TERRA / WEARABLE ====================
+export interface TerraStatus {
+  connected: boolean;
+  terraUserId: string | null;
+  devices: string[];
+}
+
+export const terraApi = {
+  connect: async (): Promise<{ url: string; sessionId: string }> => {
+    const res = await apiClient.post('/terra/connect');
+    return res.data;
+  },
+  disconnect: async () => {
+    const res = await apiClient.post('/terra/disconnect');
+    return res.data;
+  },
+  getStatus: async (): Promise<TerraStatus> => {
+    const res = await apiClient.get('/terra/status');
+    return res.data;
+  },
+};
+
 export default apiClient;
 
