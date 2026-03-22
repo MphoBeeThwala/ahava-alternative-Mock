@@ -365,7 +365,7 @@ export const patientApi = {
 // ==================== BOOKINGS ====================
 export interface CreateBookingData {
   scheduledDate: string; // ISO date string
-  address: string;
+  address?: string;
   encryptedAddress: string;
   amountInCents: number;
   patientLat: number;
