@@ -22,6 +22,8 @@ import triageRoutes from './routes/triage';
 import triageCasesRoutes from './routes/triageCases';
 import nurseRoutes from './routes/nurse';
 import patientRoutes from './routes/patient';
+import terraRoutes from './routes/terra';
+import consentRoutes from './routes/consent';
 
 // Import middleware
 import { errorHandler } from './middleware/errorHandler';
@@ -105,6 +107,8 @@ app.use('/api/triage', authMiddleware, triageRoutes);
 app.use('/api/triage-cases', authMiddleware, triageCasesRoutes);
 app.use('/api/nurse', authMiddleware, nurseRoutes);
 app.use('/api/patient', authMiddleware, patientRoutes);
+app.use('/api/terra', terraRoutes);
+app.use('/api/patient/consent', authMiddleware, consentRoutes);
 app.use('/webhooks', webhookRoutes);
 
 // WebSocket initialization
