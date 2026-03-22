@@ -32,18 +32,16 @@ apiClient.interceptors.request.use(
 // Track if we're already attempting refresh to avoid infinite loops
 let isRefreshing = false;
 let failedQueue: Array<{
-  resolve: (response: unknown) => void;
-  reject: (error: unknown) => void;
-  config: ReturnType<typeof Object.assign>;
+  onSuccess: (token: string) => void;
+  onFailure: (error: AxiosError) => void;
 }> = [];
 
 const processQueue = (error: AxiosError | null, token: string | null = null) => {
-  failedQueue.forEach(({ resolve, reject, config }) => {
+  failedQueue.forEach((prom) => {
     if (error) {
-      reject(error);
-    } else if (token && config) {
-      if (config.headers) config.headers.Authorization = `Bearer ${token}`;
-      resolve(apiClient(config));
+      prom.onFailure(error);
+    } else {
+      prom.onSuccess(token!);
     }
   });
   failedQueue = [];
@@ -120,9 +118,9 @@ apiClient.interceptors.response.use(
         }
       }
 
-      // If already refreshing, queue this request and retry it when token is ready
-      return new Promise((resolve, reject) => {
-        failedQueue.push({ resolve, reject, config: originalRequest });
+      // If already refreshing, queue this request
+      return new Promise((onSuccess, onFailure) => {
+        failedQueue.push({ onSuccess, onFailure });
       });
     }
 
@@ -191,6 +189,18 @@ export const authApi = {
   },
   resendVerification: async (email: string) => {
     const res = await apiClient.post('/auth/resend-verification', { email });
+    return res.data;
+  },
+  updateProfile: async (data: {
+    firstName?: string;
+    lastName?: string;
+    phone?: string;
+    dateOfBirth?: string | null;
+    gender?: string | null;
+    preferredLanguage?: string | null;
+    email?: string;
+  }) => {
+    const res = await apiClient.put('/auth/profile', data);
     return res.data;
   },
 };
@@ -354,35 +364,24 @@ export const patientApi = {
 
 // ==================== BOOKINGS ====================
 export interface CreateBookingData {
+  scheduledDate: string; // ISO date string
+  address: string;
   encryptedAddress: string;
-  scheduledDate: string;
-  estimatedDuration: number;
-  paymentMethod: 'CARD' | 'INSURANCE';
   amountInCents: number;
   patientLat: number;
   patientLng: number;
-  insuranceProvider?: string;
-  insuranceMemberNumber?: string;
+  notes?: string;
 }
 
 export interface Booking {
   id: string;
   patientId: string;
-  nurseId?: string;
   scheduledDate: string;
-  estimatedDuration: number;
-  paymentMethod: string;
-  paymentStatus: string;
   status: string;
+  address: string;
   amountInCents: number;
-  encryptedAddress?: string;
   createdAt: string;
   updatedAt: string;
-  visit?: {
-    id: string;
-    status: string;
-    nurse?: { id: string; firstName: string; lastName: string };
-  };
 }
 
 export const bookingsApi = {
@@ -424,9 +423,9 @@ export interface Visit {
   treatment?: { medications?: { name: string; dosage: string }[]; notes?: string };
   nurseReport?: string;
   booking?: {
-    encryptedAddress?: string;
-    scheduledDate?: string;
+    address?: string;
     patient?: { firstName?: string; lastName?: string };
+    scheduledDate?: string;
   };
 }
 
@@ -545,46 +544,6 @@ export const adminApi = {
   },
   getStats: async () => {
     const res = await apiClient.get('/admin/stats');
-    return res.data;
-  },
-};
-
-// ==================== CONSENT ====================
-export type ConsentType = 'AI_TRIAGE' | 'BIOMETRIC_MONITORING' | 'DATA_SHARING' | 'MARKETING';
-
-export const consentApi = {
-  give: async (consentType: ConsentType, version = '1.0') => {
-    const res = await apiClient.post('/consent', { consentType, version });
-    return res.data;
-  },
-  list: async () => {
-    const res = await apiClient.get('/consent');
-    return res.data as { success: boolean; consents: { consentType: string; withdrawn: boolean }[] };
-  },
-  withdraw: async (consentType: ConsentType) => {
-    const res = await apiClient.delete(`/consent/${consentType}`);
-    return res.data;
-  },
-};
-
-// ==================== TERRA / WEARABLE ====================
-export interface TerraStatus {
-  connected: boolean;
-  terraUserId: string | null;
-  devices: string[];
-}
-
-export const terraApi = {
-  connect: async (): Promise<{ url: string; sessionId: string }> => {
-    const res = await apiClient.post('/terra/connect');
-    return res.data;
-  },
-  disconnect: async () => {
-    const res = await apiClient.post('/terra/disconnect');
-    return res.data;
-  },
-  getStatus: async (): Promise<TerraStatus> => {
-    const res = await apiClient.get('/terra/status');
     return res.data;
   },
 };

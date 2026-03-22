@@ -11,72 +11,8 @@
 import * as cheerio from "cheerio";
 
 const NCBI_STATPEARLS_SEARCH = "https://www.ncbi.nlm.nih.gov/books/NBK430685/";
-const MAX_CONTEXT_CHARS = 8000;
+const MAX_CONTEXT_CHARS = 8000; // Keep prompt size reasonable
 const REQUEST_TIMEOUT_MS = 10000;
-const CACHE_TTL_SECONDS = 86400; // 24 hours
-
-// ---------------------------------------------------------------------------
-// Lightweight Redis cache (optional — works without Redis)
-// ---------------------------------------------------------------------------
-let _redisClient: any = null;
-
-async function getRedis(): Promise<any | null> {
-  if (_redisClient) return _redisClient;
-  if (!process.env.REDIS_URL) return null;
-  try {
-    const { createClient } = await import('redis');
-    _redisClient = createClient({ url: process.env.REDIS_URL });
-    await _redisClient.connect();
-    return _redisClient;
-  } catch {
-    return null;
-  }
-}
-
-async function cacheGet(key: string): Promise<string | null> {
-  try {
-    const r = await getRedis();
-    return r ? await r.get(key) : null;
-  } catch { return null; }
-}
-
-async function cacheSet(key: string, value: string): Promise<void> {
-  try {
-    const r = await getRedis();
-    if (r) await r.setEx(key, CACHE_TTL_SECONDS, value);
-  } catch { /* non-critical */ }
-}
-
-// ---------------------------------------------------------------------------
-// SA-specific fallback context (high-frequency SA conditions)
-// Used when NCBI is unreachable and no cache exists.
-// ---------------------------------------------------------------------------
-const SA_FALLBACK_CONTEXT: Record<string, string> = {
-  "chest": `## Chest Pain — SA Clinical Context (SATS-aligned)
-In South Africa, ACS risk is elevated due to hypertension prevalence (46% of adults aged 15+). Rheumatic heart disease remains common in patients under 40 — unlike high-income countries. Always rule out TB pericarditis in HIV-positive patients presenting with chest pain and fever. Cocaine-induced coronary spasm is emerging in urban areas.\n\nSATS Level 2 indicators: Chest pain with diaphoresis, radiation to jaw/arm, or associated dyspnoea. Refer immediately to level 3 or higher facility.`,
-  "breath": `## Respiratory / Dyspnoea — SA Clinical Context
-South Africa has the world's highest TB incidence (322/100,000). Any productive cough >2 weeks must be screened for TB using GeneXpert. HIV co-infection (prevalence 13.7%) elevates PCP (Pneumocystis pneumonia) risk in patients with CD4 <200. Post-COVID pulmonary fibrosis is increasingly seen. Asthma and COPD are prevalent in peri-urban areas due to biomass fuel exposure.`,
-  "cough": `## Cough — SA Clinical Context
-Differential includes TB (most important to exclude), URTI, bronchitis, asthma, GORD, and early pneumonia. Screen for: duration >2 weeks (TB), haemoptysis (TB/cancer), night sweats and weight loss (TB/HIV), immunocompromise. GeneXpert MTB/RIF is the preferred first-line TB test in SA.`,
-  "fever": `## Fever — SA Clinical Context
-In SA febrile patients: malaria must be excluded in Limpopo, Mpumalanga, KZN lowveld (rapid malaria test). Tick-bite fever (Rickettsia conorii) is endemic — look for eschar + rash. Typhoid fever occurs in areas with poor sanitation. Viral haemorrhagic fever (Crimean-Congo) in Limpopo game farming areas. HIV viral illness is a common cause of fever of unknown origin.`,
-  "headache": `## Headache — SA Clinical Context
-In immunocompromised patients (HIV, CD4 <100): cryptococcal meningitis presents as progressive headache with or without neck stiffness — screen with CrAg serum test. TB meningitis is endemic. Bacterial meningitis (Streptococcus pneumoniae) is more common in SA than high-income countries. Tension-type and migraine are the most common in healthy patients.`,
-  "abdomen": `## Abdominal Pain — SA Clinical Context
-High prevalence of amoebic liver abscess in areas with poor sanitation. Typhoid (enteric fever) with relative bradycardia. HIV-related cholangiopathy and CMV colitis in immunocompromised. Helicobacter pylori prevalence >70% in SA — common cause of peptic ulcer disease. Acute appendicitis presentation is similar to high-income countries.`,
-  "dizz": `## Dizziness / Syncope — SA Clinical Context
-Hypertensive emergency is a leading cause of presentation (BP crisis). Postural hypotension common in patients on antihypertensives or diuretics. Anaemia (iron deficiency, B12, folate) is prevalent — especially in women and children. Hypoglycaemia in diabetic patients on oral agents.`,
-  "pain": `## Pain — SA Clinical Context
-Chest pain: high ACS risk given hypertension prevalence. MSK pain: high burden of manual labour injuries. Neuropathic pain: HIV-associated peripheral neuropathy is common. Sickle cell disease in West African diaspora — vaso-occlusive crisis.`,
-};
-
-function getSAFallbackContext(query: string): string | null {
-  const q = query.toLowerCase();
-  for (const [key, context] of Object.entries(SA_FALLBACK_CONTEXT)) {
-    if (q.includes(key)) return context;
-  }
-  return null;
-}
 
 interface SearchResult {
   title: string;
@@ -213,56 +149,23 @@ async function fetchFromNcbi(symptoms: string): Promise<string | null> {
 
 /**
  * Get peer-reviewed medical context for the given symptoms.
- *
- * Resilience tier order:
- *  1. Redis cache (24h TTL) — instant, no external calls
- *  2. STATPEARLS_SERVICE_URL proxy — if configured
- *  3. Direct NCBI scrape — primary live source
- *  4. SA hardcoded fallback — always available, SA-specific
- *
- * Returns null only if all tiers fail; triage proceeds without context.
+ * Uses STATPEARLS_SERVICE_URL if set, otherwise fetches directly from NCBI StatPearls.
+ * Returns null on failure; triage proceeds without context.
  */
 export async function getMedicalContext(symptoms: string): Promise<string | null> {
+  const serviceUrl = process.env.STATPEARLS_SERVICE_URL;
   const query = extractSearchQuery(symptoms);
   if (!query) return null;
 
-  const cacheKey = `statpearls:${query.slice(0, 60).replace(/\s+/g, '_')}`;
-
-  // Tier 1: Redis cache
-  const cached = await cacheGet(cacheKey);
-  if (cached) {
-    console.log(`[statPearls] Cache hit for: ${query}`);
-    return cached;
-  }
-
-  // Tier 2: External StatPearls proxy service
-  const serviceUrl = process.env.STATPEARLS_SERVICE_URL;
   if (serviceUrl) {
     const content = await fetchFromStatPearlsService(serviceUrl, query);
-    if (content) {
-      const result = content.slice(0, MAX_CONTEXT_CHARS);
-      await cacheSet(cacheKey, result);
-      return result;
-    }
+    if (content) return content.slice(0, MAX_CONTEXT_CHARS);
   }
 
-  // Tier 3: Direct NCBI scrape
   try {
-    const content = await fetchFromNcbi(symptoms);
-    if (content) {
-      await cacheSet(cacheKey, content);
-      return content;
-    }
+    return await fetchFromNcbi(symptoms);
   } catch (err) {
-    console.warn("[statPearls] NCBI scrape failed:", (err as Error).message);
+    console.warn("[statPearls] Failed to fetch medical context:", err);
+    return null;
   }
-
-  // Tier 4: SA-specific hardcoded fallback
-  const saContext = getSAFallbackContext(query);
-  if (saContext) {
-    console.log(`[statPearls] Using SA fallback context for: ${query}`);
-    return saContext;
-  }
-
-  return null;
 }

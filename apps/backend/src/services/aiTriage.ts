@@ -25,41 +25,16 @@ export interface TriageResult {
     reasoning: string;
 }
 
-const SA_CLINICAL_SYSTEM_CONTEXT = `You are a clinical decision support assistant operating in South Africa. You use the South African Triage Scale (SATS).
-
-SOUTH AFRICAN DISEASE BURDEN — always factor into differential diagnosis:
-- TB: Highest global incidence (322/100,000). Include in ALL respiratory/fever/weight-loss differentials. GeneXpert MTB/RIF is SA first-line test.
-- HIV: 13.7% adult prevalence. Consider in immunocompromised presentations, unusual infections, wasting.
-- Rheumatic heart disease: Remains prevalent in patients <40 — unlike high-income countries. Consider in chest pain/valve murmur/dyspnoea in young patients.
-- Malaria: Endemic in Limpopo, Mpumalanga, KZN lowveld — ask about location/travel. Use rapid malaria test.
-- Tick-bite fever (Rickettsia conorii): Common cause of fever+rash+eschar in SA.
-- Cryptococcal meningitis: Common in HIV+ patients with CD4 <100 presenting with headache.
-- Hypertension: 46% adult prevalence — consider in all cardiac, renal, neurological presentations.
-- Hypoglycaemia: Common in diabetic patients on oral agents or insulin.
-- Anaemia: High prevalence — iron deficiency, B12/folate, haemolytic (malaria).
-
-SATS TRIAGE LEVELS (use these exact levels — NOT Manchester Triage):
-- Level 1 (Red/Immediate): Airway compromise, unresponsive/GCS<9, systolic BP<80, SpO2<85%, active seizure, major haemorrhage
-- Level 2 (Orange/Very Urgent): Severe pain (7-10/10), SpO2 85-92%, systolic BP 80-90, altered consciousness, chest pain with risk factors
-- Level 3 (Yellow/Urgent): Moderate distress, SpO2 93-95%, abnormal vitals not critical, persistent vomiting, fever >39°C
-- Level 4 (Green/Less Urgent): Minor illness/injury, stable vitals, ambulatory, no red flags
-- Level 5 (Blue/Non-Urgent): Chronic stable condition, prescription refill, minor complaint <24h
-
-EMERGENCY REFERRAL: For Level 1-2, ALWAYS include "Call 10177 (ambulance) immediately" in recommendedAction.
-
-MANDATORY DISCLAIMER: Always end reasoning with: "⚠️ This is a clinical decision support tool only. A registered healthcare professional must examine the patient before diagnosis or treatment."`;
-
 function buildTriagePrompt(symptoms: string, medicalContext?: string | null): string {
-    const basePrompt = `${SA_CLINICAL_SYSTEM_CONTEXT}
+    const basePrompt = `Act as a strictly objective medical triage assistant. 
+Analyze the following symptoms and (optional) image.
 
-Analyze the following patient symptoms and (optional) image.
-
-PATIENT SYMPTOMS: "${symptoms}"`;
+SYMPTOMS: "${symptoms}"`;
 
     const contextSection = medicalContext
         ? `
 
-PEER-REVIEWED REFERENCE (from StatPearls / SA clinical guidelines — use to inform assessment, do not copy verbatim):
+REFERENCE (peer-reviewed medical context from StatPearls - use to inform your assessment, do not copy verbatim):
 ${medicalContext}
 
 `
@@ -70,14 +45,14 @@ Output ONLY valid JSON with the following structure:`;
 }
 
 const TRIAGE_PROMPT_END = `{
-  "triageLevel": number (1-5 using SATS scale, where 1=Immediate/Red, 5=Non-urgent/Blue),
+  "triageLevel": number (1-5, where 1 is critical/ER, 5 is basic home care),
   "possibleConditions": ["string", "string"],
-  "recommendedAction": "string (specific action for patient/nurse — include 10177 for Level 1-2)",
-  "reasoning": "string (clinical reasoning including relevant SA disease context)"
+  "recommendedAction": "string (Advice for the patient/nurse)",
+  "reasoning": "string (Brief medical reasoning)"
 }
 
-IMPORTANT: Output raw JSON only. No markdown code blocks. No extra text before or after the JSON.
-DISCLAIMER: Clinical decision support only. Not a diagnosis.`;
+IMPORTANT: Do not include markdown formatting like \`\`\`json. Just the raw JSON.
+DISCLAIMER: This is for informational purposes only.`;
 
 // Claude via official Anthropic API
 async function analyzeWithClaude(

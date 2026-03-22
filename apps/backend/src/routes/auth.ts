@@ -303,6 +303,65 @@ router.get('/me', async (req, res, next) => {
 });
 
 // ---------------------------------------------------------------------------
+// PUT /auth/profile — update own profile details
+// ---------------------------------------------------------------------------
+router.put('/profile', authMiddleware, async (req: any, res: any, next: any) => {
+  try {
+    const userId = req.user.id;
+    const { error, value } = Joi.object({
+      firstName: Joi.string().min(1).max(80),
+      lastName: Joi.string().min(1).max(80),
+      phone: Joi.string().allow('', null),
+      dateOfBirth: Joi.string().isoDate().allow(null),
+      gender: Joi.string().valid('MALE', 'FEMALE', 'OTHER', 'PREFER_NOT_TO_SAY').allow(null),
+      preferredLanguage: Joi.string().max(10).allow(null),
+      email: emailSchema.optional(),
+    }).validate(req.body);
+    if (error) return res.status(400).json({ error: error.details[0].message });
+
+    const currentUser = await prisma.user.findUnique({ where: { id: userId }, select: { email: true, firstName: true } });
+    if (!currentUser) return res.status(404).json({ error: 'User not found' });
+
+    const updateData: Record<string, unknown> = {};
+    if (value.firstName !== undefined) updateData.firstName = value.firstName;
+    if (value.lastName !== undefined) updateData.lastName = value.lastName;
+    if (value.phone !== undefined) updateData.phone = value.phone;
+    if (value.dateOfBirth !== undefined) updateData.dateOfBirth = value.dateOfBirth ? new Date(value.dateOfBirth) : null;
+    if (value.gender !== undefined) updateData.gender = value.gender;
+    if (value.preferredLanguage !== undefined) updateData.preferredLanguage = value.preferredLanguage;
+
+    let emailChanged = false;
+    if (value.email && value.email.toLowerCase() !== currentUser.email.toLowerCase()) {
+      const taken = await prisma.user.findUnique({ where: { email: value.email.toLowerCase() } });
+      if (taken) return res.status(409).json({ error: 'That email address is already in use.' });
+      updateData.email = value.email.toLowerCase();
+      updateData.isVerified = false;
+      emailChanged = true;
+      try {
+        const verificationToken = crypto.randomBytes(32).toString('hex');
+        (updateData as any).emailVerificationToken = verificationToken;
+        const verifyUrl = `${process.env.FRONTEND_URL ?? ''}/auth/verify-email?token=${verificationToken}`;
+        addEmailJob({
+          to: value.email.toLowerCase(),
+          subject: 'Verify your new Ahava Healthcare email',
+          html: `<p>Hi ${value.firstName ?? currentUser.firstName},</p><p>You changed your email address. Please verify your new address:</p><p><a href="${verifyUrl}" style="background:#0d9488;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">Verify New Email</a></p>`,
+        }).catch(() => {});
+      } catch { /* non-fatal */ }
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: updateData,
+      select: { id: true, email: true, firstName: true, lastName: true, phone: true, dateOfBirth: true, gender: true, preferredLanguage: true, isVerified: true, role: true },
+    });
+
+    res.json({ success: true, user: updated, emailChanged });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // POST /auth/forgot-password — send reset link
 // ---------------------------------------------------------------------------
 router.post('/forgot-password', authRateLimiter, async (req, res, next) => {

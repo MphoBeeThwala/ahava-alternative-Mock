@@ -118,6 +118,10 @@ export default function DashboardLayout({
               🏥 HPCSA Registered
             </div>
           )}
+          {/* Profile — all roles */}
+          <Link href="/profile" className={linkClass(pathname === "/profile")} aria-current={pathname === "/profile" ? "page" : undefined}>
+            <span aria-hidden>👤</span>My Profile
+          </Link>
         </nav>
 
         {/* User chip + POPIA + logout */}
