@@ -424,6 +424,7 @@ export interface Visit {
   nurseReport?: string;
   booking?: {
     address?: string;
+    encryptedAddress?: string;
     patient?: { firstName?: string; lastName?: string };
     scheduledDate?: string;
   };
@@ -517,6 +518,34 @@ export const doctorApi = {
   },
   referTriageCase: async (caseId: string, referredTo: string, doctorNotes?: string) => {
     const res = await apiClient.post(`/triage-cases/${caseId}/refer`, { referredTo, doctorNotes });
+    return res.data;
+  },
+};
+
+// ==================== TERRA (WEARABLE) ====================
+export const terraApi = {
+  connect: async (): Promise<{ url: string }> => {
+    const res = await apiClient.post('/terra/connect');
+    return res.data;
+  },
+  disconnect: async () => {
+    const res = await apiClient.post('/terra/disconnect');
+    return res.data;
+  },
+  getStatus: async (): Promise<{ connected: boolean; devices?: string[] }> => {
+    const res = await apiClient.get('/terra/status');
+    return res.data;
+  },
+};
+
+// ==================== CONSENT ====================
+export const consentApi = {
+  give: async (consentType: string) => {
+    const res = await apiClient.post('/patient/consent', { consentType });
+    return res.data;
+  },
+  getAll: async () => {
+    const res = await apiClient.get('/patient/consent');
     return res.data;
   },
 };
