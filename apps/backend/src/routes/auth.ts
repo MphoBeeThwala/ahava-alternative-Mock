@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { PrismaClient } from '@prisma/client';
 import { authRateLimiter } from '../middleware/rateLimiter';
+import { authMiddleware, AuthenticatedRequest } from '../middleware/auth';
 import Joi from 'joi';
 import { verifySancRegistration } from '../services/sancVerification';
 import { seedBaselineForUser } from '../services/baselineSeed';
