@@ -137,6 +137,13 @@ async function startServer() {
     console.log('⚠️ REDIS_URL not set, skipping Redis/queues (core API will work)');
   }
 
+  // Warn on missing critical env vars (broken email links, etc.)
+  if (!process.env.FRONTEND_URL) {
+    console.warn('⚠️  FRONTEND_URL is not set — email verification/reset links will be broken. Set FRONTEND_URL to your frontend domain (e.g. https://yourapp.up.railway.app)');
+  } else {
+    console.log(`🔗 Frontend URL: ${process.env.FRONTEND_URL}`);
+  }
+
   // Start server
   server.listen(PORT, () => {
     console.log(`🚀 Ahava Healthcare API server running on port ${PORT}`);
