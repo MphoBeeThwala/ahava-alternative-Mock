@@ -31,5 +31,4 @@ COPY --from=builder --chown=apiuser:nodejs /app/apps/backend/prisma ./prisma
 USER apiuser
 EXPOSE 4000
 ENV NODE_ENV=production
-# Migrations: run separately (e.g. CI or release job), not in container startup
-CMD ["node", "dist/index.js"]
+CMD node_modules/.bin/prisma migrate deploy; node dist/index.js
