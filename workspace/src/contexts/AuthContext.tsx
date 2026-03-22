@@ -13,6 +13,9 @@ interface User {
   isActive: boolean;
   isVerified: boolean;
   preferredLanguage?: string;
+  phone?: string;
+  dateOfBirth?: string;
+  gender?: string;
 }
 
 interface AuthContextType {

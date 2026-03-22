@@ -42,10 +42,10 @@ export default function ProfilePage() {
       setForm({
         firstName: user.firstName ?? "",
         lastName: user.lastName ?? "",
-        phone: (user as any).phone ?? "",
+        phone: user.phone ?? "",
         email: user.email ?? "",
-        dateOfBirth: (user as any).dateOfBirth ? (user as any).dateOfBirth.split("T")[0] : "",
-        gender: (user as any).gender ?? "",
+        dateOfBirth: user.dateOfBirth ? user.dateOfBirth.split("T")[0] : "",
+        gender: user.gender ?? "",
         preferredLanguage: user.preferredLanguage ?? "",
       });
     }
