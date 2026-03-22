@@ -29,7 +29,7 @@ export const rateLimiter = rateLimit({
 // Strict rate limiter for auth endpoints (relaxed in dev so load-test can run 1000 logins)
 export const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'production' ? 5 : 5000, // 5 in prod, 5k in dev for load-test
+  max: process.env.NODE_ENV === 'production' ? 30 : 5000, // 30 in prod (covers register+login+forgot pw), 5k in dev
   message: {
     error: 'Too many authentication attempts, please try again later.',
   },
