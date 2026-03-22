@@ -525,6 +525,11 @@ export const doctorApi = {
 };
 
 // ==================== TERRA (WEARABLE) ====================
+export interface TerraStatus {
+  connected: boolean;
+  devices?: string[];
+}
+
 export const terraApi = {
   connect: async (): Promise<{ url: string }> => {
     const res = await apiClient.post('/terra/connect');
