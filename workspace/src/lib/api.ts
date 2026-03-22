@@ -371,6 +371,8 @@ export interface CreateBookingData {
   patientLat: number;
   patientLng: number;
   notes?: string;
+  estimatedDuration?: number;
+  paymentMethod?: string;
 }
 
 export interface Booking {
