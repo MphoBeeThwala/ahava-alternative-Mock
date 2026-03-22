@@ -24,6 +24,7 @@ import nurseRoutes from './routes/nurse';
 import patientRoutes from './routes/patient';
 import terraRoutes from './routes/terra';
 import consentRoutes from './routes/consent';
+import healthConnectRoutes from './routes/healthConnect';
 
 // Import middleware
 import { errorHandler } from './middleware/errorHandler';
@@ -109,6 +110,7 @@ app.use('/api/nurse', authMiddleware, nurseRoutes);
 app.use('/api/patient', authMiddleware, patientRoutes);
 app.use('/api/terra', terraRoutes);
 app.use('/api/patient/consent', authMiddleware, consentRoutes);
+app.use('/api/biometrics/health-connect', healthConnectRoutes);
 app.use('/webhooks', webhookRoutes);
 
 // WebSocket initialization
