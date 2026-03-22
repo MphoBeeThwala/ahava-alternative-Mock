@@ -380,7 +380,8 @@ export interface Booking {
   patientId: string;
   scheduledDate: string;
   status: string;
-  address: string;
+  address?: string;
+  encryptedAddress?: string;
   amountInCents: number;
   createdAt: string;
   updatedAt: string;
