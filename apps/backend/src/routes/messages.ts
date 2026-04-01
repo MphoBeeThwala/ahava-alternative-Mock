@@ -1,10 +1,9 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
-import { PrismaClient } from '@prisma/client';
-import { authMiddleware } from '../middleware/auth';
+import { AuthenticatedRequest, authMiddleware } from '../middleware/auth';
+import prisma from '../lib/prisma';
 
 const router: Router = Router();
-const prisma = new PrismaClient();
 
 // Create a new message
 router.post('/', authMiddleware, async (req: Request, res: Response, next: NextFunction) => {
@@ -21,8 +20,28 @@ router.post('/', authMiddleware, async (req: Request, res: Response, next: NextF
 // Get all messages
 router.get('/', authMiddleware, async (req: Request, res: Response, next: NextFunction) => {
 	try {
-		const messages = await prisma.message.findMany();
-		res.json({ success: true, messages });
+    const r = req as AuthenticatedRequest;
+    const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit), 10) || 20));
+    const offset = Math.max(0, parseInt(String(req.query.offset), 10) || 0);
+    const visitId = (req.query.visitId as string | undefined) || undefined;
+
+    const where: any = {};
+    if (visitId) where.visitId = visitId;
+
+    if (r.user?.role !== 'ADMIN') {
+      where.OR = [
+        { senderId: r.user!.id },
+        { recipientId: r.user!.id },
+      ];
+    }
+
+		const messages = await prisma.message.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      skip: offset,
+    });
+		res.json({ success: true, messages, meta: { limit, offset } });
 	} catch (error) {
 		next(error);
 	}

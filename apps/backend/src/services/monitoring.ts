@@ -13,10 +13,9 @@
  *   - Other health scares
  */
 
-import { PrismaClient } from '@prisma/client';
 import axios from 'axios';
+import prisma from '../lib/prisma';
 
-const prisma = new PrismaClient();
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://localhost:8000';
 
 export interface MonitoringResult {

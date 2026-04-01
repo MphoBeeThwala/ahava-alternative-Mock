@@ -14,11 +14,10 @@
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth';
+import prisma from '../lib/prisma';
 
 const router: Router = Router();
-const prisma = new PrismaClient();
 
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL ?? 'http://localhost:8000';
 

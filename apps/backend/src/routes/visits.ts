@@ -1,12 +1,12 @@
 import { Router, Response, NextFunction } from 'express';
-import { PrismaClient, VisitStatus, UserRole } from '@prisma/client';
+import { VisitStatus, UserRole } from '@prisma/client';
 import { AuthenticatedRequest, authMiddleware } from '../middleware/auth';
 import { encryptData } from '../utils/encryption';
 import { notifyVisitApproved } from '../services/notifications';
 import Joi from 'joi';
+import prisma from '../lib/prisma';
 
 const router: Router = Router();
-const prisma = new PrismaClient();
 
 // Validation schemas
 const createVisitSchema = Joi.object({
@@ -144,6 +144,8 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res: Response,
   try {
     const whereClause: any = {};
     const statusFilter = req.query.status as string | undefined;
+    const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit), 10) || 20));
+    const offset = Math.max(0, parseInt(String(req.query.offset), 10) || 0);
 
     // Filter by user role
     if (req.user!.role === UserRole.PATIENT) {
@@ -198,9 +200,11 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res: Response,
         },
       },
       orderBy: { createdAt: 'desc' },
+      take: limit,
+      skip: offset,
     });
 
-    res.json({ success: true, visits });
+    res.json({ success: true, visits, meta: { limit, offset } });
   } catch (error) {
     next(error);
   }

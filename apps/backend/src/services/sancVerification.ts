@@ -15,10 +15,8 @@
  *  Then run: ts-node scripts/importSancRegister.ts --file sanc_register.csv
  */
 
-import { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma';
 
 export type SancVerificationStatus =
   | 'Active'

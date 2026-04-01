@@ -25,6 +25,11 @@ from models import BiometricData, ContextualProfile
 
 logger = logging.getLogger(__name__)
 
+_db_url = os.getenv("DATABASE_URL")
+_use_db = bool(_db_url)
+_memory_biometrics: dict[str, list[dict]] = {}
+_memory_context: dict[str, ContextualProfile] = {}
+
 # ---------------------------------------------------------------------------
 # Connection pool (shared across requests for the lifetime of the process)
 # ---------------------------------------------------------------------------
@@ -34,13 +39,12 @@ _pool: Optional[psycopg2.pool.ThreadedConnectionPool] = None
 def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
     global _pool
     if _pool is None:
-        db_url = os.getenv("DATABASE_URL")
-        if not db_url:
+        if not _db_url:
             raise RuntimeError("DATABASE_URL environment variable not set")
         _pool = psycopg2.pool.ThreadedConnectionPool(
             minconn=1,
             maxconn=10,
-            dsn=db_url,
+            dsn=_db_url,
         )
         logger.info("[db] Connection pool created")
     return _pool
@@ -90,6 +94,8 @@ CREATE INDEX IF NOT EXISTS bts_user_time_idx
 
 def ensure_schema() -> None:
     """Call once at service startup to create hypertable if not already present."""
+    if not _use_db:
+        return
     conn = _get_conn()
     try:
         with conn.cursor() as cur:
@@ -139,6 +145,12 @@ def save_biometric(
     alert_level: str,
     anomalies: list,
 ) -> None:
+    if not _use_db:
+        row = data.model_dump()
+        row["alert_level"] = alert_level
+        row["anomalies"] = anomalies
+        _memory_biometrics.setdefault(user_id, []).append(row)
+        return
     conn = _get_conn()
     try:
         with conn.cursor() as cur:
@@ -179,6 +191,13 @@ def save_biometric(
 # Read — returns rows as plain dicts with keys matching BiometricData fields
 # ---------------------------------------------------------------------------
 def load_biometrics(user_id: str, days: int = 30) -> List[dict]:
+    if not _use_db:
+        rows = _memory_biometrics.get(user_id, [])
+        if not rows:
+            return []
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        filtered = [r for r in rows if isinstance(r.get("timestamp"), datetime) and r["timestamp"].astimezone(timezone.utc) >= cutoff]
+        return sorted(filtered, key=lambda r: r.get("timestamp") or datetime.now(timezone.utc))
     conn = _get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -212,6 +231,11 @@ def load_biometrics(user_id: str, days: int = 30) -> List[dict]:
 
 
 def load_latest_biometric(user_id: str) -> Optional[dict]:
+    if not _use_db:
+        rows = _memory_biometrics.get(user_id, [])
+        if not rows:
+            return None
+        return max(rows, key=lambda r: r.get("timestamp") or datetime.min.replace(tzinfo=timezone.utc))
     conn = _get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -245,6 +269,8 @@ def load_latest_biometric(user_id: str) -> Optional[dict]:
 
 
 def count_biometrics(user_id: str, days: int = 30) -> int:
+    if not _use_db:
+        return len(load_biometrics(user_id, days=days))
     conn = _get_conn()
     try:
         with conn.cursor() as cur:
@@ -268,6 +294,8 @@ def count_biometrics(user_id: str, days: int = 30) -> int:
 # We read it directly from the shared PostgreSQL users table.
 # ---------------------------------------------------------------------------
 def load_context(user_id: str) -> Optional[ContextualProfile]:
+    if not _use_db:
+        return _memory_context.get(user_id)
     conn = _get_conn()
     try:
         with conn.cursor() as cur:
@@ -296,6 +324,9 @@ def load_context(user_id: str) -> Optional[ContextualProfile]:
 
 def save_context(user_id: str, profile: ContextualProfile) -> None:
     """Persist context back to User.riskProfile column."""
+    if not _use_db:
+        _memory_context[user_id] = profile
+        return
     conn = _get_conn()
     try:
         profile_json = json.dumps({

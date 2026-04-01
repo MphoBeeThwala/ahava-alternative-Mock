@@ -1,14 +1,13 @@
 import { Router } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { AuthenticatedRequest, authMiddleware } from '../middleware/auth';
 import { rateLimiter } from '../middleware/rateLimiter';
 import axios from 'axios';
 import Joi from 'joi';
 import { processBiometricReading, getMonitoringSummary, detectEarlyWarningSigns } from '../services/monitoring';
 import { startDemoStream } from '../services/demoStream';
+import prisma from '../lib/prisma';
 
 const router: Router = Router();
-const prisma = new PrismaClient();
 
 // ML Service URL (from environment or default)
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://localhost:8000';

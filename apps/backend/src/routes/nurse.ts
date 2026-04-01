@@ -1,11 +1,10 @@
 import { Router } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth';
 import { rateLimiter } from '../middleware/rateLimiter';
 import Joi from 'joi';
+import prisma from '../lib/prisma';
 
 const router: Router = Router();
-const prisma = new PrismaClient();
 
 // Validation
 const updateLocationSchema = Joi.object({
@@ -62,17 +61,24 @@ router.get('/nearby', authMiddleware, async (req, res, next) => {
         }
 
         const { lat, lng, radiusKm } = value;
+        const latDelta = radiusKm / 111;
+        const cosLat = Math.cos((lat * Math.PI) / 180);
+        const lngDelta = radiusKm / (111 * (Math.abs(cosLat) < 0.00001 ? 0.00001 : cosLat));
+        const minLat = Math.max(-90, lat - latDelta);
+        const maxLat = Math.min(90, lat + latDelta);
+        const minLng = Math.max(-180, lng - lngDelta);
+        const maxLng = Math.min(180, lng + lngDelta);
+        const maxAgeMinutes = Math.max(1, parseInt(process.env.NURSE_LOCATION_MAX_AGE_MINUTES ?? '30', 10) || 30);
+        const since = new Date(Date.now() - maxAgeMinutes * 60 * 1000);
 
-        // Fetch all active nurses
-        // Note: For production with millions of users, use PostGIS. 
-        // For MVP with <1000 nurses, fetching all active nurses and filtering in memory is acceptable.
         const nurses = await prisma.user.findMany({
             where: {
                 role: 'NURSE',
                 isAvailable: true,
                 isActive: true,
-                lastKnownLat: { not: null },
-                lastKnownLng: { not: null },
+                lastKnownLat: { not: null, gte: minLat, lte: maxLat },
+                lastKnownLng: { not: null, gte: minLng, lte: maxLng },
+                lastLocationUpdate: { gte: since },
             },
             select: {
                 id: true,
@@ -81,7 +87,9 @@ router.get('/nearby', authMiddleware, async (req, res, next) => {
                 profileImage: true,
                 lastKnownLat: true,
                 lastKnownLng: true,
+                lastLocationUpdate: true,
             },
+            take: 1000,
         });
 
         // Filter by Haversine distance

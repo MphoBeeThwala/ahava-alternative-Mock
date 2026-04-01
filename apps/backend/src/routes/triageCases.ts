@@ -1,11 +1,11 @@
 import { Router, Response, NextFunction } from 'express';
-import { PrismaClient, TriageCaseStatus, UserRole } from '@prisma/client';
+import { TriageCaseStatus, UserRole } from '@prisma/client';
 import Joi from 'joi';
 import { AuthenticatedRequest, authMiddleware } from '../middleware/auth';
 import { notifyTriageApproved, notifyTriageOverride, notifyTriageReferred } from '../services/notifications';
+import prisma from '../lib/prisma';
 
 const router: Router = Router();
-const prisma = new PrismaClient();
 
 // GET /api/triage-cases – doctor: list pending cases + my reviewed cases
 router.get('/', authMiddleware, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
@@ -14,6 +14,8 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res: Response,
       return res.status(403).json({ error: 'Only doctors can view the triage queue' });
     }
 
+    const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit), 10) || 20));
+    const offset = Math.max(0, parseInt(String(req.query.offset), 10) || 0);
     const status = req.query.status as string | undefined;
     const where: { status?: TriageCaseStatus; doctorId?: string | null } = {};
 
@@ -47,9 +49,11 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res: Response,
         },
       },
       orderBy: { createdAt: 'desc' },
+      take: limit,
+      skip: offset,
     });
 
-    res.json({ success: true, cases });
+    res.json({ success: true, cases, meta: { limit, offset } });
   } catch (error) {
     next(error);
   }

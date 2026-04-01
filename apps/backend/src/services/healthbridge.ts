@@ -16,9 +16,7 @@
  *   0192 — After-hours home visit
  */
 
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma';
 
 const HB_BASE_URL        = (process.env.HEALTHBRIDGE_URL ?? '').replace(/\/$/, '');
 const HB_CLIENT_ID       = process.env.HEALTHBRIDGE_CLIENT_ID ?? '';

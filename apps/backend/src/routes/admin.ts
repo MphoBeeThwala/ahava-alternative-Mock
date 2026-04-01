@@ -1,12 +1,12 @@
 import { Router } from 'express';
-import { PrismaClient, UserRole } from '@prisma/client';
+import { UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { Request, Response, NextFunction } from 'express';
 import Joi from 'joi';
 import { requireAdmin } from '../middleware/auth';
+import prisma from '../lib/prisma';
 
 const router: Router = Router();
-const prisma = new PrismaClient();
 
 const createUserSchema = Joi.object({
   email: Joi.string().email().required(),
@@ -75,6 +75,8 @@ router.post('/users', async (req: Request, res: Response, next: NextFunction) =>
 // Get all users
 router.get('/users', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit), 10) || 50));
+    const offset = Math.max(0, parseInt(String(req.query.offset), 10) || 0);
     const users = await prisma.user.findMany({
       select: {
         id: true,
@@ -86,8 +88,11 @@ router.get('/users', async (req: Request, res: Response, next: NextFunction) => 
         isVerified: true,
         createdAt: true,
       },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      skip: offset,
     });
-    res.json({ success: true, users });
+    res.json({ success: true, users, meta: { limit, offset } });
   } catch (error) {
     next(error);
   }

@@ -1,10 +1,9 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
-import { PrismaClient } from '@prisma/client';
-import { authMiddleware } from '../middleware/auth';
+import { AuthenticatedRequest, authMiddleware } from '../middleware/auth';
+import prisma from '../lib/prisma';
 
 const router: Router = Router();
-const prisma = new PrismaClient();
 
 // Create a new payment
 router.post('/', authMiddleware, async (req: Request, res: Response, next: NextFunction) => {
@@ -21,8 +20,26 @@ router.post('/', authMiddleware, async (req: Request, res: Response, next: NextF
 // Get all payments
 router.get('/', authMiddleware, async (req: Request, res: Response, next: NextFunction) => {
 	try {
-		const payments = await prisma.payment.findMany();
-		res.json({ success: true, payments });
+    const r = req as AuthenticatedRequest;
+    const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit), 10) || 20));
+    const offset = Math.max(0, parseInt(String(req.query.offset), 10) || 0);
+
+    const where: any = {};
+    if (r.user?.role === 'PATIENT') {
+      where.visit = { booking: { patientId: r.user.id } };
+    } else if (r.user?.role === 'NURSE') {
+      where.visit = { nurseId: r.user.id };
+    } else if (r.user?.role === 'DOCTOR') {
+      where.visit = { doctorId: r.user.id };
+    }
+
+		const payments = await prisma.payment.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      skip: offset,
+    });
+		res.json({ success: true, payments, meta: { limit, offset } });
 	} catch (error) {
 		next(error);
 	}

@@ -14,12 +14,11 @@
  */
 
 import { Router, Request, Response, NextFunction } from 'express';
-import { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
 import { authMiddleware } from '../middleware/auth';
+import prisma from '../lib/prisma';
 
 const router: Router = Router();
-const prisma = new PrismaClient();
 
 const TERRA_BASE_URL    = 'https://api.tryterra.co/v2';
 const TERRA_DEV_ID      = process.env.TERRA_DEV_ID ?? '';

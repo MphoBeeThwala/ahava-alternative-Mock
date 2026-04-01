@@ -1,13 +1,12 @@
 import { Router } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { analyzeSymptoms } from '../services/aiTriage';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth';
 import { rateLimiter } from '../middleware/rateLimiter';
 import { requireConsent } from '../middleware/consentMiddleware';
 import { calculateSlaDeadline, getDoctorFee } from '../jobs/triageEscalation';
+import prisma from '../lib/prisma';
 
 const router: Router = Router();
-const prisma = new PrismaClient();
 
 // POST /api/triage – run AI triage and create a case for doctor review
 router.post('/', rateLimiter, authMiddleware, requireConsent('AI_TRIAGE'), async (req: AuthenticatedRequest, res, next) => {

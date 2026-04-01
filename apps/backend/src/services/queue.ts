@@ -61,18 +61,21 @@ export const initializeQueue = async (connection: Redis) => {
     console.error(`❌ Email job ${jobId} failed:`, failedReason);
   });
 
-  emailWorker = new Worker(
-    QUEUE_NAMES.EMAIL,
-    async (job) => {
-      const { to, subject, html, text } = job.data as { to: string; subject: string; html: string; text?: string };
-      const result = await sendEmail({ to, subject, html, text });
-      if (result.error) throw result.error;
-    },
-    { connection, concurrency: 5 }
-  );
-  emailWorker.on('failed', (job, err) => {
-    console.error(`❌ Email job ${job?.id} failed:`, err?.message);
-  });
+  if (process.env.DISABLE_INLINE_QUEUE_WORKERS !== '1') {
+    const concurrency = Math.max(1, parseInt(process.env.EMAIL_WORKER_CONCURRENCY ?? '5', 10) || 5);
+    emailWorker = new Worker(
+      QUEUE_NAMES.EMAIL,
+      async (job) => {
+        const { to, subject, html, text } = job.data as { to: string; subject: string; html: string; text?: string };
+        const result = await sendEmail({ to, subject, html, text });
+        if (result.error) throw result.error;
+      },
+      { connection, concurrency }
+    );
+    emailWorker.on('failed', (job, err) => {
+      console.error(`❌ Email job ${job?.id} failed:`, err?.message);
+    });
+  }
 
   console.log('✅ BullMQ queues initialized');
 };

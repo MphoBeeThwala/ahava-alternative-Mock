@@ -12,18 +12,24 @@ const getClientIp = (req: any) => {
   return ipKeyGenerator(req);
 };
 
+const getRateLimitKey = (req: any) => {
+  const userId = req?._rateLimitUserId;
+  if (userId) return `u:${userId}`;
+  return `ip:${getClientIp(req)}`;
+};
+
 // General API rate limiter. In development allow 10k/15min so load-test (1000 users × 4 req) works without LOAD_TEST=1.
 const generalMax = process.env.LOAD_TEST === '1' ? 50000 : (process.env.NODE_ENV === 'production' ? 100 : 10000);
 export const rateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: generalMax,
   message: {
-    error: 'Too many requests from this IP, please try again later.',
+    error: 'Too many requests, please try again later.',
   },
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => process.env.NODE_ENV === 'development' && !getClientIp(req),
-  keyGenerator: getClientIp,
+  keyGenerator: getRateLimitKey,
 });
 
 // Strict rate limiter for auth endpoints (relaxed in dev so load-test can run 1000 logins)

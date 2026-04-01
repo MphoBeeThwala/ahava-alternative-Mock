@@ -4,10 +4,8 @@
  * Run: pnpm prisma:seed  or  npx prisma db seed
  */
 import 'dotenv/config';
-import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
-
-const prisma = new PrismaClient();
+import prisma from './lib/prisma';
 
 async function main() {
   const email = process.env.ADMIN_EMAIL;

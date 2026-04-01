@@ -8,10 +8,9 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import Joi from 'joi';
-import { PrismaClient } from '@prisma/client';
+import prisma from '../lib/prisma';
 
 const router: Router = Router();
-const prisma = new PrismaClient();
 
 const VALID_CONSENT_TYPES = ['AI_TRIAGE', 'BIOMETRIC_MONITORING', 'DATA_SHARING', 'MARKETING'] as const;
 

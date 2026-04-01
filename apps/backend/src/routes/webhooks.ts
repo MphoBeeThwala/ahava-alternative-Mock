@@ -1,11 +1,11 @@
 import { Router } from 'express';
-import { PrismaClient, PaymentStatus } from '@prisma/client';
+import { PaymentStatus } from '@prisma/client';
 import { Request, Response, NextFunction } from 'express';
 import { notifyPaymentReceipt } from '../services/notifications';
 import { handleTerraWebhook } from './terra';
+import prisma from '../lib/prisma';
 
 const router: Router = Router();
-const prisma = new PrismaClient();
 
 // Payment webhook (e.g. Paystack: event=charge.success, data.reference=paystack_reference)
 router.post('/payment', async (req: Request, res: Response, next: NextFunction) => {

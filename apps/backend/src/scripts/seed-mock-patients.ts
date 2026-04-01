@@ -14,10 +14,8 @@
  */
 
 import 'dotenv/config';
-import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma';
 
 const COUNT = Math.min(parseInt(process.env.MOCK_PATIENT_COUNT || '1000', 10) || 1000, 10000);
 const PASSWORD = process.env.MOCK_PATIENT_PASSWORD || 'MockPatient1!';

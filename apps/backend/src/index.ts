@@ -30,6 +30,7 @@ import healthConnectRoutes from './routes/healthConnect';
 import { errorHandler } from './middleware/errorHandler';
 import { rateLimiter } from './middleware/rateLimiter';
 import { authMiddleware } from './middleware/auth';
+import { attachRateLimitUserKey } from './middleware/rateLimitUserKey';
 
 // Import services
 import { initializeRedis } from './services/redis';
@@ -81,6 +82,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Rate limiting
+app.use(attachRateLimitUserKey);
 app.use(rateLimiter);
 
 // Health check (Railway probes this)

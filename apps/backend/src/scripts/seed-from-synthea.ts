@@ -18,10 +18,8 @@
 import 'dotenv/config';
 import * as fs from 'fs';
 import * as path from 'path';
-import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma';
 
 // Resolve CSV path: env wins; else try cwd, parent, and repo root (pnpm runs with cwd=apps/backend)
 function resolveCsvPath(): string {

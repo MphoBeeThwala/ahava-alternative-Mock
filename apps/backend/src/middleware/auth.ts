@@ -1,8 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { PrismaClient, UserRole } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { UserRole } from '@prisma/client';
+import prisma from '../lib/prisma';
 
 export interface AuthenticatedRequest extends Request {
   user?: {
@@ -12,6 +11,8 @@ export interface AuthenticatedRequest extends Request {
     isActive: boolean;
   };
 }
+
+const userCache = new Map<string, { user: NonNullable<AuthenticatedRequest['user']>; expiresAt: number }>();
 
 export const authMiddleware = async (
   req: AuthenticatedRequest,
@@ -23,17 +24,13 @@ export const authMiddleware = async (
     if (req.user) return next();
 
     const authHeader = req.headers.authorization;
-    console.log(`[AuthMiddleware] URL: ${req.originalUrl}, Method: ${req.method}`);
-    console.log(`[AuthMiddleware] Header: ${authHeader}`);
 
     if (!authHeader) {
-      console.log('[AuthMiddleware] Missing Authorization header');
       return res.status(401).json({ error: 'No token provided' });
     }
 
     const token = authHeader.split(' ')[1];
     if (!token) {
-      console.log('[AuthMiddleware] Malformed Authorization header (no token)');
       return res.status(401).json({ error: 'Invalid token format' });
     }
 
@@ -45,10 +42,26 @@ export const authMiddleware = async (
       }
       const jwtSecret = process.env.NODE_ENV === 'production' ? secret : (secret || 'dev_secret_key_change_me_in_prod');
       decoded = jwt.verify(token, jwtSecret) as any;
-      console.log(`[AuthMiddleware] Token verified for user: ${decoded.userId}`);
     } catch (error) {
       console.error('[AuthMiddleware] Token verification failed:', error);
       return res.status(401).json({ error: 'Invalid token' });
+    }
+
+    const cacheTtlSeconds = Math.max(
+      0,
+      parseInt(process.env.AUTH_USER_CACHE_TTL_SECONDS ?? '60', 10) || 0
+    );
+    const now = Date.now();
+    if (cacheTtlSeconds > 0) {
+      const cached = userCache.get(decoded.userId);
+      if (cached && cached.expiresAt > now) {
+        if (!cached.user.isActive) {
+          return res.status(401).json({ error: 'Invalid or inactive user' });
+        }
+        req.user = cached.user;
+        return next();
+      }
+      if (cached) userCache.delete(decoded.userId);
     }
 
     // Verify user still exists and is active
@@ -67,6 +80,9 @@ export const authMiddleware = async (
     }
 
     req.user = user;
+    if (cacheTtlSeconds > 0) {
+      userCache.set(decoded.userId, { user, expiresAt: now + cacheTtlSeconds * 1000 });
+    }
     next();
   } catch (error) {
     if (error instanceof jwt.JsonWebTokenError) {

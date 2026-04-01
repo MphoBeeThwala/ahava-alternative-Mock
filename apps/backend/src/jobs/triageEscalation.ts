@@ -14,10 +14,8 @@
  * Escalation levels: 0 = normal, 1 = escalated (notify admin), 2 = critical (page on-call).
  */
 
-import { PrismaClient } from '@prisma/client';
 import { addEmailJob } from '../services/queue';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma';
 
 // SLA thresholds in minutes per triage level
 const SLA_MINUTES: Record<number, number> = {

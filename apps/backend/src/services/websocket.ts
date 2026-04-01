@@ -1,8 +1,8 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import jwt from 'jsonwebtoken';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import Redis from 'ioredis';
+import crypto from 'crypto';
+import prisma from '../lib/prisma';
 
 interface AuthenticatedWebSocket extends WebSocket {
   userId?: string;
@@ -13,7 +13,92 @@ interface AuthenticatedWebSocket extends WebSocket {
 const clients = new Map<string, AuthenticatedWebSocket>();
 const onlineNurses = new Map<string, { lat: number; lng: number }>(); // Track online nurses with location
 
+const INSTANCE_ID = process.env.INSTANCE_ID ?? crypto.randomUUID();
+const WS_CHANNEL = process.env.WS_REDIS_CHANNEL ?? 'ws:events';
+let redisPub: Redis | null = null;
+let redisSub: Redis | null = null;
+let redisReady = false;
+
+type WsEvent =
+  | { instanceId: string; type: 'sendToUser'; userId: string; message: any }
+  | { instanceId: string; type: 'broadcastToUsers'; userIds: string[]; message: any }
+  | {
+      instanceId: string;
+      type: 'bookingAvailable';
+      patientLat: number;
+      patientLng: number;
+      radiusKm: number;
+      booking: {
+        id: string;
+        patientId: string;
+        scheduledDate: string;
+        estimatedDuration: number;
+        amountInCents: number;
+      };
+      patientName: string;
+    }
+  | { instanceId: string; type: 'bookingTaken'; bookingId: string; acceptedByNurseId: string };
+
+const publishEvent = (event: WsEvent) => {
+  if (!redisReady || !redisPub) return;
+  redisPub.publish(WS_CHANNEL, JSON.stringify(event)).catch((err) => {
+    console.warn('[ws] redis publish failed:', (err as Error)?.message ?? err);
+  });
+};
+
+const ensureRedisPubSub = async () => {
+  if (redisReady) return;
+  const url = process.env.REDIS_URL;
+  if (!url) return;
+  const pub = new Redis(url, { connectTimeout: 3000, maxRetriesPerRequest: null, lazyConnect: true });
+  const sub = new Redis(url, { connectTimeout: 3000, maxRetriesPerRequest: null, lazyConnect: true });
+  await pub.connect();
+  await sub.connect();
+  await sub.subscribe(WS_CHANNEL);
+  sub.on('message', (_channel, payload) => {
+    try {
+      const evt = JSON.parse(payload) as WsEvent;
+      if (!evt?.type || evt.instanceId === INSTANCE_ID) return;
+      if (evt.type === 'sendToUser') {
+        deliverToUserLocal(evt.userId, evt.message);
+        return;
+      }
+      if (evt.type === 'broadcastToUsers') {
+        evt.userIds.forEach((id) => deliverToUserLocal(id, evt.message));
+        return;
+      }
+      if (evt.type === 'bookingTaken') {
+        broadcastBookingTakenLocal(evt.bookingId, evt.acceptedByNurseId);
+        return;
+      }
+      if (evt.type === 'bookingAvailable') {
+        notifyNearbyNursesLocal(
+          evt.patientLat,
+          evt.patientLng,
+          evt.radiusKm,
+          {
+            ...evt.booking,
+            scheduledDate: new Date(evt.booking.scheduledDate),
+          },
+          evt.patientName
+        );
+        return;
+      }
+    } catch (err) {
+      console.warn('[ws] redis message parse failed:', (err as Error)?.message ?? err);
+    }
+  });
+  redisPub = pub;
+  redisSub = sub;
+  redisReady = true;
+  console.log('✅ WebSocket Redis pub/sub enabled');
+};
+
 export const initializeWebSocket = (wss: WebSocketServer) => {
+  void ensureRedisPubSub().catch((err) => {
+    console.warn('[ws] redis pub/sub unavailable:', (err as Error)?.message ?? err);
+  });
+
   wss.on('connection', (ws: AuthenticatedWebSocket, req) => {
     console.log('🔌 New WebSocket connection');
 
@@ -96,6 +181,13 @@ export const initializeWebSocket = (wss: WebSocketServer) => {
   // Cleanup on server shutdown
   wss.on('close', () => {
     clearInterval(heartbeat);
+    const pub = redisPub;
+    const sub = redisSub;
+    redisPub = null;
+    redisSub = null;
+    redisReady = false;
+    void pub?.quit().catch(() => {});
+    void sub?.quit().catch(() => {});
   });
 
   console.log('✅ WebSocket server initialized');
@@ -239,22 +331,18 @@ const handleAcceptBooking = async (ws: AuthenticatedWebSocket, data: { bookingId
     }));
 
     // Notify the patient
-    const patientWs = clients.get(booking.patientId);
-    if (patientWs && patientWs.readyState === WebSocket.OPEN) {
-      const nurse = await prisma.user.findUnique({
-        where: { id: ws.userId },
-        select: { id: true, firstName: true, lastName: true, profileImage: true },
-      });
-
-      patientWs.send(JSON.stringify({
-        type: 'BOOKING_ACCEPTED',
-        data: {
-          bookingId: data.bookingId,
-          visitId: visit.id,
-          nurse,
-        },
-      }));
-    }
+    const nurse = await prisma.user.findUnique({
+      where: { id: ws.userId },
+      select: { id: true, firstName: true, lastName: true, profileImage: true },
+    });
+    sendToUser(booking.patientId, {
+      type: 'BOOKING_ACCEPTED',
+      data: {
+        bookingId: data.bookingId,
+        visitId: visit.id,
+        nurse,
+      },
+    });
 
     // Notify other nurses that this booking is no longer available
     broadcastBookingTaken(data.bookingId, ws.userId);
@@ -314,34 +402,28 @@ const handleLocationUpdate = async (ws: AuthenticatedWebSocket, data: any) => {
 
     if (visit) {
       // Send location update to patient
-      const patientWs = clients.get(visit.booking.patientId);
-      if (patientWs && patientWs.readyState === WebSocket.OPEN) {
-        patientWs.send(JSON.stringify({
+      sendToUser(visit.booking.patientId, {
+        type: 'NURSE_LOCATION_UPDATE',
+        data: {
+          visitId: visit.id,
+          lat: data.lat,
+          lng: data.lng,
+          timestamp: new Date().toISOString(),
+        },
+      });
+
+      // Send location update to doctor if assigned
+      if (visit.doctorId) {
+        sendToUser(visit.doctorId, {
           type: 'NURSE_LOCATION_UPDATE',
           data: {
             visitId: visit.id,
+            nurseId: ws.userId,
             lat: data.lat,
             lng: data.lng,
             timestamp: new Date().toISOString(),
           },
-        }));
-      }
-
-      // Send location update to doctor if assigned
-      if (visit.doctorId) {
-        const doctorWs = clients.get(visit.doctorId);
-        if (doctorWs && doctorWs.readyState === WebSocket.OPEN) {
-          doctorWs.send(JSON.stringify({
-            type: 'NURSE_LOCATION_UPDATE',
-            data: {
-              visitId: visit.id,
-              nurseId: ws.userId,
-              lat: data.lat,
-              lng: data.lng,
-              timestamp: new Date().toISOString(),
-            },
-          }));
-        }
+        });
       }
     }
 
@@ -372,19 +454,13 @@ const handleVisitStatusUpdate = async (ws: AuthenticatedWebSocket, data: any) =>
     // Broadcast status update to all relevant parties
     const relevantUsers = [visit.booking.patientId];
     if (visit.doctorId) relevantUsers.push(visit.doctorId);
-
-    relevantUsers.forEach(userId => {
-      const userWs = clients.get(userId);
-      if (userWs && userWs.readyState === WebSocket.OPEN) {
-        userWs.send(JSON.stringify({
-          type: 'VISIT_STATUS_CHANGED',
-          data: {
-            visitId: visit.id,
-            status: data.status,
-            timestamp: new Date().toISOString(),
-          },
-        }));
-      }
+    broadcastToUsers(relevantUsers, {
+      type: 'VISIT_STATUS_CHANGED',
+      data: {
+        visitId: visit.id,
+        status: data.status,
+        timestamp: new Date().toISOString(),
+      },
     });
 
     ws.send(JSON.stringify({ type: 'VISIT_STATUS_UPDATE_SUCCESS' }));
@@ -396,23 +472,20 @@ const handleVisitStatusUpdate = async (ws: AuthenticatedWebSocket, data: any) =>
 
 const handleTypingIndicator = async (ws: AuthenticatedWebSocket, data: any) => {
   // Send typing indicator to recipient
-  const recipientWs = clients.get(data.recipientId);
-  if (recipientWs && recipientWs.readyState === WebSocket.OPEN) {
-    recipientWs.send(JSON.stringify({
-      type: 'TYPING_INDICATOR',
-      data: {
-        senderId: ws.userId,
-        visitId: data.visitId,
-        isTyping: data.isTyping,
-      },
-    }));
-  }
+  sendToUser(data.recipientId, {
+    type: 'TYPING_INDICATOR',
+    data: {
+      senderId: ws.userId,
+      visitId: data.visitId,
+      isTyping: data.isTyping,
+    },
+  });
 };
 
 // ===== HELPER FUNCTIONS =====
 
 // Helper function to send message to specific user
-export const sendToUser = (userId: string, message: any) => {
+const deliverToUserLocal = (userId: string, message: any) => {
   const ws = clients.get(userId);
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(message));
@@ -421,14 +494,21 @@ export const sendToUser = (userId: string, message: any) => {
   return false;
 };
 
+export const sendToUser = (userId: string, message: any) => {
+  const delivered = deliverToUserLocal(userId, message);
+  publishEvent({ instanceId: INSTANCE_ID, type: 'sendToUser', userId, message });
+  return delivered;
+};
+
 // Helper function to broadcast to multiple users
 export const broadcastToUsers = (userIds: string[], message: any) => {
-  const results = userIds.map(userId => sendToUser(userId, message));
-  return results.filter(Boolean).length;
+  const delivered = userIds.map((userId) => deliverToUserLocal(userId, message)).filter(Boolean).length;
+  publishEvent({ instanceId: INSTANCE_ID, type: 'broadcastToUsers', userIds, message });
+  return delivered;
 };
 
 // Broadcast that a booking has been taken
-const broadcastBookingTaken = (bookingId: string, acceptedByNurseId: string) => {
+const broadcastBookingTakenLocal = (bookingId: string, acceptedByNurseId: string) => {
   onlineNurses.forEach((_, nurseId) => {
     if (nurseId !== acceptedByNurseId) {
       const nurseWs = clients.get(nurseId);
@@ -440,6 +520,11 @@ const broadcastBookingTaken = (bookingId: string, acceptedByNurseId: string) => 
       }
     }
   });
+};
+
+const broadcastBookingTaken = (bookingId: string, acceptedByNurseId: string) => {
+  broadcastBookingTakenLocal(bookingId, acceptedByNurseId);
+  publishEvent({ instanceId: INSTANCE_ID, type: 'bookingTaken', bookingId, acceptedByNurseId });
 };
 
 // Haversine formula for distance calculation
@@ -455,8 +540,7 @@ function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon
   return R * c;
 }
 
-// Notify nearby online nurses about a new booking
-export const notifyNearbyNurses = async (
+const notifyNearbyNursesLocal = (
   patientLat: number,
   patientLng: number,
   radiusKm: number,
@@ -475,9 +559,7 @@ export const notifyNearbyNurses = async (
     const distance = getDistanceFromLatLonInKm(patientLat, patientLng, location.lat, location.lng);
 
     if (distance <= radiusKm) {
-      const nurseWs = clients.get(nurseId);
-      if (nurseWs && nurseWs.readyState === WebSocket.OPEN) {
-        nurseWs.send(JSON.stringify({
+      const delivered = deliverToUserLocal(nurseId, {
           type: 'NEW_BOOKING_AVAILABLE',
           data: {
             bookingId: booking.id,
@@ -487,14 +569,48 @@ export const notifyNearbyNurses = async (
             amountInCents: booking.amountInCents,
             distanceKm: Math.round(distance * 10) / 10,
           },
-        }));
-        notifiedCount++;
+        });
+      if (delivered) {
+        notifiedCount += 1;
         console.log(`📢 Notified nurse ${nurseId} about booking ${booking.id} (${distance.toFixed(1)}km away)`);
       }
     }
   });
 
   console.log(`📢 Notified ${notifiedCount} nurses about new booking ${booking.id}`);
+  return notifiedCount;
+};
+
+// Notify nearby online nurses about a new booking
+export const notifyNearbyNurses = async (
+  patientLat: number,
+  patientLng: number,
+  radiusKm: number,
+  booking: {
+    id: string;
+    patientId: string;
+    scheduledDate: Date;
+    estimatedDuration: number;
+    amountInCents: number;
+  },
+  patientName: string
+) => {
+  const notifiedCount = notifyNearbyNursesLocal(patientLat, patientLng, radiusKm, booking, patientName);
+  publishEvent({
+    instanceId: INSTANCE_ID,
+    type: 'bookingAvailable',
+    patientLat,
+    patientLng,
+    radiusKm,
+    booking: {
+      id: booking.id,
+      patientId: booking.patientId,
+      scheduledDate: booking.scheduledDate.toISOString(),
+      estimatedDuration: booking.estimatedDuration,
+      amountInCents: booking.amountInCents,
+    },
+    patientName,
+  });
   return notifiedCount;
 };
 

@@ -1,11 +1,11 @@
 import { Router } from 'express';
-import { PrismaClient, UserRole } from '@prisma/client';
+import { UserRole } from '@prisma/client';
 import { AuthenticatedRequest, authMiddleware, requirePatient } from '../middleware/auth';
 import { notifyNearbyNurses } from '../services/websocket';
 import Joi from 'joi';
+import prisma from '../lib/prisma';
 
 const router: Router = Router();
-const prisma = new PrismaClient();
 
 const createBookingSchema = Joi.object({
   encryptedAddress: Joi.string().required(),

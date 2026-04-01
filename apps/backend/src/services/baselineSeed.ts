@@ -7,9 +7,7 @@
  * instead of returning "Insufficient data" for the first 14 days.
  */
 
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma';
 
 export type AgeBand = '18-29' | '30-39' | '40-49' | '50-59' | '60-69' | '70+';
 

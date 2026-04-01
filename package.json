@@ -15,6 +15,7 @@
     "start:frontend": "pnpm --filter workspace start",
     "dev": "pnpm -r --parallel run dev",
     "dev:api": "pnpm --filter @ahava-healthcare/api dev",
+    "dev:worker": "pnpm --filter @ahava-healthcare/worker dev",
     "test": "pnpm -r run test",
     "test:backend": "pnpm --filter @ahava-healthcare/api test",
     "lint": "pnpm -r run lint",
