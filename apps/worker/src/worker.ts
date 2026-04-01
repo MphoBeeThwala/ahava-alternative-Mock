@@ -7,10 +7,27 @@ const QUEUE_NAMES = {
   EMAIL: 'email',
 } as const;
 
+const normalizeRedisUrl = (raw?: string): string | null => {
+  if (!raw) return null;
+  const decoded = raw.includes('%20') ? raw.replace(/%20/g, ' ') : raw;
+  const trimmed = decoded.trim();
+  const match = trimmed.match(/(rediss?:\/\/\S+)/);
+  if (!match) return null;
+  const url = match[1];
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'redis:' && u.protocol !== 'rediss:') return null;
+    return url;
+  } catch {
+    return null;
+  }
+};
+
 async function main() {
-  const redisUrl = process.env.REDIS_URL;
+  const redisUrl = normalizeRedisUrl(process.env.REDIS_URL);
   if (!redisUrl) {
-    throw new Error('REDIS_URL is required');
+    console.error('REDIS_URL is required and must be a valid redis:// or rediss:// URL');
+    process.exit(1);
   }
 
   const connection = new Redis(redisUrl, {
@@ -18,6 +35,10 @@ async function main() {
     maxRetriesPerRequest: null,
     connectTimeout: 3000,
     lazyConnect: true,
+  });
+
+  connection.on('error', (err) => {
+    console.error('❌ Redis connection error:', (err as Error)?.message ?? err);
   });
 
   await connection.connect();

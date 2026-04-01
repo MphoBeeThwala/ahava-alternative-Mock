@@ -46,12 +46,38 @@ const publishEvent = (event: WsEvent) => {
   });
 };
 
+const normalizeRedisUrl = (raw?: string): string | null => {
+  if (!raw) return null;
+  const decoded = raw.includes('%20') ? raw.replace(/%20/g, ' ') : raw;
+  const trimmed = decoded.trim();
+  const match = trimmed.match(/(rediss?:\/\/\S+)/);
+  if (!match) return null;
+  const url = match[1];
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'redis:' && u.protocol !== 'rediss:') return null;
+    return url;
+  } catch {
+    return null;
+  }
+};
+
 const ensureRedisPubSub = async () => {
   if (redisReady) return;
-  const url = process.env.REDIS_URL;
-  if (!url) return;
+  const url = normalizeRedisUrl(process.env.REDIS_URL);
+  if (!url) {
+    const raw = process.env.REDIS_URL;
+    if (raw) console.warn('[ws] invalid REDIS_URL; disabling redis pub/sub');
+    return;
+  }
   const pub = new Redis(url, { connectTimeout: 3000, maxRetriesPerRequest: null, lazyConnect: true });
   const sub = new Redis(url, { connectTimeout: 3000, maxRetriesPerRequest: null, lazyConnect: true });
+  pub.on('error', (err) => {
+    console.warn('[ws] redis pub error:', (err as Error)?.message ?? err);
+  });
+  sub.on('error', (err) => {
+    console.warn('[ws] redis sub error:', (err as Error)?.message ?? err);
+  });
   await pub.connect();
   await sub.connect();
   await sub.subscribe(WS_CHANNEL);
