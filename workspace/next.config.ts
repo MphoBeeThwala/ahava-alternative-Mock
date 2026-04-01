@@ -7,6 +7,8 @@ const backendUrl = process.env.BACKEND_URL || 'http://localhost:4000';
 const nextConfig: NextConfig = {
   // Output standalone server for Docker deployment
   output: 'standalone',
+  // Avoid Railpack excluding ".next" from deploy artifacts by using a non-dot dist dir
+  distDir: 'next',
   // Monorepo: trace from repo root so Next.js doesn't warn about multiple lockfiles (pnpm at root, workspace has no lockfile or has package-lock.json)
   outputFileTracingRoot: path.join(__dirname, ".."),
   // Suppress lockfile warnings in monorepo setup
