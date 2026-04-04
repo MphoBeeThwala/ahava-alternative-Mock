@@ -20,6 +20,7 @@ import adminRoutes from './routes/admin';
 import webhookRoutes from './routes/webhooks';
 import triageRoutes from './routes/triage';
 import triageCasesRoutes from './routes/triageCases';
+import triageCaseReviewRoutes from './routes/triageCaseReview';
 import nurseRoutes from './routes/nurse';
 import patientRoutes from './routes/patient';
 import terraRoutes from './routes/terra';
@@ -36,6 +37,7 @@ import { attachRateLimitUserKey } from './middleware/rateLimitUserKey';
 import { initializeRedis } from './services/redis';
 import { initializeQueue } from './services/queue';
 import { initializeWebSocket } from './services/websocket';
+import { runEscalationCheck } from './jobs/triageEscalation';
 
 const app = express();
 const server = createServer(app);
@@ -87,7 +89,13 @@ app.use(cors({
 
 // Compression and logging
 app.use(compression());
-app.use(morgan('combined'));
+app.use(morgan(':method :url :status :res[content-length] - :response-time ms', {
+  stream: {
+    write: (message: string) => {
+      console.log(message.replace(/\?[^\s]+/, '?[REDACTED]').trim());
+    },
+  },
+}));
 
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
@@ -120,10 +128,11 @@ app.use('/api/payments', authMiddleware, paymentRoutes);
 app.use('/api/admin', authMiddleware, adminRoutes);
 app.use('/api/triage', authMiddleware, triageRoutes);
 app.use('/api/triage-cases', authMiddleware, triageCasesRoutes);
+app.use('/api/triage-review', triageCaseReviewRoutes);
 app.use('/api/nurse', authMiddleware, nurseRoutes);
 app.use('/api/patient', authMiddleware, patientRoutes);
 app.use('/api/terra', terraRoutes);
-app.use('/api/patient/consent', authMiddleware, consentRoutes);
+app.use('/api/consent', authMiddleware, consentRoutes);  // moved from /api/patient/consent to avoid prefix conflict
 app.use('/api/biometrics/health-connect', healthConnectRoutes);
 app.use('/webhooks', webhookRoutes);
 
@@ -140,6 +149,8 @@ app.use('*', (req, res) => {
 
 const PORT = process.env.PORT || 4000;
 
+let escalationTimer: ReturnType<typeof setInterval> | null = null;
+
 async function startServer() {
   console.log('🔄 Starting initialization...');
 
@@ -150,6 +161,17 @@ async function startServer() {
       const redis = await initializeRedis();
       await initializeQueue(redis);
       console.log('✅ Redis and queues initialized');
+
+      // Schedule SLA escalation check every 2 minutes
+      const ESCALATION_INTERVAL_MS = 2 * 60 * 1000;
+      escalationTimer = setInterval(async () => {
+        try { await runEscalationCheck(); }
+        catch (err) { console.error('[escalation] Cron failed:', (err as Error).message); }
+      }, ESCALATION_INTERVAL_MS);
+
+      // Catch any cases missed before this restart
+      setImmediate(() => runEscalationCheck().catch(console.error));
+      console.log('✅ Escalation cron scheduled (every 2 minutes)');
     } catch (err) {
       console.warn('⚠️ Redis/Queue unavailable, running without background jobs:', (err as Error).message);
     }
@@ -175,6 +197,7 @@ async function startServer() {
 // Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('🛑 SIGTERM received, shutting down gracefully');
+  if (escalationTimer) clearInterval(escalationTimer);
   server.close(() => {
     console.log('✅ Process terminated');
     process.exit(0);
@@ -183,6 +206,7 @@ process.on('SIGTERM', () => {
 
 process.on('SIGINT', () => {
   console.log('🛑 SIGINT received, shutting down gracefully');
+  if (escalationTimer) clearInterval(escalationTimer);
   server.close(() => {
     console.log('✅ Process terminated');
     process.exit(0);

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import RoleGuard, { UserRole } from "../../../components/RoleGuard";
 import { patientApi, consentApi } from "../../../lib/api";
@@ -8,21 +8,75 @@ import { useToast } from "../../../contexts/ToastContext";
 import DashboardLayout from "../../../components/DashboardLayout";
 import { Card, CardHeader, CardTitle } from "../../../components/ui/Card";
 
+type TriageResult = {
+  triageLevel: number;
+  recommendedAction: string;
+  possibleConditions?: string[];
+  reasoning: string;
+  doctorNotes?: string;
+  doctorDiagnosis?: string;
+  doctorRecommendations?: string;
+  wasOverridden?: boolean;
+  releasedAt?: string;
+};
+
+type PendingCase = {
+  triageCaseId: string;
+  estimatedWaitMinutes: number;
+};
+
 export default function AiDoctorPage() {
   const toast = useToast();
   const [symptoms, setSymptoms] = useState("");
-  const [triageResult, setTriageResult] = useState<{
-    triageLevel: number;
-    recommendedAction: string;
-    possibleConditions?: string[];
-    reasoning: string;
-  } | null>(null);
+  const [triageResult, setTriageResult] = useState<TriageResult | null>(null);
+  const [pendingCase, setPendingCase] = useState<PendingCase | null>(null);
   const [loading, setLoading] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [showConsentModal, setShowConsentModal] = useState(false);
   const [consentChecked, setConsentChecked] = useState(false);
   const [givingConsent, setGivingConsent] = useState(false);
   const [pendingSymptoms, setPendingSymptoms] = useState<{ symptoms: string; imageBase64?: string } | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+
+  // WebSocket listener — fires when doctor releases triage result
+  useEffect(() => {
+    if (!pendingCase) return;
+
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+    if (!token) return;
+
+    const wsBase = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000')
+      .replace(/^http/, 'ws')
+      .replace(/\/$/, '');
+    const ws = new WebSocket(`${wsBase}/ws?token=${encodeURIComponent(token)}`);
+    wsRef.current = ws;
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'TRIAGE_RESULT_RELEASED' && msg.data?.triageCaseId === pendingCase.triageCaseId) {
+          setTriageResult({
+            triageLevel: msg.data.triageLevel,
+            recommendedAction: msg.data.recommendedAction,
+            possibleConditions: msg.data.possibleConditions,
+            reasoning: '',
+            doctorNotes: msg.data.doctorNotes,
+            doctorDiagnosis: msg.data.doctorDiagnosis,
+            doctorRecommendations: msg.data.doctorRecommendations,
+            wasOverridden: msg.data.wasOverridden,
+            releasedAt: msg.data.releasedAt,
+          });
+          setPendingCase(null);
+          toast.success('Your triage result has been released by a doctor.');
+        }
+      } catch { /* ignore parse errors */ }
+    };
+
+    return () => {
+      ws.close();
+      wsRef.current = null;
+    };
+  }, [pendingCase, toast]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -40,15 +94,21 @@ export default function AiDoctorPage() {
     setLoading(true);
     try {
       const result = await patientApi.submitTriage(payload);
-      setTriageResult(result.data);
+      if (result.status === 'PENDING_REVIEW' && result.triageCaseId) {
+        setPendingCase({
+          triageCaseId: result.triageCaseId,
+          estimatedWaitMinutes: result.meta?.estimatedWaitMinutes ?? 60,
+        });
+      } else if (result.data) {
+        setTriageResult(result.data);
+      }
     } catch (error: unknown) {
-      const e = error as { response?: { data?: { error?: string; consentType?: string } }; status?: number };
-      const status = (e as { response?: { status?: number } }).response?.status;
+      const e = error as { response?: { data?: { error?: string; consentType?: string }; status?: number } };
+      const status = e.response?.status;
       if (status === 403 && e.response?.data?.error === 'CONSENT_REQUIRED') {
         setPendingSymptoms(payload);
         setShowConsentModal(true);
       } else {
-        console.error("Triage failed", error);
         toast.error(e.response?.data?.error || "Failed to analyze symptoms. Please try again.");
       }
     } finally {
@@ -145,7 +205,28 @@ export default function AiDoctorPage() {
               <CardHeader>
                 <CardTitle>Symptom check</CardTitle>
               </CardHeader>
-              {!triageResult ? (
+
+              {/* Waiting state — case submitted, doctor not yet released */}
+              {pendingCase && !triageResult && (
+                <div className="space-y-4 text-center py-6">
+                  <div className="flex items-center justify-center mb-4">
+                    <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'rgba(37,99,235,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>⏳</div>
+                  </div>
+                  <h3 className="font-bold text-slate-900">Under doctor review</h3>
+                  <p className="text-sm text-slate-600 max-w-sm mx-auto">
+                    Your case has been received and assigned to a qualified doctor for review. You will be notified here in real time when the result is released.
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    Estimated wait: ~{pendingCase.estimatedWaitMinutes} minutes · Case ID: {pendingCase.triageCaseId.slice(-6).toUpperCase()}
+                  </p>
+                  <p className="text-xs text-amber-600 font-medium">
+                    If you are experiencing a medical emergency, call <strong>10177</strong> (ambulance) or <strong>112</strong> immediately.
+                  </p>
+                </div>
+              )}
+
+              {/* Input form */}
+              {!triageResult && !pendingCase && (
                 <div className="space-y-4">
                   <textarea
                     id="triage-symptoms"
@@ -180,28 +261,53 @@ export default function AiDoctorPage() {
                     disabled={loading || !symptoms}
                     className="btn-primary w-full py-3 rounded-xl font-semibold disabled:opacity-50"
                   >
-                    {loading ? "Analyzing…" : "Analyze symptoms"}
+                    {loading ? "Submitting…" : "Submit for doctor review"}
                   </button>
                 </div>
-              ) : (
+              )}
+
+              {/* Released result — doctor-reviewed */}
+              {triageResult && (
                 <div className="space-y-4">
                   <div
                     className={`p-4 rounded-lg border-l-4 ${
                       triageResult.triageLevel < 3 ? "bg-red-50 border-red-500" : "bg-emerald-50 border-emerald-500"
                     }`}
                   >
-                    <h3 className="font-bold text-slate-900 mb-2">Analysis complete</h3>
+                    <div className="flex items-center gap-2 mb-2">
+                      <h3 className="font-bold text-slate-900">Doctor-reviewed result</h3>
+                      {triageResult.wasOverridden && (
+                        <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">AI level adjusted</span>
+                      )}
+                    </div>
+                    {triageResult.doctorDiagnosis && (
+                      <p className="mb-2 text-slate-800"><strong>Diagnosis:</strong> {triageResult.doctorDiagnosis}</p>
+                    )}
                     <p className="mb-2 text-slate-800">
                       <strong>Recommended action:</strong> {triageResult.recommendedAction}
                     </p>
-                    <p className="text-sm text-slate-700">
-                      <strong>Possible conditions:</strong> {triageResult.possibleConditions?.join(", ")}
-                    </p>
+                    {triageResult.doctorRecommendations && (
+                      <p className="mb-2 text-slate-700 text-sm"><strong>Doctor&apos;s advice:</strong> {triageResult.doctorRecommendations}</p>
+                    )}
+                    {triageResult.doctorNotes && (
+                      <p className="text-sm text-slate-600"><strong>Clinical notes:</strong> {triageResult.doctorNotes}</p>
+                    )}
+                    {!triageResult.doctorDiagnosis && (
+                      <p className="text-sm text-slate-700">
+                        <strong>Possible conditions:</strong> {triageResult.possibleConditions?.join(", ")}
+                      </p>
+                    )}
                   </div>
-                  <p className="text-xs text-center text-slate-600">{triageResult.reasoning}</p>
+                  {triageResult.releasedAt && (
+                    <p className="text-xs text-center text-slate-400">
+                      Released by doctor at {new Date(triageResult.releasedAt).toLocaleTimeString()} · HPCSA-registered physician
+                    </p>
+                  )}
+                  <p className="text-xs text-center text-slate-500 italic">This result was reviewed and released by a licensed doctor. It is decision support — always follow clinical advice.</p>
                   <button
                     onClick={() => {
                       setTriageResult(null);
+                      setPendingCase(null);
                       setSymptoms("");
                       setSelectedImage(null);
                     }}

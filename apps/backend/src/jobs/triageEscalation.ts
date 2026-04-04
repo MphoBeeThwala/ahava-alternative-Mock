@@ -100,6 +100,7 @@ export async function runEscalationCheck(): Promise<void> {
         await addEmailJob({
           to: admin.email,
           subject: `[ESCALATION L${newEscalationLevel}] Triage case ${tc.id.slice(-6)} overdue by ${minutesOverdue}min`,
+          priority: tc.aiTriageLevel <= 2 ? 1 : 3,
           html: buildEscalationEmail({
             caseId: tc.id,
             triageLevel: tc.aiTriageLevel,
@@ -126,6 +127,7 @@ export async function runEscalationCheck(): Promise<void> {
           await addEmailJob({
             to: doctor.email,
             subject: `[CRITICAL] SATS Level ${tc.aiTriageLevel} triage case requires immediate review`,
+            priority: 1,
             html: buildEscalationEmail({
               caseId: tc.id,
               triageLevel: tc.aiTriageLevel,
@@ -140,6 +142,29 @@ export async function runEscalationCheck(): Promise<void> {
       }
 
       console.log(`[triageEscalation] Case ${tc.id.slice(-6)}: escalated to L${newEscalationLevel} (${minutesOverdue}min overdue, SATS ${tc.aiTriageLevel})`);
+
+      // Real-time WebSocket alert to all online doctors
+      try {
+        const { broadcastToUsers } = await import('../services/websocket');
+        const onlineDoctors = await prisma.user.findMany({
+          where: { role: 'DOCTOR', isAvailable: true, isActive: true },
+          select: { id: true },
+        });
+        if (onlineDoctors.length > 0) {
+          broadcastToUsers(onlineDoctors.map(d => d.id), {
+            type: 'TRIAGE_ESCALATION',
+            data: {
+              triageCaseId: tc.id,
+              triageLevel: tc.aiTriageLevel,
+              escalationLevel: newEscalationLevel,
+              minutesOverdue,
+              slaDeadline: tc.slaDeadline?.toISOString(),
+            },
+          });
+        }
+      } catch (wsErr) {
+        console.warn('[triageEscalation] WebSocket notify failed (non-fatal):', (wsErr as Error).message);
+      }
     }
   } catch (err) {
     console.error('[triageEscalation] Escalation check failed:', err);

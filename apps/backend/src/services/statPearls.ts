@@ -10,7 +10,8 @@
 
 import * as cheerio from "cheerio";
 
-const NCBI_STATPEARLS_SEARCH = "https://www.ncbi.nlm.nih.gov/books/NBK430685/";
+// eutils search endpoint — requires NCBI_API_KEY in env for production rate limits
+const NCBI_ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi";
 const MAX_CONTEXT_CHARS = 8000; // Keep prompt size reasonable
 const REQUEST_TIMEOUT_MS = 10000;
 
@@ -75,9 +76,11 @@ async function fetchFromStatPearlsService(
 
 /**
  * Search NCBI StatPearls and return top results.
+ * Uses eutils esearch API with optional API key.
  */
 async function searchNcbiStatPearls(query: string): Promise<SearchResult[]> {
-  const searchUrl = `${NCBI_STATPEARLS_SEARCH}?term=${encodeURIComponent(query)}`;
+  const apiKey = process.env.NCBI_API_KEY ? `&api_key=${process.env.NCBI_API_KEY}` : '';
+  const searchUrl = `${NCBI_ESEARCH_URL}?db=books&term=${encodeURIComponent(query)}+AND+NBK430685[book]&retmode=json${apiKey}`;
   const res = await fetch(searchUrl, {
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
@@ -127,11 +130,36 @@ async function fetchAndExtractArticle(url: string): Promise<string | null> {
     if (content.trim()) sections.push({ heading, content: content.trim() });
   });
 
-  if (sections.length === 0) return null;
+  if (sections.length === 0) {
+    if (process.env.NODE_ENV === 'production') {
+      console.warn('[statPearls] Article extraction returned no sections — NCBI HTML selectors may be stale.');
+    }
+    return null;
+  }
   const markdown = sections
     .map((s) => `## ${s.heading}\n${s.content}`)
     .join("\n\n");
   return markdown.slice(0, MAX_CONTEXT_CHARS);
+}
+
+/**
+ * Internal helper: fetch from service URL or NCBI directly.
+ */
+async function fetchContent(symptoms: string, query: string, serviceUrl?: string): Promise<string | null> {
+  if (serviceUrl) {
+    const content = await fetchFromStatPearlsService(serviceUrl, query);
+    if (content) return content.slice(0, MAX_CONTEXT_CHARS);
+  }
+  try {
+    const result = await fetchFromNcbi(symptoms);
+    if (!result && process.env.NODE_ENV === 'production' && !serviceUrl) {
+      console.warn('[statPearls] NCBI fetch returned null — selectors may be stale or rate-limited. Set NCBI_API_KEY.');
+    }
+    return result;
+  } catch (err) {
+    console.warn('[statPearls] Failed to fetch medical context:', err);
+    return null;
+  }
 }
 
 /**
@@ -149,7 +177,8 @@ async function fetchFromNcbi(symptoms: string): Promise<string | null> {
 
 /**
  * Get peer-reviewed medical context for the given symptoms.
- * Uses STATPEARLS_SERVICE_URL if set, otherwise fetches directly from NCBI StatPearls.
+ * Uses Redis cache (24h TTL) to avoid hammering NCBI on every triage call.
+ * Falls back to STATPEARLS_SERVICE_URL or direct NCBI fetch.
  * Returns null on failure; triage proceeds without context.
  */
 export async function getMedicalContext(symptoms: string): Promise<string | null> {
@@ -157,15 +186,26 @@ export async function getMedicalContext(symptoms: string): Promise<string | null
   const query = extractSearchQuery(symptoms);
   if (!query) return null;
 
-  if (serviceUrl) {
-    const content = await fetchFromStatPearlsService(serviceUrl, query);
-    if (content) return content.slice(0, MAX_CONTEXT_CHARS);
-  }
+  const cacheKey = `statpearls:${query.slice(0, 80).replace(/\s+/g, '_')}`;
 
   try {
-    return await fetchFromNcbi(symptoms);
-  } catch (err) {
-    console.warn("[statPearls] Failed to fetch medical context:", err);
-    return null;
+    const { getRedis } = await import('./redis');
+    const redis = getRedis();
+    if (redis) {
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        console.log('[statPearls] Cache hit for:', query);
+        return cached;
+      }
+      const content = await fetchContent(symptoms, query, serviceUrl);
+      if (content) {
+        await redis.setex(cacheKey, 86400, content); // 24-hour TTL
+      }
+      return content;
+    }
+  } catch {
+    console.warn('[statPearls] Redis cache unavailable, fetching directly');
   }
+
+  return fetchContent(symptoms, query, serviceUrl);
 }

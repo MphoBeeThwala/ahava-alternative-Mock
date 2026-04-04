@@ -491,8 +491,13 @@ export interface TriageCase {
   aiReasoning: string;
   status: string;
   doctorNotes: string | null;
+  doctorDiagnosis: string | null;
+  doctorRecommendations: string | null;
   finalDiagnosis: string | null;
+  finalTriageLevel: number | null;
   referredTo: string | null;
+  aiModel: string | null;
+  aiContextUsed: boolean;
   createdAt: string;
   patient?: { id: string; firstName: string; lastName: string; email?: string; phone?: string | null };
 }
@@ -523,6 +528,29 @@ export const doctorApi = {
     const res = await apiClient.post(`/triage-cases/${caseId}/refer`, { referredTo, doctorNotes });
     return res.data;
   },
+  // New review-flow endpoints
+  claimTriageCase: async (caseId: string) => {
+    const res = await apiClient.post(`/triage-review/${caseId}/claim`);
+    return res.data;
+  },
+  reviewTriageCase: async (caseId: string, payload: {
+    doctorNotes: string;
+    doctorDiagnosis: string;
+    doctorRecommendations?: string;
+    finalTriageLevel?: number;
+    overrideReason?: string;
+  }) => {
+    const res = await apiClient.post(`/triage-review/${caseId}/review`, payload);
+    return res.data;
+  },
+  releaseTriageCase: async (caseId: string) => {
+    const res = await apiClient.post(`/triage-review/${caseId}/release`);
+    return res.data;
+  },
+  getTriageReviewQueue: async (status = 'PENDING_REVIEW') => {
+    const res = await apiClient.get(`/triage-review?status=${status}`);
+    return res.data;
+  },
 };
 
 // ==================== TERRA (WEARABLE) ====================
@@ -549,11 +577,11 @@ export const terraApi = {
 // ==================== CONSENT ====================
 export const consentApi = {
   give: async (consentType: string) => {
-    const res = await apiClient.post('/patient/consent', { consentType });
+    const res = await apiClient.post('/consent', { consentType });
     return res.data;
   },
   getAll: async () => {
-    const res = await apiClient.get('/patient/consent');
+    const res = await apiClient.get('/consent');
     return res.data;
   },
 };

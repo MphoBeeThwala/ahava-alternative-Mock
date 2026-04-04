@@ -8,8 +8,8 @@ dotenv.config();
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
-console.log(`[aiTriage] GEMINI_API_KEY present: ${!!GEMINI_API_KEY}`);
-console.log(`[aiTriage] ANTHROPIC_API_KEY present: ${!!ANTHROPIC_API_KEY}`);
+// Key presence is logged at startup only — no patient data in logs
+console.log(`[aiTriage] providers configured: gemini=${!!GEMINI_API_KEY} claude=${!!ANTHROPIC_API_KEY}`);
 
 const genAI = GEMINI_API_KEY ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
 
@@ -62,6 +62,29 @@ ${medicalContext}
 
     return `${basePrompt}${patientSection}${contextSection}${SA_EPIDEMIOLOGICAL_CONTEXT}
 Output ONLY valid JSON with the following structure:`;
+}
+
+function validateTriageResult(parsed: unknown, source: string): TriageResult {
+    const p = parsed as Record<string, unknown>;
+    const level = Number(p?.triageLevel);
+    if (!Number.isInteger(level) || level < 1 || level > 5) {
+        throw new Error(`[aiTriage] Invalid triageLevel from ${source}: ${p?.triageLevel}`);
+    }
+    if (!Array.isArray(p?.possibleConditions) || (p.possibleConditions as unknown[]).length === 0) {
+        throw new Error(`[aiTriage] Missing possibleConditions from ${source}`);
+    }
+    if (typeof p?.recommendedAction !== 'string' || (p.recommendedAction as string).trim() === '') {
+        throw new Error(`[aiTriage] Missing recommendedAction from ${source}`);
+    }
+    if (typeof p?.reasoning !== 'string' || (p.reasoning as string).trim() === '') {
+        throw new Error(`[aiTriage] Missing reasoning from ${source}`);
+    }
+    return {
+        triageLevel: level as 1 | 2 | 3 | 4 | 5,
+        possibleConditions: (p.possibleConditions as unknown[]).map(String),
+        recommendedAction: (p.recommendedAction as string).trim(),
+        reasoning: (p.reasoning as string).trim(),
+    };
 }
 
 const TRIAGE_PROMPT_END = `{
@@ -136,9 +159,9 @@ async function analyzeWithClaude(
 
     // Clean markdown code blocks if present
     const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
-    console.log("[aiTriage] Claude response received successfully");
+    console.log("[aiTriage] Claude response received");
 
-    return JSON.parse(cleanJson) as TriageResult;
+    return validateTriageResult(JSON.parse(cleanJson), 'Claude');
 }
 
 // Gemini
@@ -159,11 +182,15 @@ async function analyzeWithGemini(
     const parts: any[] = [prompt];
 
     if (request.imageBase64) {
+        const mimeMatch = request.imageBase64.match(/^data:(image\/\w+);base64,/);
+        const detectedMimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+        const supportedMimeTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'];
+        const safeMimeType = supportedMimeTypes.includes(detectedMimeType) ? detectedMimeType : 'image/jpeg';
         const cleanBase64 = request.imageBase64.replace(/^data:image\/\w+;base64,/, "");
         parts.push({
             inlineData: {
                 data: cleanBase64,
-                mimeType: "image/jpeg",
+                mimeType: safeMimeType,
             },
         });
     }
@@ -173,14 +200,14 @@ async function analyzeWithGemini(
     const text = response.text();
 
     const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
-    console.log("[aiTriage] Gemini response received successfully");
+    console.log("[aiTriage] Gemini response received");
 
-    return JSON.parse(cleanJson) as TriageResult;
+    return validateTriageResult(JSON.parse(cleanJson), 'Gemini');
 }
 
 // Main function with fallback logic
 export async function analyzeSymptoms(request: TriageRequest): Promise<TriageResult> {
-    console.log(`[aiTriage] analyzeSymptoms called`);
+    console.log(`[aiTriage] analyzeSymptoms called for patientContext=${!!request.patientContext}`);
 
     // Fetch StatPearls medical context (Option A - Proxy/Context Injection)
     let medicalContext: string | null = null;

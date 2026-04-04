@@ -4,6 +4,7 @@ import { rateLimiter } from '../middleware/rateLimiter';
 import axios from 'axios';
 import Joi from 'joi';
 import { processBiometricReading, getMonitoringSummary, detectEarlyWarningSigns } from '../services/monitoring';
+import { analyzeSymptoms } from '../services/aiTriage';
 import { startDemoStream } from '../services/demoStream';
 import prisma from '../lib/prisma';
 
@@ -613,21 +614,8 @@ router.post('/triage', rateLimiter, authMiddleware, async (req: AuthenticatedReq
 
     const { symptoms, imageBase64, biometrics } = value;
 
-    // Call AI triage service
-    const triageResponse = await axios.post(
-      'http://localhost:4000/api/triage',
-      {
-        symptoms,
-        imageBase64,
-      },
-      {
-        headers: {
-          Authorization: req.headers.authorization,
-        },
-      }
-    );
-
-    const triageResult = triageResponse.data.data;
+    // Call AI triage service directly (avoids network self-call)
+    const triageResult = await analyzeSymptoms({ symptoms, imageBase64 });
 
     // If biometrics provided, enhance triage with biometric context
     let biometricContext = null;
@@ -702,14 +690,15 @@ router.get('/baseline-info', authMiddleware, async (req: AuthenticatedRequest, r
       return res.json({ daysEstablished: 0, daysRequired: 14, isComplete: false });
     }
 
-    const daysDiff = Math.floor(
-      (new Date().getTime() - new Date(firstReading.createdAt).getTime()) / (1000 * 60 * 60 * 24)
-    ) + 1;
+    const daysSinceFirst = Math.floor(
+      (Date.now() - new Date(firstReading.createdAt).getTime()) / 86400000
+    );
 
-    const daysEstablished = Math.min(daysDiff, 14);
-    const isComplete = daysEstablished >= 14;
+    const totalReadings = await prisma.biometricReading.count({ where: { userId } });
+    const daysEstablished = Math.min(daysSinceFirst, 14);
+    const isComplete = daysSinceFirst >= 14 && totalReadings >= 14;
 
-    res.json({ daysEstablished, daysRequired: 14, isComplete });
+    res.json({ daysEstablished, daysRequired: 14, totalReadings, isComplete });
   } catch (e) {
     res.status(500).json({ error: 'Failed to get baseline info' });
   }
@@ -787,7 +776,7 @@ router.get('/anomaly-timeline', authMiddleware, async (req: AuthenticatedRequest
 // POST /api/patient/demo/start-stream
 // DEMO ONLY - Streams realistic biometric progression for investor demo
 // Works in production but requires authentication (applied by app.use mount)
-router.post('/demo/start-stream', async (req: AuthenticatedRequest, res) => {
+router.post('/demo/start-stream', authMiddleware, async (req: AuthenticatedRequest, res) => {
   const userId = req.user?.id;
   if (!userId) {
     return res.status(401).json({ error: 'Not authenticated' });

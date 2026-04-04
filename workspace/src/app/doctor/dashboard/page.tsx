@@ -47,14 +47,24 @@ function formatTimeAgo(hours: number): string {
   return `${Math.floor(hours / 24)} days ago`;
 }
 
+type ReviewModal = {
+    caseId: string;
+    aiTriageLevel: number;
+    doctorNotes: string;
+    doctorDiagnosis: string;
+    doctorRecommendations: string;
+    finalTriageLevel: number;
+    overrideReason: string;
+};
+
 export default function DoctorDashboard() {
     const { user } = useAuth();
     const toast = useToast();
     const [triageQueue, setTriageQueue] = useState<Visit[]>([]);
     const [triageCases, setTriageCases] = useState<TriageCase[]>([]);
     const [loading, setLoading] = useState(false);
-    const [referModal, setReferModal] = useState<{ caseId: string; referredTo: string; notes: string } | null>(null);
-    const [overrideModal, setOverrideModal] = useState<{ caseId: string; notes: string; diagnosis: string } | null>(null);
+    const [reviewModal, setReviewModal] = useState<ReviewModal | null>(null);
+    const [releasing, setReleasing] = useState<string | null>(null);
 
     const loadPendingVisits = useCallback(async () => {
         try {
@@ -70,7 +80,7 @@ export default function DoctorDashboard() {
 
     const loadTriageCases = useCallback(async () => {
         try {
-            const data = await doctorApi.getTriageCases('PENDING_REVIEW');
+            const data = await doctorApi.getTriageReviewQueue('PENDING_REVIEW');
             setTriageCases(data.cases || []);
         } catch (error) {
             console.error('Failed to load triage cases:', error);
@@ -103,40 +113,55 @@ export default function DoctorDashboard() {
         }
     };
 
-    const handleApproveTriage = async (caseId: string) => {
+    const handleClaim = async (caseId: string) => {
         try {
-            await doctorApi.approveTriageCase(caseId);
-            toast.success('Case approved. Patient can use AI assessment as final.');
+            await doctorApi.claimTriageCase(caseId);
+            toast.success('Case claimed. Complete your review below.');
             loadTriageCases();
         } catch (error: unknown) {
             const err = error as { response?: { data?: { error?: string } } };
-            toast.error(err.response?.data?.error || 'Failed to approve.');
+            toast.error(err.response?.data?.error || 'Failed to claim case.');
         }
     };
 
-    const handleOverrideTriage = async () => {
-        if (!overrideModal) return;
+    const handleSaveReview = async () => {
+        if (!reviewModal) return;
+        if (!reviewModal.doctorNotes.trim() || !reviewModal.doctorDiagnosis.trim()) {
+            toast.error('Doctor notes and diagnosis are required.');
+            return;
+        }
+        if (reviewModal.finalTriageLevel !== reviewModal.aiTriageLevel && !reviewModal.overrideReason.trim()) {
+            toast.error('Override reason is required when changing the AI triage level.');
+            return;
+        }
         try {
-            await doctorApi.overrideTriageCase(overrideModal.caseId, overrideModal.notes, overrideModal.diagnosis);
-            toast.success('Your assessment recorded. You can send final diagnosis to patient later.');
-            setOverrideModal(null);
+            await doctorApi.reviewTriageCase(reviewModal.caseId, {
+                doctorNotes: reviewModal.doctorNotes,
+                doctorDiagnosis: reviewModal.doctorDiagnosis,
+                doctorRecommendations: reviewModal.doctorRecommendations || undefined,
+                finalTriageLevel: reviewModal.finalTriageLevel,
+                overrideReason: reviewModal.finalTriageLevel !== reviewModal.aiTriageLevel ? reviewModal.overrideReason : undefined,
+            });
+            toast.success('Review saved. You can now release the result to the patient.');
+            setReviewModal(null);
             loadTriageCases();
         } catch (error: unknown) {
             const err = error as { response?: { data?: { error?: string } } };
-            toast.error(err.response?.data?.error || 'Failed to save.');
+            toast.error(err.response?.data?.error || 'Failed to save review.');
         }
     };
 
-    const handleReferTriage = async () => {
-        if (!referModal || !referModal.referredTo.trim()) return;
+    const handleRelease = async (caseId: string) => {
+        setReleasing(caseId);
         try {
-            await doctorApi.referTriageCase(referModal.caseId, referModal.referredTo, referModal.notes);
-            toast.success('Case referred. Arrange in-person or partner appointment.');
-            setReferModal(null);
+            await doctorApi.releaseTriageCase(caseId);
+            toast.success('Result released to patient via real-time notification.');
             loadTriageCases();
         } catch (error: unknown) {
             const err = error as { response?: { data?: { error?: string } } };
-            toast.error(err.response?.data?.error || 'Failed to refer.');
+            toast.error(err.response?.data?.error || 'Failed to release. Ensure notes and diagnosis are saved first.');
+        } finally {
+            setReleasing(null);
         }
     };
 
@@ -202,29 +227,39 @@ export default function DoctorDashboard() {
                                     <p className="text-slate-700 mb-2"><strong>Symptoms:</strong> {tc.symptoms}</p>
                                     <p className="text-slate-600 text-sm mb-2"><strong>AI recommendation:</strong> {tc.aiRecommendedAction}</p>
                                     <p className="text-slate-500 text-sm mb-2"><strong>Possible conditions:</strong> {(tc.aiPossibleConditions || []).join(', ')}</p>
-                                    <p className="text-slate-500 text-sm mb-4"><strong>AI reasoning:</strong> {tc.aiReasoning}</p>
+                                    <p className="text-slate-500 text-sm mb-2"><strong>AI reasoning:</strong> {tc.aiReasoning}</p>
+                                    {tc.aiModel && (
+                                        <p className="text-xs text-slate-400 mb-4">AI model: {tc.aiModel}</p>
+                                    )}
                                     <div className="flex flex-wrap gap-3 border-t pt-4" style={{ borderColor: 'var(--border)' }}>
-                                        <button
-                                            onClick={() => handleApproveTriage(tc.id)}
-                                            className="px-4 py-2 rounded-lg font-medium text-white transition"
-                                            style={{ backgroundColor: '#4caf50' }}
-                                        >
-                                            ✓ Approve
-                                        </button>
-                                        <button
-                                            onClick={() => setOverrideModal({ caseId: tc.id, notes: '', diagnosis: '' })}
-                                            className="px-4 py-2 rounded-lg font-medium text-white transition"
-                                            style={{ backgroundColor: '#ff9800' }}
-                                        >
-                                            ✎ Diagnose
-                                        </button>
-                                        <button
-                                            onClick={() => setReferModal({ caseId: tc.id, referredTo: '', notes: '' })}
-                                            className="px-4 py-2 rounded-lg font-medium text-white transition"
-                                            style={{ backgroundColor: '#2196f3' }}
-                                        >
-                                            📋 Refer
-                                        </button>
+                                        {tc.status === 'PENDING_REVIEW' && (
+                                            <button
+                                                onClick={() => handleClaim(tc.id)}
+                                                className="px-4 py-2 rounded-lg font-medium text-white transition"
+                                                style={{ backgroundColor: '#2196f3' }}
+                                            >
+                                                Claim case
+                                            </button>
+                                        )}
+                                        {(tc.status === 'ASSIGNED' || tc.status === 'REVIEWED') && (
+                                            <button
+                                                onClick={() => setReviewModal({ caseId: tc.id, aiTriageLevel: tc.aiTriageLevel, doctorNotes: '', doctorDiagnosis: '', doctorRecommendations: '', finalTriageLevel: tc.aiTriageLevel, overrideReason: '' })}
+                                                className="px-4 py-2 rounded-lg font-medium text-white transition"
+                                                style={{ backgroundColor: '#ff9800' }}
+                                            >
+                                                ✎ Write review
+                                            </button>
+                                        )}
+                                        {tc.status === 'REVIEWED' && (
+                                            <button
+                                                onClick={() => handleRelease(tc.id)}
+                                                disabled={releasing === tc.id}
+                                                className="px-4 py-2 rounded-lg font-medium text-white transition disabled:opacity-60"
+                                                style={{ backgroundColor: '#4caf50' }}
+                                            >
+                                                {releasing === tc.id ? 'Releasing…' : '↑ Release to patient'}
+                                            </button>
+                                        )}
                                     </div>
                                 </Card>
                               );
@@ -345,76 +380,80 @@ export default function DoctorDashboard() {
                 )}
                 </section>
 
-                {/* Refer modal */}
+                {/* Doctor review modal — claim → review → release */}
                 <Modal
-                    open={!!referModal}
-                    onClose={() => setReferModal(null)}
-                    title="Refer patient"
-                    primaryLabel="Refer"
-                    onPrimary={handleReferTriage}
-                    primaryDisabled={!referModal?.referredTo?.trim()}
+                    open={!!reviewModal}
+                    onClose={() => setReviewModal(null)}
+                    title="Doctor review"
+                    primaryLabel="Save review"
+                    onPrimary={handleSaveReview}
+                    primaryDisabled={!reviewModal?.doctorNotes?.trim() || !reviewModal?.doctorDiagnosis?.trim()}
                     secondaryLabel="Cancel"
-                    onSecondary={() => setReferModal(null)}
+                    onSecondary={() => setReviewModal(null)}
                 >
                     <div className="space-y-4">
                         <div>
-                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Where to refer</label>
-                            <input
-                                type="text"
-                                placeholder="e.g. In-person with Dr X / Partner clinic near patient"
+                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Clinical notes <span className="text-red-500">*</span></label>
+                            <textarea
+                                placeholder="Clinical observations and reasoning"
                                 className="w-full rounded-lg border px-4 py-2.5 text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2"
                                 style={{ borderColor: 'var(--border)' }}
-                                value={referModal?.referredTo ?? ''}
-                                onChange={(e) => referModal && setReferModal({ ...referModal, referredTo: e.target.value })}
+                                rows={3}
+                                value={reviewModal?.doctorNotes ?? ''}
+                                onChange={(e) => reviewModal && setReviewModal({ ...reviewModal, doctorNotes: e.target.value })}
                             />
                         </div>
                         <div>
-                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Notes (optional)</label>
+                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Diagnosis <span className="text-red-500">*</span></label>
+                            <input
+                                type="text"
+                                placeholder="Your clinical diagnosis"
+                                className="w-full rounded-lg border px-4 py-2.5 text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2"
+                                style={{ borderColor: 'var(--border)' }}
+                                value={reviewModal?.doctorDiagnosis ?? ''}
+                                onChange={(e) => reviewModal && setReviewModal({ ...reviewModal, doctorDiagnosis: e.target.value })}
+                            />
+                        </div>
+                        <div>
+                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Recommendations to patient</label>
                             <textarea
-                                placeholder="Notes for referral"
+                                placeholder="What should the patient do next?"
                                 className="w-full rounded-lg border px-4 py-2.5 text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2"
                                 style={{ borderColor: 'var(--border)' }}
                                 rows={2}
-                                value={referModal?.notes ?? ''}
-                                onChange={(e) => referModal && setReferModal({ ...referModal, notes: e.target.value })}
-                            />
-                        </div>
-                    </div>
-                </Modal>
-
-                {/* Override modal */}
-                <Modal
-                    open={!!overrideModal}
-                    onClose={() => setOverrideModal(null)}
-                    title="Add your diagnosis"
-                    primaryLabel="Save"
-                    onPrimary={handleOverrideTriage}
-                    secondaryLabel="Cancel"
-                    onSecondary={() => setOverrideModal(null)}
-                >
-                    <div className="space-y-4">
-                        <div>
-                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Your notes (optional)</label>
-                            <textarea
-                                placeholder="Clinical notes"
-                                className="w-full rounded-lg border px-4 py-2.5 text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2"
-                                style={{ borderColor: 'var(--border)' }}
-                                rows={2}
-                                value={overrideModal?.notes ?? ''}
-                                onChange={(e) => overrideModal && setOverrideModal({ ...overrideModal, notes: e.target.value })}
+                                value={reviewModal?.doctorRecommendations ?? ''}
+                                onChange={(e) => reviewModal && setReviewModal({ ...reviewModal, doctorRecommendations: e.target.value })}
                             />
                         </div>
                         <div>
-                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Final diagnosis</label>
-                            <input
-                                type="text"
-                                placeholder="Can send to patient later"
-                                className="w-full rounded-lg border px-4 py-2.5 text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2"
+                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Final SATS level (AI suggested: {reviewModal?.aiTriageLevel})</label>
+                            <select
+                                className="w-full rounded-lg border px-4 py-2.5 text-[var(--foreground)] focus:outline-none focus:ring-2"
                                 style={{ borderColor: 'var(--border)' }}
-                                value={overrideModal?.diagnosis ?? ''}
-                                onChange={(e) => overrideModal && setOverrideModal({ ...overrideModal, diagnosis: e.target.value })}
-                            />
+                                value={reviewModal?.finalTriageLevel ?? reviewModal?.aiTriageLevel ?? ''}
+                                onChange={(e) => reviewModal && setReviewModal({ ...reviewModal, finalTriageLevel: parseInt(e.target.value) })}
+                            >
+                                <option value={1}>1 — Resuscitation (Red)</option>
+                                <option value={2}>2 — Emergency (Orange)</option>
+                                <option value={3}>3 — Urgent (Yellow)</option>
+                                <option value={4}>4 — Less-Urgent (Green)</option>
+                                <option value={5}>5 — Non-Urgent (Blue)</option>
+                            </select>
                         </div>
+                        {reviewModal && reviewModal.finalTriageLevel !== reviewModal.aiTriageLevel && (
+                            <div>
+                                <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Override reason <span className="text-red-500">*</span></label>
+                                <input
+                                    type="text"
+                                    placeholder="Why are you changing the AI triage level?"
+                                    className="w-full rounded-lg border px-4 py-2.5 text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2"
+                                    style={{ borderColor: 'var(--border)' }}
+                                    value={reviewModal?.overrideReason ?? ''}
+                                    onChange={(e) => reviewModal && setReviewModal({ ...reviewModal, overrideReason: e.target.value })}
+                                />
+                            </div>
+                        )}
+                        <p className="text-xs text-[var(--muted)] pt-2">After saving, click <strong>Release to patient</strong> on the case card to deliver the result in real time.</p>
                     </div>
                 </Modal>
                 </div>{/* p-6 */}

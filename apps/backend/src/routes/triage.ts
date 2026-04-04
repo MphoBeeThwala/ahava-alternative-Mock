@@ -4,6 +4,7 @@ import { authMiddleware, AuthenticatedRequest } from '../middleware/auth';
 import { rateLimiter } from '../middleware/rateLimiter';
 import { requireConsent } from '../middleware/consentMiddleware';
 import { calculateSlaDeadline, getDoctorFee } from '../jobs/triageEscalation';
+import { broadcastToUsers } from '../services/websocket';
 import prisma from '../lib/prisma';
 
 const router: Router = Router();
@@ -113,18 +114,47 @@ router.post('/', rateLimiter, authMiddleware, requireConsent('AI_TRIAGE'), async
                 aiReasoning: result.reasoning,
                 slaDeadline,
                 doctorFeeCents: feeCents,
+                aiModel: process.env.CLAUDE_MODEL || 'claude-sonnet-4-20250514',
+                aiContextUsed: !!patientContext,
             } as any,
         });
 
+        // Notify all available doctors via WebSocket that a new case needs review
+        try {
+            const availableDoctors = await prisma.user.findMany({
+                where: { role: 'DOCTOR', isAvailable: true, isActive: true },
+                select: { id: true },
+            });
+            if (availableDoctors.length > 0) {
+                broadcastToUsers(
+                    availableDoctors.map(d => d.id),
+                    {
+                        type: 'NEW_TRIAGE_CASE',
+                        data: {
+                            triageCaseId: triageCase.id,
+                            triageLevel: result.triageLevel,
+                            slaDeadline: slaDeadline.toISOString(),
+                            symptoms: symptoms.slice(0, 100),
+                            createdAt: new Date().toISOString(),
+                        },
+                    }
+                );
+            }
+        } catch (wsErr) {
+            console.warn('[triage] WebSocket notify doctors failed (non-fatal):', (wsErr as Error).message);
+        }
+
+        // Return acknowledgement only — NOT the AI result
+        // Patient receives the result via WebSocket when doctor releases it
         res.json({
             success: true,
-            data: result,
+            status: 'PENDING_REVIEW',
             triageCaseId: triageCase.id,
             slaDeadline: slaDeadline.toISOString(),
             meta: {
-                disclaimer: "Not a medical diagnosis. Tool for decision support only. Sent to doctor for review.",
-                satsLevel: result.triageLevel,
-                slaMinutes: { 1: 5, 2: 15, 3: 60, 4: 240, 5: 480 }[result.triageLevel],
+                message: 'Your case has been received and is being reviewed by a qualified doctor.',
+                estimatedWaitMinutes: ({ 1: 5, 2: 15, 3: 60, 4: 240, 5: 480 } as Record<number,number>)[result.triageLevel],
+                disclaimer: 'A licensed HPCSA-registered doctor will review and release your results.',
             },
         });
     } catch (error) {

@@ -135,7 +135,7 @@ function generateRecommendations(
   if (anomalies.some(a => a.includes('spo2') || a.includes('oxygen'))) {
     if (biometricData?.spo2 < 92) {
       recommendations.push('🔴 CRITICAL: Oxygen saturation dangerously low (<92%)');
-      recommendations.push('   → CALL 911 or seek immediate emergency care');
+      recommendations.push('   → CALL 10177 (ambulance) or 112 from any mobile — South African emergency services');
       recommendations.push('   → Check for: breathing difficulty, chest pain, dizziness');
     } else if (biometricData?.spo2 < 95) {
       recommendations.push('⚠️ Oxygen saturation below normal (95%)');
@@ -192,22 +192,25 @@ function fallbackAnalysis(biometricData: any): MonitoringResult {
   // Basic threshold checks
   const heartRate = biometricData.heartRateResting || biometricData.heartRate;
   if (heartRate) {
-    if (heartRate > 100) {
-      anomalies.push('Elevated resting heart rate');
-      alertLevel = 'YELLOW';
-    } else if (heartRate > 120) {
+    if (heartRate > 120) {
       anomalies.push('Significantly elevated heart rate');
       alertLevel = 'RED';
+    } else if (heartRate > 100) {
+      anomalies.push('Elevated resting heart rate');
+      alertLevel = alertLevel === 'RED' ? 'RED' : 'YELLOW';
     }
   }
 
   if (biometricData.oxygenSaturation) {
-    if (biometricData.oxygenSaturation < 95) {
+    if (biometricData.oxygenSaturation < 90) {
+      anomalies.push('Critically low oxygen saturation - EMERGENCY');
+      alertLevel = 'RED';
+    } else if (biometricData.oxygenSaturation < 94) {
       anomalies.push('Low oxygen saturation');
       alertLevel = alertLevel === 'RED' ? 'RED' : 'YELLOW';
-    } else if (biometricData.oxygenSaturation < 90) {
-      anomalies.push('Critically low oxygen saturation');
-      alertLevel = 'RED';
+    } else if (biometricData.oxygenSaturation < 96) {
+      anomalies.push('Borderline oxygen saturation - monitor closely');
+      alertLevel = alertLevel === 'RED' ? 'RED' : 'YELLOW';
     }
   }
 
@@ -311,8 +314,12 @@ export async function getMonitoringSummary(userId: string): Promise<{
     console.warn('[Monitoring] Failed to fetch readings:', error?.message || error);
   }
 
-  const baselineEstablished = readings.length >= 14;
-  const daysUntilBaseline = baselineEstablished ? 0 : Math.max(0, 14 - readings.length);
+  const oldestReading = readings[0]?.createdAt;
+  const daysSinceFirst = oldestReading
+    ? Math.floor((Date.now() - new Date(oldestReading).getTime()) / 86400000)
+    : 0;
+  const baselineEstablished = daysSinceFirst >= 14 && readings.length >= 14;
+  const daysUntilBaseline = baselineEstablished ? 0 : Math.max(0, 14 - daysSinceFirst);
 
   // Get current readiness score from ML service
   let currentReadinessScore = 100;

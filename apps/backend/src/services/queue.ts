@@ -106,11 +106,13 @@ export const addEmailJob = async (data: {
   subject: string;
   html: string;
   text?: string;
+  priority?: number;
 }) => {
+  const { priority = 3, ...jobData } = data;
   if (emailQueue) {
-    return emailQueue.add('send-email', data, { priority: 3 });
+    return emailQueue.add('send-email', jobData, { priority });
   }
   // No Redis: send directly so notifications still work (e.g. serverless or dev without Redis)
   const { sendEmail } = await import('./email');
-  sendEmail(data).catch((e) => console.error('[email] direct send failed', e));
+  sendEmail(jobData).catch((e) => console.error('[email] direct send failed', e));
 };

@@ -53,8 +53,12 @@ enum MessageType {
 
 enum TriageCaseStatus {
   PENDING_REVIEW   // AI done, waiting for doctor
-  APPROVED         // Doctor agrees with AI assessment
-  DOCTOR_OVERRIDE  // Doctor disagrees; final diagnosis may follow later
+  ASSIGNED         // Doctor claimed the case
+  REVIEWED         // Doctor saved notes but not yet released
+  RELEASED         // Doctor released result to patient
+  ESCALATED        // SLA breached, escalated
+  APPROVED         // Legacy: doctor agrees with AI assessment
+  DOCTOR_OVERRIDE  // Legacy: doctor disagreed
   REFERRED         // In-person or partner appointment needed
 }
 
@@ -404,8 +408,19 @@ model TriageCase {
   
   status            TriageCaseStatus  @default(PENDING_REVIEW)
   doctorNotes       String?
-  finalDiagnosis    String?          // Set when doctor approves or overrides
+  doctorDiagnosis   String?          // Doctor's clinical diagnosis
+  doctorRecommendations String?      // Doctor's recommendations to patient
+  finalDiagnosis    String?          // Legacy field
+  finalTriageLevel  Int?             // Doctor's approved or overridden triage level
+  overrideReason    String?          // Required if finalTriageLevel != aiTriageLevel
   referredTo        String?          // e.g. "In-person with Dr X" or "Partner clinic near patient"
+  reviewedAt        DateTime?        // When doctor saved review
+  releasedAt        DateTime?        // When doctor released to patient
+
+  // AI audit fields
+  aiModel           String?          // e.g. "claude-sonnet-4-20250514"
+  aiContextUsed     Boolean          @default(false)  // was patient context available?
+  statPearlsUsed    Boolean          @default(false)  // was StatPearls context available?
 
   // SLA & escalation
   slaDeadline       DateTime?        // Set on creation based on aiTriageLevel
