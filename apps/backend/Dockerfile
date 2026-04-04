@@ -5,7 +5,7 @@ WORKDIR /app
 
 # Install all dependencies (including devDependencies needed for build)
 FROM base AS deps
-COPY package.json ./
+COPY package.json package-lock.json* ./
 RUN npm install
 
 # Build: generate Prisma client, compile TypeScript
@@ -26,4 +26,4 @@ COPY --from=builder --chown=apiuser:nodejs /app/prisma ./prisma
 USER apiuser
 EXPOSE 4000
 ENV NODE_ENV=production
-CMD node_modules/.bin/prisma migrate deploy; node dist/index.js
+CMD node_modules/.bin/prisma migrate deploy && node dist/index.js
