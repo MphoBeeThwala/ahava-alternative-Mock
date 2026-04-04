@@ -295,7 +295,12 @@ export interface TriageRequest {
 
 export interface TriageResponse {
   success: boolean;
-  data: {
+  status?: string;
+  triageCaseId?: string;
+  meta?: {
+    estimatedWaitMinutes?: number;
+  };
+  data?: {
     triageLevel: number;
     recommendedAction: string;
     possibleConditions: string[];

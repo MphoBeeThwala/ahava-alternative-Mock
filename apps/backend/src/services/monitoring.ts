@@ -197,7 +197,7 @@ function fallbackAnalysis(biometricData: any): MonitoringResult {
       alertLevel = 'RED';
     } else if (heartRate > 100) {
       anomalies.push('Elevated resting heart rate');
-      alertLevel = alertLevel === 'RED' ? 'RED' : 'YELLOW';
+      if (alertLevel !== 'RED') alertLevel = 'YELLOW';
     }
   }
 
@@ -207,10 +207,10 @@ function fallbackAnalysis(biometricData: any): MonitoringResult {
       alertLevel = 'RED';
     } else if (biometricData.oxygenSaturation < 94) {
       anomalies.push('Low oxygen saturation');
-      alertLevel = alertLevel === 'RED' ? 'RED' : 'YELLOW';
+      if (alertLevel !== 'RED') alertLevel = 'YELLOW';
     } else if (biometricData.oxygenSaturation < 96) {
       anomalies.push('Borderline oxygen saturation - monitor closely');
-      alertLevel = alertLevel === 'RED' ? 'RED' : 'YELLOW';
+      if (alertLevel !== 'RED') alertLevel = 'YELLOW';
     }
   }
 
@@ -218,14 +218,14 @@ function fallbackAnalysis(biometricData: any): MonitoringResult {
     const { systolic, diastolic } = biometricData.bloodPressure;
     if (systolic > 140 || diastolic > 90) {
       anomalies.push('Elevated blood pressure');
-      alertLevel = alertLevel === 'RED' ? 'RED' : 'YELLOW';
+      if (alertLevel !== 'RED') alertLevel = 'YELLOW';
     }
   }
 
   if (biometricData.respiratoryRate) {
     if (biometricData.respiratoryRate > 20) {
       anomalies.push('Elevated respiratory rate');
-      alertLevel = alertLevel === 'RED' ? 'RED' : 'YELLOW';
+      if (alertLevel !== 'RED') alertLevel = 'YELLOW';
     }
   }
 
