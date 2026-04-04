@@ -28,6 +28,8 @@ WORKDIR /app
 COPY --from=builder --chown=nextjs:nodejs /app/workspace/next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/workspace/next/static ./workspace/next/static
 COPY --from=builder --chown=nextjs:nodejs /app/workspace/public ./workspace/public
+# Remove monorepo root files traced into standalone — prevents Railway pnpm auto-detection
+RUN rm -f pnpm-workspace.yaml pnpm-lock.yaml package.json
 USER nextjs
 EXPOSE 3000
 ENV NODE_ENV=production
