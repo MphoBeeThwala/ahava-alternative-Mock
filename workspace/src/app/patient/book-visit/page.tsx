@@ -245,7 +245,7 @@ export default function BookVisitPage() {
             <div style={{ maxWidth: 720, margin: '0 auto' }}>
               <p style={{ color: 'rgba(94,234,212,0.8)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>On-Demand Care</p>
               <h1 style={{ color: 'white', fontSize: 'clamp(20px,3vw,28px)', fontWeight: 900, margin: 0 }}>Book a Nurse Visit 🏠</h1>
-              <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginTop: 4 }}>A verified SANC-registered nurse will come to you, usually within 30 minutes.</p>
+              <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginTop: 4 }}>A professional nurse will come to you, usually within 30 minutes.</p>
             </div>
           </div>
 

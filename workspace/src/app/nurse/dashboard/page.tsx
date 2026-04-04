@@ -306,7 +306,7 @@ export default function NurseDashboard() {
                             <div style={{ height: 100, background: isAvailable ? 'linear-gradient(135deg,#059669,#047857)' : 'linear-gradient(135deg,#374151,#1f2937)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, transition: 'background 0.4s ease' }}>
                                 <span style={{ fontSize: 32 }}>{isAvailable ? '🟢' : '⚫'}</span>
                                 <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                                    {isAvailable ? 'SANC Verified · Active' : 'Currently Unavailable'}
+                                    {isAvailable ? 'Active · Available' : 'Currently Unavailable'}
                                 </span>
                             </div>
 

@@ -300,7 +300,7 @@ export default function AiDoctorPage() {
                   </div>
                   {triageResult.releasedAt && (
                     <p className="text-xs text-center text-slate-400">
-                      Released by doctor at {new Date(triageResult.releasedAt).toLocaleTimeString()} · HPCSA-registered physician
+                      Released by doctor at {new Date(triageResult.releasedAt).toLocaleTimeString()} · Licensed physician
                     </p>
                   )}
                   <p className="text-xs text-center text-slate-500 italic">This result was reviewed and released by a licensed doctor. It is decision support — always follow clinical advice.</p>

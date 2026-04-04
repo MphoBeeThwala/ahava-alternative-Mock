@@ -216,7 +216,7 @@ export default function VisitTrackerPage({ params }: { params: Promise<{ visitId
                     <p style={{ fontSize: 16, fontWeight: 800, color: 'var(--foreground)', margin: 0 }}>
                       {visit.nurse.firstName} {visit.nurse.lastName}
                     </p>
-                    <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 20, background: 'rgba(5,150,105,0.1)', color: '#059669' }}>🟢 SANC Verified</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 20, background: 'rgba(5,150,105,0.1)', color: '#059669' }}>🟢 Verified</span>
                   </div>
                   <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3 }}>Your assigned nurse · {price} · {duration} min</p>
                 </div>

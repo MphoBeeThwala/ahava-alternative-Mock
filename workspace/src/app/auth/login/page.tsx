@@ -86,8 +86,8 @@ export default function LoginPage() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                         {[
                             { icon: '🔒', label: 'POPIA Compliant', sub: 'Your data is encrypted & protected' },
-                            { icon: '✅', label: 'SANC Verified Nurses', sub: 'Only registered professionals' },
-                            { icon: '⚕️', label: 'HPCSA Registered Doctors', sub: 'Licensed medical oversight' },
+                            { icon: '✅', label: 'Professional Nurses', sub: 'Accreditation in progress' },
+                            { icon: '⚕️', label: 'Doctor Oversight', sub: 'Licensed medical oversight' },
                         ].map(({ icon, label, sub }) => (
                             <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12, padding: '10px 14px', textAlign: 'left' }}>
                                 <span style={{ fontSize: 20 }}>{icon}</span>

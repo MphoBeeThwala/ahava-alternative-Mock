@@ -3,22 +3,22 @@ import Link from 'next/link';
 export default function Home() {
   const features = [
     { icon: '🧠', title: 'AI Health Monitoring', desc: 'Real-time biometric tracking with intelligent baseline analysis and early-warning alerts before things get serious.', accent: '#0d9488' },
-    { icon: '🏥', title: 'On-Demand Nursing', desc: 'Connect with SANC-verified nurses in your area within minutes for professional home visits and care.', accent: '#059669' },
+    { icon: '🏥', title: 'On-Demand Nursing', desc: 'Connect with professional nurses in your area within minutes for quality home visits and care.', accent: '#059669' },
     { icon: '🔒', title: 'POPIA Compliant', desc: 'Your medical data is encrypted end-to-end and stored securely in full compliance with South African law.', accent: '#7c3aed' },
-    { icon: '⚕️', title: 'Doctor Oversight', desc: 'Every AI diagnostic report is reviewed and validated by a licensed HPCSA-registered doctor before release.', accent: '#b45309' },
+    { icon: '⚕️', title: 'Doctor Oversight', desc: 'Every AI diagnostic report is reviewed and validated by a licensed doctor before it is released to you.', accent: '#b45309' },
   ];
 
   const stats = [
     { icon: '❤️', value: 'Patient-Centric', label: 'Care at every step' },
-    { icon: '✅', value: 'Verified Nurses', label: 'SANC registered' },
-    { icon: '⚕️', value: 'Verified Doctors', label: 'HPCSA registered' },
+    { icon: '✅', value: 'Professional Nurses', label: 'Accreditation in progress' },
+    { icon: '⚕️', value: 'Medical Oversight', label: 'Doctor-reviewed results' },
     { icon: '⚡', value: '< 8 min', label: 'Avg Response Time' },
   ];
 
   const steps = [
     { num: '01', icon: '📝', title: 'Create Your Profile', desc: 'Sign up in under 2 minutes. Tell us your role — patient, nurse, or doctor — and we tailor your experience.' },
     { num: '02', icon: '📡', title: 'Connect & Monitor', desc: 'Link your wearable or manually log vitals. Our AI builds your personal health baseline immediately.' },
-    { num: '03', icon: '✅', title: 'Get Care Instantly', desc: 'Request a nurse visit or symptom analysis. A verified professional responds in minutes, reviewed by a doctor.' },
+    { num: '03', icon: '✅', title: 'Get Care Instantly', desc: 'Request a nurse visit or symptom analysis. A professional responds in minutes, with doctor-reviewed triage results.' },
   ];
 
   return (
@@ -60,7 +60,7 @@ export default function Home() {
           <div>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: 'rgba(13,148,136,0.15)', border: '1px solid rgba(13,148,136,0.3)', borderRadius: 30, padding: '6px 16px', marginBottom: 28 }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#0d9488', display: 'inline-block' }} />
-              <span style={{ color: '#5eead4', fontSize: 13, fontWeight: 600 }}>Now serving South Africa · HPCSA Registered</span>
+              <span style={{ color: '#5eead4', fontSize: 13, fontWeight: 600 }}>Now serving South Africa · Accreditation in progress</span>
             </div>
 
             <h1 style={{ fontSize: 'clamp(36px,4vw,58px)', fontWeight: 900, color: 'white', lineHeight: 1.1, marginBottom: 20 }}>
@@ -86,7 +86,7 @@ export default function Home() {
             </div>
 
             <div style={{ marginTop: 32, display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-              {[['🔒', 'POPIA Compliant'], ['✅', 'SANC Verified Nurses'], ['⚡', '8-min avg response']].map(([icon, label]) => (
+              {[['🔒', 'POPIA Compliant'], ['✅', 'Professional Nurses'], ['⚡', '8-min avg response']].map(([icon, label]) => (
                 <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'rgba(255,255,255,0.45)', fontSize: 13 }}>
                   <span>{icon}</span><span>{label}</span>
                 </div>
@@ -237,7 +237,7 @@ export default function Home() {
             <span style={{ color: 'rgba(255,255,255,0.7)', fontWeight: 600, fontSize: 14 }}>Ahava Healthcare</span>
           </div>
           <div style={{ color: 'rgba(255,255,255,0.35)', fontSize: 13 }}>
-            © {new Date().getFullYear()} Ahava Healthcare · POPIA Compliant · HPCSA Registered
+            © {new Date().getFullYear()} Ahava Healthcare · POPIA Compliant
           </div>
           <div style={{ display: 'flex', gap: 16 }}>
             {[['🔒', 'Privacy'], ['📋', 'Terms'], ['📞', 'Contact']].map(([icon, label]) => (

@@ -131,12 +131,12 @@ export default function DashboardLayout({
           )}
           {user.role === "NURSE" && (
             <div className="mt-4 px-3 py-2 rounded-xl text-xs" style={{ background: 'rgba(5,150,105,0.08)', color: '#059669', fontWeight: 600 }}>
-              🟢 SANC Verified
+              🟢 Verified Nurse
             </div>
           )}
           {user.role === "DOCTOR" && (
             <div className="mt-4 px-3 py-2 rounded-xl text-xs" style={{ background: 'rgba(37,99,235,0.08)', color: '#2563eb', fontWeight: 600 }}>
-              🏥 HPCSA Registered
+              🏥 Licensed Doctor
             </div>
           )}
           {/* Profile — all roles */}
