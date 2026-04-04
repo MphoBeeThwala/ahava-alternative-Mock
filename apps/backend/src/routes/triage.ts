@@ -27,19 +27,19 @@ router.post('/', rateLimiter, authMiddleware, requireConsent('AI_TRIAGE'), async
             const [readings, alerts, baseline, userInfo] = await Promise.all([
                 prisma.biometricReading.findMany({
                     where: { userId: patientId },
-                    orderBy: { recordedAt: 'desc' },
+                    orderBy: { createdAt: 'desc' },
                     take: 5,
                     select: {
-                        heartRate: true, systolicBp: true, diastolicBp: true,
+                        heartRate: true, bloodPressureSystolic: true, bloodPressureDiastolic: true,
                         oxygenSaturation: true, respiratoryRate: true, temperature: true,
-                        hrv: true, recordedAt: true,
+                        hrvRmssd: true, createdAt: true,
                     },
                 }),
-                (prisma as any).healthAlert.findMany({
-                    where: { userId: patientId, resolvedAt: null },
+                prisma.healthAlert.findMany({
+                    where: { userId: patientId, resolved: false },
                     orderBy: { createdAt: 'desc' },
                     take: 3,
-                    select: { alertType: true, message: true, severity: true, createdAt: true },
+                    select: { alertLevel: true, title: true, message: true },
                 }),
                 (prisma as any).userBaseline.findUnique({
                     where: { userId: patientId },
@@ -63,11 +63,11 @@ router.post('/', rateLimiter, authMiddleware, requireConsent('AI_TRIAGE'), async
                 const parts: string[] = [];
                 if (latest.heartRate != null) parts.push(`HR ${latest.heartRate} bpm`);
                 if (latest.oxygenSaturation != null) parts.push(`SpO2 ${latest.oxygenSaturation}%`);
-                if (latest.systolicBp != null && latest.diastolicBp != null) parts.push(`BP ${latest.systolicBp}/${latest.diastolicBp} mmHg`);
+                if (latest.bloodPressureSystolic != null && latest.bloodPressureDiastolic != null) parts.push(`BP ${latest.bloodPressureSystolic}/${latest.bloodPressureDiastolic} mmHg`);
                 if (latest.respiratoryRate != null) parts.push(`RR ${latest.respiratoryRate} breaths/min`);
                 if (latest.temperature != null) parts.push(`Temp ${latest.temperature}°C`);
-                if (latest.hrv != null) parts.push(`HRV ${latest.hrv} ms`);
-                if (parts.length > 0) lines.push(`Latest vitals (${new Date(latest.recordedAt).toLocaleDateString('en-ZA')}): ${parts.join(', ')}`);
+                if (latest.hrvRmssd != null) parts.push(`HRV ${latest.hrvRmssd} ms`);
+                if (parts.length > 0) lines.push(`Latest vitals (${new Date(latest.createdAt).toLocaleDateString('en-ZA')}): ${parts.join(', ')}`);
             }
 
             if (baseline) {
@@ -86,7 +86,7 @@ router.post('/', rateLimiter, authMiddleware, requireConsent('AI_TRIAGE'), async
             }
 
             if (alerts && alerts.length > 0) {
-                const alertStr = alerts.map((a: any) => `[${a.severity}] ${a.alertType}: ${a.message}`).join(' | ');
+                const alertStr = alerts.map((a) => `[${a.alertLevel}] ${a.title}: ${a.message}`).join(' | ');
                 lines.push(`Active health alerts: ${alertStr}`);
             }
 
