@@ -402,103 +402,156 @@ router.get('/early-warning', authMiddleware, async (req: AuthenticatedRequest, r
       temperature_trend: ['normal', 'elevated_single_day', 'elevated_over_3_days'].includes(r.temperatureTrend) ? r.temperatureTrend : 'normal',
     };
 
-    // Try ML service first, with graceful fallback to database-only analysis
+    // Try ML service — fully optional, any failure falls back to DB-only analysis
     let mlData: any;
-    const mlServiceAvailable = process.env.ML_SERVICE_URL && !process.env.ML_SERVICE_URL.includes('localhost');
-    
+    const ML_URL = (process.env.ML_SERVICE_URL ?? '').replace(/\/$/, '');
+    const mlServiceAvailable = !!ML_URL && !ML_URL.includes('localhost');
+
     if (mlServiceAvailable) {
       try {
+        // 1. Try the cached summary first
         const summaryRes = await axios.get(
-          `${ML_SERVICE_URL}/early-warning/summary/${encodeURIComponent(userId)}`,
+          `${ML_URL}/early-warning/summary/${encodeURIComponent(userId)}`,
           { timeout: 8000 }
         );
         mlData = summaryRes.data;
       } catch (summaryErr: any) {
-        if (summaryErr.response?.status !== 404) throw summaryErr;
-        // ML has no history: backfill from DB (last 20 readings, send oldest-first so baseline works)
-        const recentReadings = await prisma.biometricReading.findMany({
-          where: { userId },
-          orderBy: { createdAt: 'desc' },
-          take: 20,
-          select: {
-            createdAt: true,
-            heartRate: true,
-            heartRateResting: true,
-            hrvRmssd: true,
-            oxygenSaturation: true,
-            skinTempOffset: true,
-            respiratoryRate: true,
-            stepCount: true,
-            activeCalories: true,
-            sleepDurationHours: true,
-            ecgRhythm: true,
-            temperatureTrend: true,
-          },
-        });
-        const inOrder = [...recentReadings].reverse();
-        for (const row of inOrder) {
-          const r = row as any;
-          const ts = r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString();
-          const clamp = (v: number | null | undefined, min: number, max: number, def: number) =>
-            v != null ? Math.min(max, Math.max(min, Number(v))) : def;
+        const status = summaryErr.response?.status;
+        if (status !== 404) {
+          // ML service is reachable but erroring — log and fall through to DB analysis
+          console.warn(`[early-warning] ML summary failed (${status ?? 'network'}): ${summaryErr.message}`);
+        } else {
+          // 404 = no history yet — backfill from DB then run analysis
           try {
-            await axios.post(
-              `${ML_SERVICE_URL}/ingest?user_id=${encodeURIComponent(userId)}`,
-              {
-                timestamp: ts,
-                heart_rate_resting: clamp(r.heartRateResting ?? r.heartRate, 30, 200, 72),
-                hrv_rmssd: clamp(r.hrvRmssd, 0, 300, 35),
-                spo2: clamp(r.oxygenSaturation, 50, 100, 98),
-                skin_temp_offset: clamp(r.skinTempOffset, -5, 5, 0),
-                respiratory_rate: clamp(r.respiratoryRate, 4, 60, 16),
-                step_count: Math.max(0, Number(r.stepCount) || 0),
-                active_calories: Math.max(0, Number(r.activeCalories) || 0),
-                sleep_duration_hours: Math.min(24, Math.max(0, Number(r.sleepDurationHours) || 0)),
-                ecg_rhythm: ['regular', 'irregular', 'unknown'].includes(r.ecgRhythm) ? r.ecgRhythm : 'unknown',
-                temperature_trend: ['normal', 'elevated_single_day', 'elevated_over_3_days'].includes(r.temperatureTrend) ? r.temperatureTrend : 'normal',
+            const recentReadings = await prisma.biometricReading.findMany({
+              where: { userId },
+              orderBy: { createdAt: 'desc' },
+              take: 20,
+              select: {
+                createdAt: true, heartRate: true, heartRateResting: true, hrvRmssd: true,
+                oxygenSaturation: true, skinTempOffset: true, respiratoryRate: true,
+                stepCount: true, activeCalories: true, sleepDurationHours: true,
+                ecgRhythm: true, temperatureTrend: true,
               },
-              { timeout: 3000 }
+            });
+            const clampR = (v: number | null | undefined, min: number, max: number, def: number) =>
+              v != null ? Math.min(max, Math.max(min, Number(v))) : def;
+            for (const row of [...recentReadings].reverse()) {
+              const rb = row as any;
+              await axios.post(
+                `${ML_URL}/ingest?user_id=${encodeURIComponent(userId)}`,
+                {
+                  timestamp: rb.createdAt ? new Date(rb.createdAt).toISOString() : new Date().toISOString(),
+                  heart_rate_resting: clampR(rb.heartRateResting ?? rb.heartRate, 30, 200, 72),
+                  hrv_rmssd: clampR(rb.hrvRmssd, 0, 300, 35),
+                  spo2: clampR(rb.oxygenSaturation, 50, 100, 98),
+                  skin_temp_offset: clampR(rb.skinTempOffset, -5, 5, 0),
+                  respiratory_rate: clampR(rb.respiratoryRate, 4, 60, 16),
+                  step_count: Math.max(0, Number(rb.stepCount) || 0),
+                  active_calories: Math.max(0, Number(rb.activeCalories) || 0),
+                  sleep_duration_hours: Math.min(24, Math.max(0, Number(rb.sleepDurationHours) || 0)),
+                  ecg_rhythm: ['regular', 'irregular', 'unknown'].includes(rb.ecgRhythm) ? rb.ecgRhythm : 'unknown',
+                  temperature_trend: ['normal', 'elevated_single_day', 'elevated_over_3_days'].includes(rb.temperatureTrend) ? rb.temperatureTrend : 'normal',
+                },
+                { timeout: 3000 }
+              ).catch(() => { /* ignore individual ingest failures */ });
+            }
+            const analyzeRes = await axios.post(
+              `${ML_URL}/early-warning/analyze?user_id=${encodeURIComponent(userId)}`,
+              { biometrics, context },
+              { timeout: 10000 }
             );
-          } catch (_) {
-            // ignore single ingest failure
+            mlData = analyzeRes.data;
+          } catch (backfillErr: any) {
+            console.warn(`[early-warning] ML backfill/analyze failed: ${backfillErr.message}`);
+            // mlData stays undefined → DB fallback below
           }
         }
-        const analyzeRes = await axios.post(
-          `${ML_SERVICE_URL}/early-warning/analyze?user_id=${encodeURIComponent(userId)}`,
-          { biometrics, context },
-          { timeout: 10000 }
-        );
-        mlData = analyzeRes.data;
       }
     }
     
-    // Fallback to database-only analysis if ML service unavailable
+    // Fallback: rule-based analysis directly from DB readings (works without ML service)
     if (!mlData) {
       const allReadings = await prisma.biometricReading.findMany({
         where: { userId },
         orderBy: { createdAt: 'desc' },
         take: 30,
       });
-      
-      mlData = {
-        riskLevel: allReadings.length === 0 ? 'unknown' : 'low',
-        recommendations: allReadings.length === 0 
-          ? ['Please add your first biometric reading to get personalized recommendations']
-          : ['Maintain current health habits', 'Continue regular monitoring of vital signs'],
-        trendAnalysis: {
-          heartRate: 'stable',
-          oxygenSaturation: 'stable',
-          sleepQuality: 'unknown'
-        },
-        baselineMetrics: biometrics,
-        fusion: {
-          alert_triggered: false,
-          alert_message: undefined,
-          trajectory_risk_2y_pct: undefined,
-        },
-        alert_level: 'GREEN',
-        anomalies: [],
-      };
+
+      const anomalies: string[] = [];
+      const recommendations: string[] = [];
+      let alertLevel = 'GREEN';
+
+      if (allReadings.length > 0) {
+        const latest = allReadings[0] as any;
+        const hr    = Number(latest.heartRateResting ?? latest.heartRate ?? 0);
+        const spo2  = Number(latest.oxygenSaturation ?? 98);
+        const hrv   = Number(latest.hrvRmssd ?? 35);
+        const rr    = Number(latest.respiratoryRate ?? 16);
+        const temp  = Number(latest.temperature ?? 36.5);
+        const sleep = Number(latest.sleepDurationHours ?? 7);
+
+        // Heart rate flags
+        if (hr > 100) { anomalies.push('Resting tachycardia (HR > 100 bpm)'); alertLevel = 'YELLOW'; recommendations.push('Resting heart rate is elevated — consider rest and re-check. If persistent, consult a clinician.'); }
+        else if (hr < 45) { anomalies.push('Bradycardia (HR < 45 bpm)'); alertLevel = 'YELLOW'; recommendations.push('Resting heart rate is very low — ensure no medication side effect. Seek medical review if symptomatic.'); }
+
+        // SpO2 flags
+        if (spo2 < 90) { anomalies.push(`Critical SpO2 (${spo2}%)`); alertLevel = 'RED'; recommendations.push('Oxygen saturation critically low — seek immediate medical attention.'); }
+        else if (spo2 < 94) { anomalies.push(`Low SpO2 (${spo2}%)`); alertLevel = 'YELLOW'; recommendations.push('Blood oxygen below normal range — avoid exertion, ensure adequate ventilation, consult a clinician.'); }
+
+        // HRV flags
+        if (hrv < 20) { anomalies.push('Very low HRV (autonomic stress)'); if (alertLevel === 'GREEN') alertLevel = 'YELLOW'; recommendations.push('HRV is very low, indicating high autonomic stress or fatigue. Prioritise rest and recovery.'); }
+
+        // Respiratory rate
+        if (rr > 24) { anomalies.push(`Elevated respiratory rate (${rr}/min)`); alertLevel = 'RED'; recommendations.push('Respiratory rate is elevated — seek medical review, particularly to exclude pneumonia or pulmonary embolism.'); }
+        else if (rr > 20) { anomalies.push(`Mildly elevated respiratory rate (${rr}/min)`); if (alertLevel === 'GREEN') alertLevel = 'YELLOW'; recommendations.push('Respiratory rate slightly elevated — monitor closely and avoid strenuous activity.'); }
+
+        // Temperature
+        if (temp > 38.5) { anomalies.push(`Fever (${temp.toFixed(1)}°C)`); if (alertLevel === 'GREEN') alertLevel = 'YELLOW'; recommendations.push('Temperature indicates fever — stay hydrated, rest, and consult a clinician if above 39°C or persistent beyond 48h.'); }
+
+        // Sleep
+        if (sleep < 5 && sleep > 0) { recommendations.push('Sleep duration below recommended — chronic sleep deprivation increases cardiovascular and metabolic risk.'); }
+
+        // Trend analysis (compare most recent 5 readings if available)
+        const hrValues = allReadings.slice(0, 5).map((row: any) => Number(row.heartRateResting ?? row.heartRate ?? 0)).filter(v => v > 0);
+        const hrTrend = hrValues.length >= 3
+          ? (hrValues[0] - hrValues[hrValues.length - 1] > 8 ? 'rising' : hrValues[hrValues.length - 1] - hrValues[0] > 8 ? 'falling' : 'stable')
+          : 'stable';
+
+        if (anomalies.length === 0) recommendations.push('All key vitals within normal range. Maintain your current habits — regular monitoring, balanced diet, and 150 min/week of moderate activity.');
+        // SA-specific note
+        recommendations.push('If you have any respiratory symptoms, consider TB screening — South Africa has a high TB burden.');
+
+        mlData = {
+          riskLevel: alertLevel === 'RED' ? 'high' : alertLevel === 'YELLOW' ? 'moderate' : 'low',
+          alert_level: alertLevel,
+          anomalies,
+          recommendations,
+          trendAnalysis: {
+            heartRate: hrTrend,
+            oxygenSaturation: spo2 >= 96 ? 'normal' : spo2 >= 94 ? 'borderline' : 'low',
+            sleepQuality: sleep >= 7 ? 'adequate' : sleep >= 5 ? 'below optimal' : 'poor',
+          },
+          baselineMetrics: biometrics,
+          fusion: {
+            alert_triggered: alertLevel !== 'GREEN',
+            alert_message: alertLevel !== 'GREEN' ? anomalies[0] : undefined,
+            trajectory_risk_2y_pct: undefined,
+          },
+          _source: 'db_rules', // indicates ML service was unavailable; this is rule-based
+        };
+      } else {
+        mlData = {
+          riskLevel: 'unknown',
+          alert_level: 'GREEN',
+          anomalies: [],
+          recommendations: ['Connect a wearable or enter your first biometric reading to receive personalised Early Warning analysis.'],
+          trendAnalysis: { heartRate: 'no data', oxygenSaturation: 'no data', sleepQuality: 'no data' },
+          baselineMetrics: biometrics,
+          fusion: { alert_triggered: false },
+          _source: 'db_rules',
+        };
+      }
     }
 
     res.json({
