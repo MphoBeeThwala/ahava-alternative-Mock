@@ -197,7 +197,7 @@ function fallbackAnalysis(biometricData: any): MonitoringResult {
       alertLevel = 'RED';
     } else if (heartRate > 100) {
       anomalies.push('Elevated resting heart rate');
-      if (alertLevel !== 'RED') alertLevel = 'YELLOW';
+      alertLevel = 'YELLOW';
     }
   }
 
