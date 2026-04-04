@@ -13,6 +13,11 @@ RUN pnpm install --frozen-lockfile
 
 # Build Next.js standalone
 FROM base AS builder
+# BACKEND_URL must be resolved at build time — Next.js bakes rewrites into
+# routes-manifest.json during `next build`, not at container startup.
+# Default points to Railway private networking (http, no TLS, internal only).
+ARG BACKEND_URL=http://backend.railway.internal:4000
+ENV BACKEND_URL=$BACKEND_URL
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/workspace/node_modules ./workspace/node_modules
 COPY . .
