@@ -9,16 +9,73 @@ import { verifySancRegistration } from '../services/sancVerification';
 import { seedBaselineForUser } from '../services/baselineSeed';
 import { addEmailJob } from '../services/queue';
 import prisma from '../lib/prisma';
+import { getRedis } from '../services/redis';
 
 const router: Router = Router();
 
 // Allow any TLD including .test for mock/load-test users (IANA list excludes .test)
 const emailSchema = Joi.string().email({ tlds: { allow: false } }).required();
 
+// Password must be 8+ chars with at least one uppercase, one digit, one special character
+const passwordComplexitySchema = Joi.string()
+  .min(8)
+  .pattern(/[A-Z]/, 'uppercase letter')
+  .pattern(/[0-9]/, 'number')
+  .pattern(/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/, 'special character')
+  .required()
+  .messages({
+    'string.pattern.name': 'Password must contain at least one {#name}',
+    'string.min': 'Password must be at least 8 characters',
+  });
+
+// ---------------------------------------------------------------------------
+// Account lockout helpers (Redis-backed, graceful fallback if Redis is down)
+// ---------------------------------------------------------------------------
+const LOCKOUT_MAX_ATTEMPTS = parseInt(process.env.AUTH_LOCKOUT_MAX_ATTEMPTS ?? '5', 10);
+const LOCKOUT_TTL_SECONDS  = parseInt(process.env.AUTH_LOCKOUT_TTL_SECONDS  ?? '900', 10); // 15 min
+
+async function isAccountLocked(email: string): Promise<{ locked: boolean; remainingSeconds?: number }> {
+  try {
+    const redis = getRedis();
+    const ttl = await redis.ttl(`auth:locked:${email}`);
+    if (ttl > 0) return { locked: true, remainingSeconds: ttl };
+  } catch {
+    // Redis unavailable — fail open (do not block healthcare login)
+    console.warn('[auth] Redis unavailable for lockout check, failing open');
+  }
+  return { locked: false };
+}
+
+async function recordFailedAttempt(email: string): Promise<void> {
+  try {
+    const redis = getRedis();
+    const key = `auth:failures:${email}`;
+    const attempts = await redis.incr(key);
+    // Reset window on first attempt
+    if (attempts === 1) await redis.expire(key, LOCKOUT_TTL_SECONDS);
+    if (attempts >= LOCKOUT_MAX_ATTEMPTS) {
+      await redis.set(`auth:locked:${email}`, '1', 'EX', LOCKOUT_TTL_SECONDS);
+      await redis.del(key);
+      console.warn(`[auth] Account locked after ${LOCKOUT_MAX_ATTEMPTS} failed attempts: ${email}`);
+    }
+  } catch {
+    console.warn('[auth] Redis unavailable for failure tracking');
+  }
+}
+
+async function clearFailedAttempts(email: string): Promise<void> {
+  try {
+    const redis = getRedis();
+    await redis.del(`auth:failures:${email}`);
+  } catch {
+    // Non-fatal
+  }
+}
+
 // Validation schemas
 const registerSchema = Joi.object({
   email: emailSchema,
-  password: Joi.string().min(8).required(),
+  password: passwordComplexitySchema,
   firstName: Joi.string().min(2).required(),
   lastName: Joi.string().min(2).required(),
   role: Joi.string().valid('PATIENT', 'NURSE', 'DOCTOR', 'ADMIN').required(),
@@ -175,24 +232,39 @@ router.post('/login', authRateLimiter, async (req, res, next) => {
 
     const { email, password } = value;
 
+    // Check account lockout before doing any DB work
+    const lockStatus = await isAccountLocked(email);
+    if (lockStatus.locked) {
+      const minutes = Math.ceil((lockStatus.remainingSeconds ?? LOCKOUT_TTL_SECONDS) / 60);
+      return res.status(429).json({
+        error: `Account temporarily locked due to too many failed login attempts. Try again in ${minutes} minute${minutes !== 1 ? 's' : ''}.`,
+      });
+    }
+
     // Find user
     const user = await prisma.user.findUnique({
       where: { email },
     });
 
     if (!user || !user.passwordHash) {
+      // Still record attempt to prevent email enumeration timing attacks
+      await recordFailedAttempt(email);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     // Verify password
     const isValidPassword = await bcrypt.compare(password, user.passwordHash);
     if (!isValidPassword) {
+      await recordFailedAttempt(email);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     if (!user.isActive) {
       return res.status(401).json({ error: 'Account is deactivated' });
     }
+
+    // Successful login — clear any failure counter
+    await clearFailedAttempts(email);
 
     // Generate tokens
     const { accessToken, refreshToken } = generateTokens(user.id, user.role);
@@ -435,7 +507,7 @@ router.post('/reset-password', authRateLimiter, async (req, res, next) => {
   try {
     const { error, value } = Joi.object({
       token: Joi.string().required(),
-      password: Joi.string().min(8).required(),
+      password: passwordComplexitySchema,
     }).validate(req.body);
     if (error) return res.status(400).json({ error: error.details[0].message });
 
