@@ -1,3 +1,7 @@
+# Sensitive business documents — stored locally only, never commit
+INVESTOR_DEMO_GUIDE.md
+docs/Ahava_on_88_INVESTMENT_BUSINESS_PLAN.md
+
 # Dependencies
 node_modules/
 .pnp
