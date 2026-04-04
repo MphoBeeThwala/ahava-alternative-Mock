@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "../contexts/AuthContext";
+import { authApi } from "../lib/api";
 
 /**
  * Dashboard layout: sidebar + main content.
@@ -15,6 +17,25 @@ export default function DashboardLayout({
 }) {
   const { user, logout, isAuthenticated } = useAuth();
   const pathname = usePathname();
+  const [verifyBannerDismissed, setVerifyBannerDismissed] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendSent, setResendSent] = useState(false);
+
+  const handleResendVerification = async () => {
+    if (!user?.email) return;
+    setResendLoading(true);
+    try {
+      await authApi.resendVerification(user.email);
+      setResendSent(true);
+    } catch {
+      // silently ignore — backend always returns success to avoid enumeration
+      setResendSent(true);
+    } finally {
+      setResendLoading(false);
+    }
+  };
+
+  const showVerifyBanner = isAuthenticated && user && !(user as { isVerified?: boolean }).isVerified && !verifyBannerDismissed;
 
   const getDashboardPath = () => {
     if (!user) return "/";
@@ -156,6 +177,34 @@ export default function DashboardLayout({
 
       {/* Main content */}
       <main className="flex-1 overflow-auto" id="main-content" aria-label="Main content">
+        {showVerifyBanner && (
+          <div role="alert" style={{ background: '#fffbeb', borderBottom: '1px solid #fde68a', padding: '10px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', fontSize: 13 }}>
+            <span style={{ color: '#92400e', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>📧</span>
+              <span><strong>Verify your email</strong> — check your inbox for a verification link to activate all features.</span>
+            </span>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+              {resendSent ? (
+                <span style={{ color: '#059669', fontSize: 12, fontWeight: 600 }}>✓ Email sent!</span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleResendVerification}
+                  disabled={resendLoading}
+                  style={{ background: '#f59e0b', border: 'none', color: 'white', borderRadius: 7, padding: '5px 12px', fontSize: 12, fontWeight: 700, cursor: resendLoading ? 'not-allowed' : 'pointer', opacity: resendLoading ? 0.7 : 1 }}
+                >
+                  {resendLoading ? 'Sending…' : 'Resend email'}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setVerifyBannerDismissed(true)}
+                aria-label="Dismiss"
+                style={{ background: 'transparent', border: 'none', color: '#a16207', fontSize: 16, cursor: 'pointer', lineHeight: 1, padding: '0 4px' }}
+              >×</button>
+            </div>
+          </div>
+        )}
         {children}
       </main>
     </div>

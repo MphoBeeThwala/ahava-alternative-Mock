@@ -16,6 +16,7 @@ const genAI = GEMINI_API_KEY ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
 export interface TriageRequest {
     symptoms: string;
     imageBase64?: string; // Optional image of the condition
+    patientContext?: string; // Patient vitals, baselines, active alerts (injected by triage route)
 }
 
 export interface TriageResult {
@@ -25,22 +26,41 @@ export interface TriageResult {
     reasoning: string;
 }
 
-function buildTriagePrompt(symptoms: string, medicalContext?: string | null): string {
-    const basePrompt = `Act as a strictly objective medical triage assistant. 
-Analyze the following symptoms and (optional) image.
+const SA_EPIDEMIOLOGICAL_CONTEXT = `
+SA/AFRICAN EPIDEMIOLOGICAL NOTE (South Africa disease burden — factor into differential diagnosis):
+- TB (tuberculosis) is endemic; South Africa has one of the highest TB burdens globally. Consider TB in any respiratory or constitutional symptom presentation.
+- HIV/AIDS prevalence is ~13% of the adult population; immunocompromised states can mask or alter typical presentations.
+- Non-communicable diseases (hypertension, type 2 diabetes, cardiovascular disease) are the leading cause of adult mortality in SA.
+- Malnutrition, particularly in children and elderly, is common in under-resourced settings.
+- Rheumatic heart disease remains prevalent due to high rates of untreated streptococcal pharyngitis.
+- Community-acquired pneumonia in SA is frequently caused by Streptococcus pneumoniae, TB, or Pneumocystis jirovecii (in HIV+ patients).
+- Malaria is present in Limpopo and KwaZulu-Natal low-lying areas; ask about travel history.
+- SATS (South African Triage Scale) levels: 1=Resuscitation (<5 min), 2=Emergency (<10 min), 3=Urgent (<30 min), 4=Less-Urgent (<1h), 5=Non-Urgent (<4h).
+`;
+
+function buildTriagePrompt(symptoms: string, medicalContext?: string | null, patientContext?: string | null): string {
+    const basePrompt = `Act as a strictly objective medical triage assistant trained on the South African Triage Scale (SATS).
+Analyze the following symptoms and (optional) image in the context of a South African patient.
 
 SYMPTOMS: "${symptoms}"`;
+
+    const patientSection = patientContext
+        ? `
+
+PATIENT VITALS & HEALTH CONTEXT (from wearable/clinic measurements — use to inform severity and differential):
+${patientContext}
+`
+        : '';
 
     const contextSection = medicalContext
         ? `
 
-REFERENCE (peer-reviewed medical context from StatPearls - use to inform your assessment, do not copy verbatim):
+CLINICAL REFERENCE (peer-reviewed context from StatPearls/NCBI — use to inform assessment, do not copy verbatim):
 ${medicalContext}
-
 `
-        : "\n";
+        : '';
 
-    return `${basePrompt}${contextSection}
+    return `${basePrompt}${patientSection}${contextSection}${SA_EPIDEMIOLOGICAL_CONTEXT}
 Output ONLY valid JSON with the following structure:`;
 }
 
@@ -57,7 +77,8 @@ DISCLAIMER: This is for informational purposes only.`;
 // Claude via official Anthropic API
 async function analyzeWithClaude(
     request: TriageRequest,
-    medicalContext?: string | null
+    medicalContext?: string | null,
+    patientContext?: string | null
 ): Promise<TriageResult> {
     if (!ANTHROPIC_API_KEY) {
         throw new Error("ANTHROPIC_API_KEY is not configured");
@@ -65,7 +86,7 @@ async function analyzeWithClaude(
 
     console.log("[aiTriage] Using Claude via Anthropic API...");
 
-    const prompt = buildTriagePrompt(request.symptoms, medicalContext) + TRIAGE_PROMPT_END;
+    const prompt = buildTriagePrompt(request.symptoms, medicalContext, patientContext) + TRIAGE_PROMPT_END;
 
     // Build message content
     const content: any[] = [{ type: "text", text: prompt }];
@@ -123,7 +144,8 @@ async function analyzeWithClaude(
 // Gemini
 async function analyzeWithGemini(
     request: TriageRequest,
-    medicalContext?: string | null
+    medicalContext?: string | null,
+    patientContext?: string | null
 ): Promise<TriageResult> {
     if (!genAI) {
         throw new Error("GEMINI_API_KEY is not configured");
@@ -132,7 +154,7 @@ async function analyzeWithGemini(
     console.log("[aiTriage] Using Gemini...");
 
     const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-    const prompt = buildTriagePrompt(request.symptoms, medicalContext) + TRIAGE_PROMPT_END;
+    const prompt = buildTriagePrompt(request.symptoms, medicalContext, patientContext) + TRIAGE_PROMPT_END;
 
     const parts: any[] = [prompt];
 
@@ -171,10 +193,12 @@ export async function analyzeSymptoms(request: TriageRequest): Promise<TriageRes
         console.warn("[aiTriage] StatPearls context fetch failed, proceeding without:", err);
     }
 
+    const patientCtx = request.patientContext ?? null;
+
     // Try Claude first (primary)
     if (ANTHROPIC_API_KEY) {
         try {
-            return await analyzeWithClaude(request, medicalContext);
+            return await analyzeWithClaude(request, medicalContext, patientCtx);
         } catch (error: any) {
             console.warn(`[aiTriage] Claude failed: ${error.message}`);
 
@@ -190,7 +214,7 @@ export async function analyzeSymptoms(request: TriageRequest): Promise<TriageRes
     // Fallback to Gemini
     if (genAI) {
         try {
-            return await analyzeWithGemini(request, medicalContext);
+            return await analyzeWithGemini(request, medicalContext, patientCtx);
         } catch (error: any) {
             console.error(`[aiTriage] Gemini also failed: ${error.message}`);
             throw new Error("Both AI providers failed. Please try again later.");
