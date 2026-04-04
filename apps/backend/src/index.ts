@@ -57,15 +57,27 @@ app.use(helmet({
 }));
 
 // CORS: allow frontend origin so browser permits cross-origin API calls (including preflight)
-const corsOrigins = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean)
-  : process.env.NODE_ENV === 'production'
-    ? [
-        'https://frontend-production-326c.up.railway.app',
-        'https://ahava-healthcare-admin.railway.app',
-        'https://ahava-healthcare-doctor.railway.app',
-      ]
-    : ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:3003', 'http://127.0.0.1:3003'];
+// Priority: CORS_ORIGIN env var > auto-build from FRONTEND_URL + defaults
+const buildCorsOrigins = (): string[] => {
+  if (process.env.CORS_ORIGIN) {
+    return process.env.CORS_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean);
+  }
+  if (process.env.NODE_ENV === 'production') {
+    const defaults = [
+      'https://frontend-production-326c.up.railway.app',
+      'https://ahava-healthcare-admin.railway.app',
+      'https://ahava-healthcare-doctor.railway.app',
+    ];
+    // Auto-include custom domain set via FRONTEND_URL (e.g. https://app.yourdomain.com)
+    if (process.env.FRONTEND_URL) {
+      const custom = process.env.FRONTEND_URL.trim().replace(/\/$/, '');
+      if (custom && !defaults.includes(custom)) defaults.push(custom);
+    }
+    return defaults;
+  }
+  return ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:3003', 'http://127.0.0.1:3003'];
+};
+const corsOrigins = buildCorsOrigins();
 app.use(cors({
   origin: corsOrigins,
   credentials: true,
