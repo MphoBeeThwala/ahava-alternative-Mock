@@ -95,11 +95,45 @@ router.post('/register', authRateLimiter, async (req, res, next) => {
         where: { id: user.id },
         data: { emailVerificationToken: verificationToken },
       });
-      const verifyUrl = `${process.env.FRONTEND_URL ?? ''}/auth/verify-email?token=${verificationToken}`;
+      const frontendBase = (process.env.FRONTEND_URL ?? 'https://app.ahavaon88.co.za').replace(/\/$/, '');
+      const verifyUrl = `${frontendBase}/auth/verify-email?token=${verificationToken}`;
       addEmailJob({
         to: email,
         subject: 'Verify your Ahava Healthcare email',
-        html: `<p>Hi ${firstName},</p><p>Welcome to Ahava Healthcare! Please verify your email address:</p><p><a href="${verifyUrl}" style="background:#0d9488;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">Verify Email</a></p><p>Or copy this link: ${verifyUrl}</p><p>This link expires in 24 hours.</p>`,
+        html: `<!DOCTYPE html>
+<html lang="en">
+<body style="margin:0;padding:0;font-family:Arial,sans-serif;background:#f1f5f9;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 16px;">
+    <tr><td align="center">
+      <table width="520" cellpadding="0" cellspacing="0" style="background:white;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+        <tr><td style="background:linear-gradient(135deg,#0d9488,#059669);padding:32px 40px;text-align:center;">
+          <p style="margin:0;font-size:32px;">⚕️</p>
+          <h1 style="margin:8px 0 0;color:white;font-size:22px;font-weight:800;">Ahava Healthcare</h1>
+        </td></tr>
+        <tr><td style="padding:36px 40px;text-align:center;">
+          <h2 style="margin:0 0 12px;font-size:20px;color:#0f172a;">Hi ${firstName}, verify your email</h2>
+          <p style="margin:0 0 28px;color:#475569;font-size:14px;line-height:1.6;">
+            Welcome to Ahava Healthcare! Click the button below to verify your email address and activate your account.
+          </p>
+          <a href="${verifyUrl}"
+             style="display:inline-block;background:linear-gradient(135deg,#0d9488,#059669);color:white;padding:14px 36px;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px;letter-spacing:0.3px;">
+            Verify My Email →
+          </a>
+          <p style="margin:28px 0 0;color:#94a3b8;font-size:12px;">
+            Button not working? Copy and paste this link into your browser:<br>
+            <a href="${verifyUrl}" style="color:#0d9488;word-break:break-all;">${verifyUrl}</a>
+          </p>
+          <p style="margin:16px 0 0;color:#94a3b8;font-size:11px;">This link expires in 24 hours. If you did not create an account, you can safely ignore this email.</p>
+        </td></tr>
+        <tr><td style="background:#f8fafc;padding:16px 40px;text-align:center;border-top:1px solid #e2e8f0;">
+          <p style="margin:0;color:#94a3b8;font-size:11px;">Ahava Healthcare · POPIA Compliant · Encrypted</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`,
+        text: `Hi ${firstName},\n\nWelcome to Ahava Healthcare! Please verify your email by visiting:\n${verifyUrl}\n\nThis link expires in 24 hours.\n\nIf you did not create an account, ignore this email.`,
       }).catch(() => {});
     } catch (verifyErr) {
       console.warn('[auth/register] Could not set email verification token (migration pending?):', verifyErr);
