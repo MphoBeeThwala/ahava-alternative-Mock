@@ -7,5 +7,3 @@ dockerfilePath = "workspace/Dockerfile"
 
 [deploy]
 startCommand = "node workspace/server.js"
-healthcheckPath = "/"
-healthcheckTimeout = 300
