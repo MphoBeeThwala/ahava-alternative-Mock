@@ -14,6 +14,7 @@ RUN pnpm install --frozen-lockfile
 # Build Next.js standalone
 FROM base AS builder
 COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/workspace/node_modules ./workspace/node_modules
 COPY . .
 RUN mkdir -p /app/workspace/public && pnpm --filter workspace build
 
