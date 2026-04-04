@@ -4,3 +4,6 @@
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "workspace/Dockerfile"
+
+[deploy]
+startCommand = "node workspace/server.js"
