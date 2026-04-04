@@ -18,16 +18,19 @@ COPY --from=deps /app/workspace/node_modules ./workspace/node_modules
 COPY . .
 RUN mkdir -p /app/workspace/public && pnpm --filter workspace build
 
-# Production image — standalone server (distDir is 'next', not '.next')
+# Production image — standalone server
+# outputFileTracingRoot=repo-root causes Next.js to nest server.js at
+# standalone/workspace/server.js (path relative to tracing root).
+# WORKDIR /app so that COPY standalone ./ lands server.js at /app/workspace/server.js.
 FROM node:20-alpine AS runner
 RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
-WORKDIR /app/workspace
-COPY --from=builder /app/workspace/public ./public
+WORKDIR /app
 COPY --from=builder --chown=nextjs:nodejs /app/workspace/next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/workspace/next/static ./next/static
+COPY --from=builder --chown=nextjs:nodejs /app/workspace/next/static ./workspace/next/static
+COPY --from=builder --chown=nextjs:nodejs /app/workspace/public ./workspace/public
 USER nextjs
 EXPOSE 3000
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
-CMD ["node", "server.js"]
+CMD ["node", "workspace/server.js"]
