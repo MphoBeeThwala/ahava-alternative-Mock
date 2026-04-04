@@ -5,8 +5,8 @@ WORKDIR /app
 
 # Install all dependencies (including devDependencies needed for build)
 FROM base AS deps
-COPY package.json package-lock.json* ./
-RUN npm install
+COPY package.json package-lock.json ./
+RUN npm ci
 
 # Build: generate Prisma client, compile TypeScript
 FROM base AS builder
