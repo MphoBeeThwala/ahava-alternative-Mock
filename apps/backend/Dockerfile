@@ -1,33 +1,28 @@
-# Build from repo root: docker build -f apps/backend/Dockerfile .
+# Build from apps/backend/ directory (Railway Root Directory = "apps/backend").
+# Uses npm because pnpm-lock.yaml lives at the repo root (not in this context).
 FROM node:20-alpine AS base
-RUN corepack enable && corepack prepare pnpm@9 --activate
 WORKDIR /app
 
-# Install dependencies (monorepo)
+# Install all dependencies (including devDependencies needed for build)
 FROM base AS deps
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY apps/backend/package.json ./apps/backend/
-COPY workspace/package.json ./workspace/
-RUN pnpm install --frozen-lockfile
+COPY package.json ./
+RUN npm install
 
-# Build backend only
+# Build: generate Prisma client, compile TypeScript
 FROM base AS builder
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/apps/backend/node_modules ./apps/backend/node_modules
 COPY . .
-RUN pnpm --filter @ahava-healthcare/api prisma:generate
-RUN pnpm --filter @ahava-healthcare/api build
+RUN npx prisma generate --schema=prisma/schema.prisma
+RUN npm run build
 
-# Production image: pnpm uses symlinks in apps/backend/node_modules -> ../../node_modules/.pnpm
-# so we must copy root node_modules (the store) for require() to resolve.
+# Production image: copy only compiled output + runtime deps
 FROM node:20-alpine AS runner
 RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 apiuser
-WORKDIR /app/apps/backend
-COPY --from=builder --chown=apiuser:nodejs /app/node_modules /app/node_modules
-COPY --from=builder --chown=apiuser:nodejs /app/apps/backend/dist ./dist
-COPY --from=builder --chown=apiuser:nodejs /app/apps/backend/node_modules ./node_modules
-COPY --from=builder --chown=apiuser:nodejs /app/apps/backend/package.json ./
-COPY --from=builder --chown=apiuser:nodejs /app/apps/backend/prisma ./prisma
+WORKDIR /app
+COPY --from=builder --chown=apiuser:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=apiuser:nodejs /app/dist ./dist
+COPY --from=builder --chown=apiuser:nodejs /app/package.json ./
+COPY --from=builder --chown=apiuser:nodejs /app/prisma ./prisma
 USER apiuser
 EXPOSE 4000
 ENV NODE_ENV=production
