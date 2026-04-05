@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import RoleGuard, { UserRole } from '../../../components/RoleGuard';
-import { doctorApi, visitsApi, Visit, TriageCase } from '../../../lib/api';
+import { doctorApi, doctorProfileApi, visitsApi, Visit, TriageCase } from '../../../lib/api';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useToast } from '../../../contexts/ToastContext';
 import DashboardLayout from '../../../components/DashboardLayout';
@@ -57,6 +57,23 @@ type ReviewModal = {
     overrideReason: string;
 };
 
+type MedRow = { name: string; dosage: string; frequency: string; duration: string; instructions: string };
+
+type PrescriptionModal = {
+    caseId: string;
+    diagnosis: string;
+    medications: MedRow[];
+    doctorNotes: string;
+};
+
+type ReferralModal = {
+    caseId: string;
+    referralType: string;
+    provisionalDiagnosis: string;
+    clinicalNotes: string;
+    recommendedFacility: string;
+};
+
 export default function DoctorDashboard() {
     const { user } = useAuth();
     const toast = useToast();
@@ -65,6 +82,36 @@ export default function DoctorDashboard() {
     const [loading, setLoading] = useState(false);
     const [reviewModal, setReviewModal] = useState<ReviewModal | null>(null);
     const [releasing, setReleasing] = useState<string | null>(null);
+    const [prescriptionModal, setPrescriptionModal] = useState<PrescriptionModal | null>(null);
+    const [referralModal, setReferralModal] = useState<ReferralModal | null>(null);
+    const [submittingDoc, setSubmittingDoc] = useState(false);
+    const [hcpsaStatus, setHcpsaStatus] = useState<{ hcpsaNumber: string | null; hcpsaVerified: boolean } | null>(null);
+    const [hcpsaInput, setHcpsaInput] = useState('');
+    const [savingHcpsa, setSavingHcpsa] = useState(false);
+
+    const blankMed = (): MedRow => ({ name: '', dosage: '', frequency: '', duration: '', instructions: '' });
+
+    const loadHcpsaStatus = useCallback(async () => {
+        try {
+            const data = await doctorProfileApi.getHpcsa();
+            setHcpsaStatus(data.hcpsa);
+        } catch { /* silent */ }
+    }, []);
+
+    const handleSaveHcpsa = async () => {
+        if (!hcpsaInput.trim()) return;
+        setSavingHcpsa(true);
+        try {
+            await doctorProfileApi.submitHpcsa(hcpsaInput.trim());
+            toast.success('Practice number submitted. An administrator will verify it shortly.');
+            setHcpsaInput('');
+            loadHcpsaStatus();
+        } catch {
+            toast.error('Failed to save practice number.');
+        } finally {
+            setSavingHcpsa(false);
+        }
+    };
 
     const loadPendingVisits = useCallback(async () => {
         try {
@@ -90,7 +137,8 @@ export default function DoctorDashboard() {
     useEffect(() => {
         loadPendingVisits();
         loadTriageCases();
-    }, [loadPendingVisits, loadTriageCases]);
+        loadHcpsaStatus();
+    }, [loadPendingVisits, loadTriageCases, loadHcpsaStatus]);
 
     const handleApprove = async (visitId: string) => {
         try {
@@ -165,6 +213,56 @@ export default function DoctorDashboard() {
         }
     };
 
+    const handleIssuePrescription = async () => {
+        if (!prescriptionModal) return;
+        const meds = prescriptionModal.medications.filter(m => m.name.trim());
+        if (!prescriptionModal.diagnosis.trim() || meds.length === 0) {
+            toast.error('Diagnosis and at least one medication are required.');
+            return;
+        }
+        setSubmittingDoc(true);
+        try {
+            await doctorApi.issuePrescription(prescriptionModal.caseId, {
+                diagnosis: prescriptionModal.diagnosis,
+                medications: meds,
+                doctorNotes: prescriptionModal.doctorNotes || undefined,
+            });
+            toast.success('Prescription issued. Patient notified and PDF ready for download.');
+            setPrescriptionModal(null);
+            loadTriageCases();
+        } catch (error: unknown) {
+            const err = error as { response?: { data?: { error?: string } } };
+            toast.error(err.response?.data?.error || 'Failed to issue prescription.');
+        } finally {
+            setSubmittingDoc(false);
+        }
+    };
+
+    const handleIssueReferral = async () => {
+        if (!referralModal) return;
+        if (!referralModal.provisionalDiagnosis.trim() || !referralModal.clinicalNotes.trim() || !referralModal.recommendedFacility) {
+            toast.error('Diagnosis, clinical notes and recommended facility are required.');
+            return;
+        }
+        setSubmittingDoc(true);
+        try {
+            await doctorApi.issueEmergencyReferral(referralModal.caseId, {
+                referralType: referralModal.referralType,
+                provisionalDiagnosis: referralModal.provisionalDiagnosis,
+                clinicalNotes: referralModal.clinicalNotes,
+                recommendedFacility: referralModal.recommendedFacility,
+            });
+            toast.success('Referral issued. Patient has been notified with emergency instructions.');
+            setReferralModal(null);
+            loadTriageCases();
+        } catch (error: unknown) {
+            const err = error as { response?: { data?: { error?: string } } };
+            toast.error(err.response?.data?.error || 'Failed to issue referral.');
+        } finally {
+            setSubmittingDoc(false);
+        }
+    };
+
     const totalPending = triageQueue.length + triageCases.length;
 
     return (
@@ -194,6 +292,49 @@ export default function DoctorDashboard() {
                     </div>
 
                 <div className="p-6 sm:p-8">
+
+                {/* ── HPCSA onboarding banner ── */}
+                {hcpsaStatus !== null && (
+                    <div className={`mb-6 rounded-xl border px-5 py-4 flex flex-wrap items-center gap-4 ${hcpsaStatus.hcpsaVerified ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-300'}`}>
+                        <span className="text-2xl">{hcpsaStatus.hcpsaVerified ? '✅' : '⚠️'}</span>
+                        <div className="flex-1 min-w-0">
+                            {hcpsaStatus.hcpsaVerified ? (
+                                <p className="text-sm font-semibold text-green-800">
+                                    HPCSA Practice No. <span className="font-mono">{hcpsaStatus.hcpsaNumber}</span> — Verified
+                                </p>
+                            ) : hcpsaStatus.hcpsaNumber ? (
+                                <p className="text-sm font-semibold text-amber-800">
+                                    Practice No. <span className="font-mono">{hcpsaStatus.hcpsaNumber}</span> submitted — pending admin verification. Scripts will show this number once verified.
+                                </p>
+                            ) : (
+                                <p className="text-sm font-semibold text-amber-800">
+                                    HPCSA practice number not set. Prescriptions and referrals will not include a verified practice number until you add one.
+                                </p>
+                            )}
+                        </div>
+                        {!hcpsaStatus.hcpsaVerified && (
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="text"
+                                    placeholder="e.g. MP0123456"
+                                    className="rounded-lg border px-3 py-2 text-sm font-mono w-36"
+                                    style={{ borderColor: 'var(--border)' }}
+                                    value={hcpsaInput}
+                                    onChange={e => setHcpsaInput(e.target.value.toUpperCase())}
+                                    onKeyDown={e => e.key === 'Enter' && handleSaveHcpsa()}
+                                />
+                                <button
+                                    onClick={handleSaveHcpsa}
+                                    disabled={savingHcpsa || !hcpsaInput.trim()}
+                                    className="px-4 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
+                                    style={{ background: '#d97706' }}
+                                >
+                                    {savingHcpsa ? 'Saving…' : 'Submit'}
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 {/* AI-assisted remote triage (sent from patient dashboard) */}
                 {triageCases.length > 0 && (
@@ -250,16 +391,30 @@ export default function DoctorDashboard() {
                                                 ✎ Write review
                                             </button>
                                         )}
-                                        {tc.status === 'REVIEWED' && (
+                                        {tc.status === 'REVIEWED' && (<>
                                             <button
                                                 onClick={() => handleRelease(tc.id)}
                                                 disabled={releasing === tc.id}
                                                 className="px-4 py-2 rounded-lg font-medium text-white transition disabled:opacity-60"
                                                 style={{ backgroundColor: '#4caf50' }}
                                             >
-                                                {releasing === tc.id ? 'Releasing…' : '↑ Release to patient'}
+                                                {releasing === tc.id ? 'Releasing…' : '✅ Release result'}
                                             </button>
-                                        )}
+                                            <button
+                                                onClick={() => setPrescriptionModal({ caseId: tc.id, diagnosis: tc.doctorDiagnosis || '', medications: [blankMed()], doctorNotes: '' })}
+                                                className="px-4 py-2 rounded-lg font-medium text-white transition"
+                                                style={{ backgroundColor: '#0d9488' }}
+                                            >
+                                                💊 Write prescription
+                                            </button>
+                                            <button
+                                                onClick={() => setReferralModal({ caseId: tc.id, referralType: 'EMERGENCY', provisionalDiagnosis: tc.doctorDiagnosis || '', clinicalNotes: '', recommendedFacility: 'HOSPITAL' })}
+                                                className="px-4 py-2 rounded-lg font-medium text-white transition"
+                                                style={{ backgroundColor: '#dc2626' }}
+                                            >
+                                                🚨 Emergency referral
+                                            </button>
+                                        </>)}
                                     </div>
                                 </Card>
                               );
@@ -379,6 +534,142 @@ export default function DoctorDashboard() {
                     </div>
                 )}
                 </section>
+
+                {/* ── Prescription modal ── */}
+                <Modal
+                    open={!!prescriptionModal}
+                    onClose={() => setPrescriptionModal(null)}
+                    title="💊 Write Prescription"
+                    primaryLabel={submittingDoc ? 'Issuing…' : 'Issue prescription'}
+                    onPrimary={handleIssuePrescription}
+                    primaryDisabled={submittingDoc}
+                    secondaryLabel="Cancel"
+                    onSecondary={() => setPrescriptionModal(null)}
+                >
+                    <div className="space-y-4">
+                        <p className="text-xs text-amber-600 bg-amber-50 rounded-lg p-3">
+                            ⚠️ Your HPCSA practice number will be printed on this script. Ensure it is set in your profile before issuing.
+                        </p>
+                        <div>
+                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Diagnosis <span className="text-red-500">*</span></label>
+                            <input type="text" className="w-full rounded-lg border px-4 py-2.5" style={{ borderColor: 'var(--border)' }}
+                                value={prescriptionModal?.diagnosis ?? ''}
+                                onChange={e => prescriptionModal && setPrescriptionModal({ ...prescriptionModal, diagnosis: e.target.value })}
+                                placeholder="Clinical diagnosis"
+                            />
+                        </div>
+                        <div>
+                            <div className="flex items-center justify-between mb-2">
+                                <label className="text-sm font-medium text-[var(--foreground)]">Medications <span className="text-red-500">*</span></label>
+                                <button type="button" className="text-xs text-teal-600 font-semibold"
+                                    onClick={() => prescriptionModal && setPrescriptionModal({ ...prescriptionModal, medications: [...prescriptionModal.medications, blankMed()] })}>
+                                    + Add medication
+                                </button>
+                            </div>
+                            {prescriptionModal?.medications.map((med, i) => (
+                                <div key={i} className="border rounded-lg p-3 mb-2 space-y-2" style={{ borderColor: 'var(--border)' }}>
+                                    <div className="flex gap-2">
+                                        <input placeholder="Drug name *" className="flex-1 rounded border px-3 py-2 text-sm" style={{ borderColor: 'var(--border)' }}
+                                            value={med.name}
+                                            onChange={e => { const m = [...prescriptionModal.medications]; m[i] = { ...m[i], name: e.target.value }; setPrescriptionModal({ ...prescriptionModal, medications: m }); }}
+                                        />
+                                        <input placeholder="Dosage *" className="w-28 rounded border px-3 py-2 text-sm" style={{ borderColor: 'var(--border)' }}
+                                            value={med.dosage}
+                                            onChange={e => { const m = [...prescriptionModal.medications]; m[i] = { ...m[i], dosage: e.target.value }; setPrescriptionModal({ ...prescriptionModal, medications: m }); }}
+                                        />
+                                        {prescriptionModal.medications.length > 1 && (
+                                            <button type="button" className="text-red-400 text-xs px-2"
+                                                onClick={() => { const m = prescriptionModal.medications.filter((_, idx) => idx !== i); setPrescriptionModal({ ...prescriptionModal, medications: m }); }}>✕</button>
+                                        )}
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <input placeholder="Frequency (e.g. 3x daily)" className="flex-1 rounded border px-3 py-2 text-sm" style={{ borderColor: 'var(--border)' }}
+                                            value={med.frequency}
+                                            onChange={e => { const m = [...prescriptionModal.medications]; m[i] = { ...m[i], frequency: e.target.value }; setPrescriptionModal({ ...prescriptionModal, medications: m }); }}
+                                        />
+                                        <input placeholder="Duration (e.g. 5 days)" className="flex-1 rounded border px-3 py-2 text-sm" style={{ borderColor: 'var(--border)' }}
+                                            value={med.duration}
+                                            onChange={e => { const m = [...prescriptionModal.medications]; m[i] = { ...m[i], duration: e.target.value }; setPrescriptionModal({ ...prescriptionModal, medications: m }); }}
+                                        />
+                                    </div>
+                                    <input placeholder="Special instructions (optional)" className="w-full rounded border px-3 py-2 text-sm" style={{ borderColor: 'var(--border)' }}
+                                        value={med.instructions}
+                                        onChange={e => { const m = [...prescriptionModal.medications]; m[i] = { ...m[i], instructions: e.target.value }; setPrescriptionModal({ ...prescriptionModal, medications: m }); }}
+                                    />
+                                </div>
+                            ))}
+                        </div>
+                        <div>
+                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Additional notes</label>
+                            <textarea rows={2} className="w-full rounded-lg border px-4 py-2.5 text-sm" style={{ borderColor: 'var(--border)' }}
+                                value={prescriptionModal?.doctorNotes ?? ''}
+                                onChange={e => prescriptionModal && setPrescriptionModal({ ...prescriptionModal, doctorNotes: e.target.value })}
+                                placeholder="Dietary advice, follow-up instructions, etc."
+                            />
+                        </div>
+                        <p className="text-xs text-[var(--muted)]">The patient will receive a real-time notification and a downloadable PDF prescription. Valid for 30 days from issue (Schedule 0–4).</p>
+                    </div>
+                </Modal>
+
+                {/* ── Emergency Referral modal ── */}
+                <Modal
+                    open={!!referralModal}
+                    onClose={() => setReferralModal(null)}
+                    title="🚨 Emergency Referral"
+                    primaryLabel={submittingDoc ? 'Issuing…' : 'Issue referral'}
+                    onPrimary={handleIssueReferral}
+                    primaryDisabled={submittingDoc}
+                    secondaryLabel="Cancel"
+                    onSecondary={() => setReferralModal(null)}
+                >
+                    <div className="space-y-4">
+                        <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                            <p className="text-sm font-semibold text-red-700">⚠️ Emergency referral</p>
+                            <p className="text-xs text-red-600 mt-1">The patient will receive an immediate alert with SA emergency numbers (10177 / 112) and a downloadable referral letter they can present at any facility — even without platform access.</p>
+                        </div>
+                        <div className="flex gap-3">
+                            <div className="flex-1">
+                                <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Referral type</label>
+                                <select className="w-full rounded-lg border px-4 py-2.5 text-sm" style={{ borderColor: 'var(--border)' }}
+                                    value={referralModal?.referralType ?? 'EMERGENCY'}
+                                    onChange={e => referralModal && setReferralModal({ ...referralModal, referralType: e.target.value })}>
+                                    <option value="EMERGENCY">🔴 Emergency</option>
+                                    <option value="URGENT">🟠 Urgent</option>
+                                    <option value="SPECIALIST">🔵 Specialist</option>
+                                    <option value="ROUTINE">🟢 Routine</option>
+                                </select>
+                            </div>
+                            <div className="flex-1">
+                                <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Recommended facility</label>
+                                <select className="w-full rounded-lg border px-4 py-2.5 text-sm" style={{ borderColor: 'var(--border)' }}
+                                    value={referralModal?.recommendedFacility ?? 'HOSPITAL'}
+                                    onChange={e => referralModal && setReferralModal({ ...referralModal, recommendedFacility: e.target.value })}>
+                                    <option value="HOSPITAL">Hospital (Emergency)</option>
+                                    <option value="CLINIC">Clinic / CHC</option>
+                                    <option value="SPECIALIST">Specialist rooms</option>
+                                    <option value="EMS">EMS / Ambulance</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div>
+                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Provisional diagnosis <span className="text-red-500">*</span></label>
+                            <input type="text" className="w-full rounded-lg border px-4 py-2.5" style={{ borderColor: 'var(--border)' }}
+                                value={referralModal?.provisionalDiagnosis ?? ''}
+                                onChange={e => referralModal && setReferralModal({ ...referralModal, provisionalDiagnosis: e.target.value })}
+                                placeholder="e.g. Suspected bacterial meningitis"
+                            />
+                        </div>
+                        <div>
+                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Clinical assessment / referral notes <span className="text-red-500">*</span></label>
+                            <textarea rows={5} className="w-full rounded-lg border px-4 py-2.5 text-sm" style={{ borderColor: 'var(--border)' }}
+                                value={referralModal?.clinicalNotes ?? ''}
+                                onChange={e => referralModal && setReferralModal({ ...referralModal, clinicalNotes: e.target.value })}
+                                placeholder="Describe the patient's presentation, vitals, AI assessment findings, and your clinical reasoning for this referral. This text appears verbatim on the referral letter."
+                            />
+                        </div>
+                        <p className="text-xs text-[var(--muted)]">Your HPCSA practice number will be printed on the referral. The letter is legally valid under the National Health Act 61 of 2003.</p>
+                    </div>
+                </Modal>
 
                 {/* Doctor review modal — claim → review → release */}
                 <Modal

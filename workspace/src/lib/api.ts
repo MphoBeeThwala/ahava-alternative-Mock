@@ -556,6 +556,25 @@ export const doctorApi = {
     const res = await apiClient.get(`/triage-review?status=${status}`);
     return res.data;
   },
+  issuePrescription: async (caseId: string, payload: {
+    diagnosis: string;
+    medications: { name: string; dosage: string; frequency: string; duration: string; instructions?: string }[];
+    doctorNotes?: string;
+  }) => {
+    const res = await apiClient.post(`/triage-review/${caseId}/prescription`, payload);
+    return res.data;
+  },
+  issueEmergencyReferral: async (caseId: string, payload: {
+    referralType: string;
+    provisionalDiagnosis: string;
+    clinicalNotes: string;
+    recommendedFacility: string;
+  }) => {
+    const res = await apiClient.post(`/triage-review/${caseId}/emergency-referral`, payload);
+    return res.data;
+  },
+  getPrescriptionPdfUrl: (caseId: string) => `/api/triage-review/${caseId}/prescription/pdf`,
+  getReferralPdfUrl: (caseId: string) => `/api/triage-review/${caseId}/referral/pdf`,
 };
 
 // ==================== TERRA (WEARABLE) ====================
@@ -614,6 +633,26 @@ export const adminApi = {
   },
   getStats: async () => {
     const res = await apiClient.get('/admin/stats');
+    return res.data;
+  },
+  setDoctorHpcsa: async (userId: string, hcpsaNumber: string, verify = false) => {
+    const res = await apiClient.patch(`/admin/users/${userId}/hpcsa`, { hcpsaNumber, verify });
+    return res.data;
+  },
+  getDoctorHpcsa: async (userId: string) => {
+    const res = await apiClient.get(`/admin/users/${userId}/hpcsa`);
+    return res.data;
+  },
+};
+
+// ==================== DOCTOR PROFILE ====================
+export const doctorProfileApi = {
+  getHpcsa: async () => {
+    const res = await apiClient.get('/triage-review/profile/hpcsa');
+    return res.data;
+  },
+  submitHpcsa: async (hcpsaNumber: string) => {
+    const res = await apiClient.patch('/triage-review/profile/hpcsa', { hcpsaNumber });
     return res.data;
   },
 };

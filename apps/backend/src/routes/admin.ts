@@ -165,4 +165,80 @@ router.delete('/users/:id', async (req: Request, res: Response, next: NextFuncti
   }
 });
 
+// -----------------------------------------------------------------------
+// PATCH /api/admin/users/:id/hpcsa
+// Admin sets or verifies a doctor's HPCSA practice number.
+// Body: { hcpsaNumber: string, verify?: boolean }
+// -----------------------------------------------------------------------
+router.patch('/users/:id/hpcsa', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { hcpsaNumber, verify } = req.body as { hcpsaNumber?: string; verify?: boolean };
+
+    if (!hcpsaNumber || typeof hcpsaNumber !== 'string' || !hcpsaNumber.trim()) {
+      res.status(400).json({ error: 'hcpsaNumber is required.' });
+      return;
+    }
+
+    const target = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!target) {
+      res.status(404).json({ error: 'User not found.' });
+      return;
+    }
+    if (target.role !== 'DOCTOR') {
+      res.status(400).json({ error: 'HPCSA numbers can only be set on DOCTOR accounts.' });
+      return;
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: req.params.id },
+      data: {
+        hcpsaNumber: hcpsaNumber.trim().toUpperCase(),
+        hcpsaVerified: verify === true,
+        hcpsaVerifiedAt: verify === true ? new Date() : undefined,
+      } as Record<string, unknown>,
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        hcpsaNumber: true,
+        hcpsaVerified: true,
+        hcpsaVerifiedAt: true,
+      } as Record<string, boolean>,
+    });
+
+    res.json({ success: true, user: updated });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// -----------------------------------------------------------------------
+// GET /api/admin/users/:id/hpcsa  — retrieve a doctor's HPCSA status
+// -----------------------------------------------------------------------
+router.get('/users/:id/hpcsa', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        hcpsaNumber: true,
+        hcpsaVerified: true,
+        hcpsaVerifiedAt: true,
+      } as Record<string, boolean>,
+    });
+    if (!user) {
+      res.status(404).json({ error: 'User not found.' });
+      return;
+    }
+    res.json({ success: true, user });
+  } catch (error) {
+    next(error);
+  }
+});
+
 export default router;

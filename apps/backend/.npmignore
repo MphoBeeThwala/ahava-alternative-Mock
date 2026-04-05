@@ -1,0 +1,7 @@
+# Prevent npm from publishing source/test files
+src/
+prisma/
+tests/
+*.test.ts
+*.spec.ts
+.env*

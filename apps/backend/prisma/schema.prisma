@@ -52,14 +52,16 @@ enum MessageType {
 }
 
 enum TriageCaseStatus {
-  PENDING_REVIEW   // AI done, waiting for doctor
-  ASSIGNED         // Doctor claimed the case
-  REVIEWED         // Doctor saved notes but not yet released
-  RELEASED         // Doctor released result to patient
-  ESCALATED        // SLA breached, escalated
-  APPROVED         // Legacy: doctor agrees with AI assessment
-  DOCTOR_OVERRIDE  // Legacy: doctor disagreed
-  REFERRED         // In-person or partner appointment needed
+  PENDING_REVIEW      // AI done, waiting for doctor
+  ASSIGNED            // Doctor claimed the case
+  REVIEWED            // Doctor saved notes but not yet released
+  RELEASED            // Doctor released result to patient
+  ESCALATED           // SLA breached, escalated
+  EMERGENCY_REFERRAL  // Doctor declared emergency, referral issued
+  PRESCRIPTION_ISSUED // Doctor treated remotely, script written
+  APPROVED            // Legacy: doctor agrees with AI assessment
+  DOCTOR_OVERRIDE     // Legacy: doctor disagreed
+  REFERRED            // In-person or partner appointment needed
 }
 
 model User {
@@ -103,6 +105,11 @@ model User {
   sancVerificationDate    DateTime?
   sancCategory            String?  // Professional Nurse | Enrolled Nurse | Enrolled Nursing Auxiliary
 
+  // HPCSA practice number (doctors)
+  hcpsaNumber             String?
+  hcpsaVerified           Boolean  @default(false)
+  hcpsaVerifiedAt         DateTime?
+
   // Auth
   passwordHash              String?
   passwordResetToken        String?   @unique
@@ -123,6 +130,10 @@ model User {
   doctorSessions       DoctorSession[]
   consents             PatientConsent[]
   baseline             UserBaseline?
+  prescriptionsAsPatient Prescription[] @relation("PatientPrescriptions")
+  prescriptionsAsDoctor  Prescription[] @relation("DoctorPrescriptions")
+  referralsAsPatient     Referral[]     @relation("PatientReferrals")
+  referralsAsDoctor      Referral[]     @relation("DoctorReferrals")
 
   // Audit
   createdAt         DateTime @default(now())
@@ -434,6 +445,8 @@ model TriageCase {
 
   patient           User             @relation("TriageCasePatient", fields: [patientId], references: [id], onDelete: Cascade)
   doctor            User?            @relation("TriageCaseDoctor", fields: [doctorId], references: [id], onDelete: SetNull)
+  prescription      Prescription?
+  referral          Referral?
 
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
@@ -519,4 +532,65 @@ model DoctorSession {
   @@index([doctorId, isActive])
   @@index([startsAt, endsAt])
   @@map("doctor_sessions")
+}
+
+model Prescription {
+  id              String    @id @default(cuid())
+  triageCaseId    String    @unique
+  patientId       String
+  doctorId        String
+
+  medications     Json      // [{ name, dosage, frequency, duration, instructions }]
+  diagnosis       String
+  doctorNotes     String?
+
+  // Auditable snapshot of prescriber identity at time of issuing
+  hcpsaNumberSnapshot String?
+  doctorNameSnapshot  String
+
+  issuedAt        DateTime  @default(now())
+
+  triageCase      TriageCase @relation(fields: [triageCaseId], references: [id], onDelete: Cascade)
+  patient         User       @relation("PatientPrescriptions", fields: [patientId], references: [id])
+  doctor          User       @relation("DoctorPrescriptions", fields: [doctorId], references: [id])
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([patientId])
+  @@index([doctorId])
+  @@map("prescriptions")
+}
+
+model Referral {
+  id              String    @id @default(cuid())
+  triageCaseId    String    @unique
+  patientId       String
+  doctorId        String
+
+  referralType        String    // EMERGENCY | URGENT | ROUTINE | SPECIALIST
+  provisionalDiagnosis String
+  clinicalNotes       String    // Doctor's preliminary assessment / referral narrative
+  recommendedFacility String    // HOSPITAL | CLINIC | SPECIALIST | EMS
+
+  // Auditable snapshot of referring doctor
+  hcpsaNumberSnapshot String?
+  doctorNameSnapshot  String
+
+  issuedAt        DateTime  @default(now())
+
+  // SMS delivery tracking (stub — populated when SMS provider is configured)
+  smsStatus       String    @default("NO_SMS_PROVIDER") // NO_SMS_PROVIDER | PENDING | SENT | FAILED
+  smsSentAt       DateTime?
+
+  triageCase      TriageCase @relation(fields: [triageCaseId], references: [id], onDelete: Cascade)
+  patient         User       @relation("PatientReferrals", fields: [patientId], references: [id])
+  doctor          User       @relation("DoctorReferrals", fields: [doctorId], references: [id])
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([patientId])
+  @@index([doctorId])
+  @@map("referrals")
 }

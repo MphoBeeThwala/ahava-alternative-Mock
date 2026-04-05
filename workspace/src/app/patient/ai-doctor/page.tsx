@@ -25,6 +25,28 @@ type PendingCase = {
   estimatedWaitMinutes: number;
 };
 
+type PrescriptionNotice = {
+  triageCaseId: string;
+  prescriptionId: string;
+  diagnosis: string;
+  doctorName: string;
+  medicationCount: number;
+  issuedAt: string;
+  downloadUrl: string;
+};
+
+type ReferralNotice = {
+  triageCaseId: string;
+  referralId: string;
+  referralType: string;
+  provisionalDiagnosis: string;
+  recommendedFacility: string;
+  doctorName: string;
+  issuedAt: string;
+  downloadUrl: string;
+  emergencyNumbers: { ems: string; national: string; poison: string };
+};
+
 export default function AiDoctorPage() {
   const toast = useToast();
   const [symptoms, setSymptoms] = useState("");
@@ -37,8 +59,10 @@ export default function AiDoctorPage() {
   const [givingConsent, setGivingConsent] = useState(false);
   const [pendingSymptoms, setPendingSymptoms] = useState<{ symptoms: string; imageBase64?: string } | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const [prescriptionNotice, setPrescriptionNotice] = useState<PrescriptionNotice | null>(null);
+  const [referralNotice, setReferralNotice] = useState<ReferralNotice | null>(null);
 
-  // WebSocket listener — fires when doctor releases triage result
+  // WebSocket listener — fires when doctor releases result, prescription, or emergency referral
   useEffect(() => {
     if (!pendingCase) return;
 
@@ -54,6 +78,7 @@ export default function AiDoctorPage() {
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
+
         if (msg.type === 'TRIAGE_RESULT_RELEASED' && msg.data?.triageCaseId === pendingCase.triageCaseId) {
           setTriageResult({
             triageLevel: msg.data.triageLevel,
@@ -68,6 +93,18 @@ export default function AiDoctorPage() {
           });
           setPendingCase(null);
           toast.success('Your triage result has been released by a doctor.');
+        }
+
+        if (msg.type === 'PRESCRIPTION_ISSUED' && msg.data?.triageCaseId === pendingCase.triageCaseId) {
+          setPrescriptionNotice(msg.data as PrescriptionNotice);
+          setPendingCase(null);
+          toast.success(`Prescription issued by ${msg.data.doctorName}. Download your script below.`);
+        }
+
+        if (msg.type === 'EMERGENCY_REFERRAL_ISSUED' && msg.data?.triageCaseId === pendingCase.triageCaseId) {
+          setReferralNotice(msg.data as ReferralNotice);
+          setPendingCase(null);
+          toast.error('Emergency referral issued. Please act immediately — see instructions below.');
         }
       } catch { /* ignore parse errors */ }
     };
@@ -305,12 +342,87 @@ export default function AiDoctorPage() {
                   )}
                   <p className="text-xs text-center text-slate-500 italic">This result was reviewed and released by a licensed doctor. It is decision support — always follow clinical advice.</p>
                   <button
-                    onClick={() => {
-                      setTriageResult(null);
-                      setPendingCase(null);
-                      setSymptoms("");
-                      setSelectedImage(null);
-                    }}
+                    onClick={() => { setTriageResult(null); setPendingCase(null); setSymptoms(""); setSelectedImage(null); }}
+                    className="text-sm font-medium w-full text-center hover:underline"
+                    style={{ color: "var(--primary)" }}
+                  >
+                    Start over
+                  </button>
+                </div>
+              )}
+
+              {/* Prescription notice */}
+              {prescriptionNotice && (
+                <div className="space-y-4">
+                  <div className="p-4 rounded-lg border-l-4 bg-teal-50 border-teal-500">
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="text-2xl">💊</span>
+                      <h3 className="font-bold text-teal-900">Prescription issued</h3>
+                    </div>
+                    <p className="text-sm text-teal-800 mb-1"><strong>Diagnosis:</strong> {prescriptionNotice.diagnosis}</p>
+                    <p className="text-sm text-teal-700 mb-1"><strong>Medications:</strong> {prescriptionNotice.medicationCount} item{prescriptionNotice.medicationCount !== 1 ? 's' : ''} prescribed</p>
+                    <p className="text-sm text-teal-700 mb-3"><strong>Prescribing doctor:</strong> {prescriptionNotice.doctorName}</p>
+                    <a
+                      href={prescriptionNotice.downloadUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg font-semibold text-white text-sm"
+                      style={{ background: '#0d9488' }}
+                    >
+                      ⬇ Download prescription PDF
+                    </a>
+                    <p className="text-xs text-teal-600 mt-2">Present this PDF at any pharmacy. Valid 30 days from issue.</p>
+                  </div>
+                  <p className="text-xs text-center text-slate-500 italic">Prescription issued by a licensed doctor via Ahava Healthcare Platform.</p>
+                  <button
+                    onClick={() => { setPrescriptionNotice(null); setSymptoms(""); setSelectedImage(null); }}
+                    className="text-sm font-medium w-full text-center hover:underline"
+                    style={{ color: "var(--primary)" }}
+                  >
+                    Start over
+                  </button>
+                </div>
+              )}
+
+              {/* Emergency referral notice */}
+              {referralNotice && (
+                <div className="space-y-4">
+                  <div className="p-4 rounded-lg border-2 border-red-500 bg-red-50">
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="text-2xl">🚨</span>
+                      <h3 className="font-bold text-red-900 text-lg">Emergency referral issued</h3>
+                    </div>
+                    <div className="bg-red-100 rounded-lg p-3 mb-3">
+                      <p className="text-sm font-bold text-red-800">⚠️ Please seek medical attention immediately</p>
+                      <p className="text-xs text-red-700 mt-1">Call <strong>10177</strong> (EMS) or <strong>112</strong> (National Emergency) now if you feel unwell.</p>
+                    </div>
+                    <p className="text-sm text-red-800 mb-1"><strong>Provisional diagnosis:</strong> {referralNotice.provisionalDiagnosis}</p>
+                    <p className="text-sm text-red-800 mb-1"><strong>Recommended facility:</strong> {referralNotice.recommendedFacility}</p>
+                    <p className="text-sm text-red-800 mb-1"><strong>Referral type:</strong> {referralNotice.referralType}</p>
+                    <p className="text-sm text-red-700 mb-3"><strong>Referring doctor:</strong> {referralNotice.doctorName}</p>
+                    <a
+                      href={referralNotice.downloadUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg font-semibold text-white text-sm"
+                      style={{ background: '#dc2626' }}
+                    >
+                      ⬇ Download referral letter PDF
+                    </a>
+                    <p className="text-xs text-red-600 mt-2">Show this letter at any hospital, clinic or emergency facility — even without internet access.</p>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    {[['🚑 Ambulance', '10177'], ['🆘 Emergency', '112'], ['☠ Poison', '0861 555 777']].map(([label, num]) => (
+                      <a key={num} href={`tel:${num.replace(/\s/g,'')}`}
+                        className="p-3 rounded-lg border font-bold text-sm"
+                        style={{ borderColor: '#dc2626', color: '#dc2626', textDecoration: 'none' }}
+                      >
+                        <div>{label}</div><div className="text-xs font-normal">{num}</div>
+                      </a>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => { setReferralNotice(null); setSymptoms(""); setSelectedImage(null); }}
                     className="text-sm font-medium w-full text-center hover:underline"
                     style={{ color: "var(--primary)" }}
                   >
