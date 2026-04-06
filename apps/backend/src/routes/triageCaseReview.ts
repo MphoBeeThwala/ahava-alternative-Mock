@@ -223,7 +223,7 @@ router.post('/:id/prescription', authMiddleware, requireRole('DOCTOR'), async (r
         });
         if (!doctor) return res.status(404).json({ error: 'Doctor not found' });
 
-        const d = doctor as { firstName: string; lastName: string; hcpsaNumber?: string | null };
+        const d = doctor as unknown as { firstName: string; lastName: string; hcpsaNumber?: string | null };
 
         const prescription = await (prisma.prescription as any).create({
             data: {
@@ -296,7 +296,7 @@ router.post('/:id/emergency-referral', authMiddleware, requireRole('DOCTOR'), as
         });
         if (!doctor) return res.status(404).json({ error: 'Doctor not found' });
 
-        const d = doctor as { firstName: string; lastName: string; hcpsaNumber?: string | null };
+        const d = doctor as unknown as { firstName: string; lastName: string; hcpsaNumber?: string | null };
         const type = (referralType as string)?.toUpperCase() || 'EMERGENCY';
 
         const referral = await (prisma.referral as any).create({
