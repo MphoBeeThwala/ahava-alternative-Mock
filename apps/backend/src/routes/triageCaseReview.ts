@@ -144,7 +144,7 @@ router.post('/:id/review', authMiddleware, requireRole('DOCTOR'), async (req: Au
 // POST /api/triage-cases/:id/release — doctor releases result to patient
 router.post('/:id/release', authMiddleware, requireRole('DOCTOR'), async (req: AuthenticatedRequest, res, next) => {
     try {
-        const doctorId = req.user!.id;
+        const _doctorId = req.user!.id;
         const { id } = req.params;
 
         const tc = await prisma.triageCase.findUnique({ where: { id } });
@@ -211,6 +211,10 @@ router.post('/:id/prescription', authMiddleware, requireRole('DOCTOR'), async (r
         if (!tc) return res.status(404).json({ error: 'Case not found' });
         if (tc.doctorId && tc.doctorId !== doctorId) {
             return res.status(403).json({ error: 'Case assigned to a different doctor' });
+        }
+        const validPrescribeStatuses = ['REVIEWED', 'ASSIGNED', 'PENDING_REVIEW'];
+        if (!validPrescribeStatuses.includes(tc.status as string)) {
+            return res.status(400).json({ error: `Cannot issue a prescription on a case with status ${tc.status}.` });
         }
 
         const doctor = await prisma.user.findUnique({
@@ -280,6 +284,10 @@ router.post('/:id/emergency-referral', authMiddleware, requireRole('DOCTOR'), as
         if (!tc) return res.status(404).json({ error: 'Case not found' });
         if (tc.doctorId && tc.doctorId !== doctorId) {
             return res.status(403).json({ error: 'Case assigned to a different doctor' });
+        }
+        const validReferralStatuses = ['REVIEWED', 'ASSIGNED', 'PENDING_REVIEW'];
+        if (!validReferralStatuses.includes(tc.status as string)) {
+            return res.status(400).json({ error: `Cannot issue an emergency referral on a case with status ${tc.status}.` });
         }
 
         const doctor = await prisma.user.findUnique({

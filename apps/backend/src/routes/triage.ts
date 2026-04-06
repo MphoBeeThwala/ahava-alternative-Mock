@@ -114,7 +114,7 @@ router.post('/', rateLimiter, authMiddleware, requireConsent('AI_TRIAGE'), async
                 aiReasoning: result.reasoning,
                 slaDeadline,
                 doctorFeeCents: feeCents,
-                aiModel: process.env.CLAUDE_MODEL || 'claude-sonnet-4-20250514',
+                aiModel: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514',
                 aiContextUsed: !!patientContext,
             } as any,
         });

@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import RoleGuard, { UserRole } from "../../../components/RoleGuard";
-import { patientApi, consentApi } from "../../../lib/api";
+import apiClient, { patientApi, consentApi } from "../../../lib/api";
 import { useToast } from "../../../contexts/ToastContext";
 import DashboardLayout from "../../../components/DashboardLayout";
 import { Card, CardHeader, CardTitle } from "../../../components/ui/Card";
@@ -46,6 +46,23 @@ type ReferralNotice = {
   downloadUrl: string;
   emergencyNumbers: { ems: string; national: string; poison: string };
 };
+
+async function downloadPdf(relativeUrl: string, filename: string) {
+  try {
+    const res = await apiClient.get(relativeUrl, { responseType: 'blob' });
+    const blobUrl = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(blobUrl);
+  } catch {
+    // error handled by caller
+    throw new Error('Download failed');
+  }
+}
 
 export default function AiDoctorPage() {
   const toast = useToast();
@@ -362,15 +379,18 @@ export default function AiDoctorPage() {
                     <p className="text-sm text-teal-800 mb-1"><strong>Diagnosis:</strong> {prescriptionNotice.diagnosis}</p>
                     <p className="text-sm text-teal-700 mb-1"><strong>Medications:</strong> {prescriptionNotice.medicationCount} item{prescriptionNotice.medicationCount !== 1 ? 's' : ''} prescribed</p>
                     <p className="text-sm text-teal-700 mb-3"><strong>Prescribing doctor:</strong> {prescriptionNotice.doctorName}</p>
-                    <a
-                      href={prescriptionNotice.downloadUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      onClick={() =>
+                        downloadPdf(
+                          prescriptionNotice.downloadUrl,
+                          `prescription-${prescriptionNotice.prescriptionId.slice(-8)}.pdf`
+                        ).catch(() => toast.error('Failed to download PDF.'))
+                      }
                       className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg font-semibold text-white text-sm"
                       style={{ background: '#0d9488' }}
                     >
                       ⬇ Download prescription PDF
-                    </a>
+                    </button>
                     <p className="text-xs text-teal-600 mt-2">Present this PDF at any pharmacy. Valid 30 days from issue.</p>
                   </div>
                   <p className="text-xs text-center text-slate-500 italic">Prescription issued by a licensed doctor via Ahava Healthcare Platform.</p>
@@ -400,15 +420,18 @@ export default function AiDoctorPage() {
                     <p className="text-sm text-red-800 mb-1"><strong>Recommended facility:</strong> {referralNotice.recommendedFacility}</p>
                     <p className="text-sm text-red-800 mb-1"><strong>Referral type:</strong> {referralNotice.referralType}</p>
                     <p className="text-sm text-red-700 mb-3"><strong>Referring doctor:</strong> {referralNotice.doctorName}</p>
-                    <a
-                      href={referralNotice.downloadUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      onClick={() =>
+                        downloadPdf(
+                          referralNotice.downloadUrl,
+                          `referral-${referralNotice.referralId.slice(-8)}.pdf`
+                        ).catch(() => toast.error('Failed to download referral PDF.'))
+                      }
                       className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg font-semibold text-white text-sm"
                       style={{ background: '#dc2626' }}
                     >
                       ⬇ Download referral letter PDF
-                    </a>
+                    </button>
                     <p className="text-xs text-red-600 mt-2">Show this letter at any hospital, clinic or emergency facility — even without internet access.</p>
                   </div>
                   <div className="grid grid-cols-3 gap-2 text-center">

@@ -127,7 +127,7 @@ export default function DoctorDashboard() {
 
     const loadTriageCases = useCallback(async () => {
         try {
-            const data = await doctorApi.getTriageReviewQueue('PENDING_REVIEW');
+            const data = await doctorApi.getTriageReviewQueue('all');
             setTriageCases(data.cases || []);
         } catch (error) {
             console.error('Failed to load triage cases:', error);

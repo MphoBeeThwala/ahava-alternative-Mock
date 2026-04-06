@@ -205,7 +205,7 @@ router.patch('/users/:id/hpcsa', async (req: Request, res: Response, next: NextF
         hcpsaNumber: true,
         hcpsaVerified: true,
         hcpsaVerifiedAt: true,
-      } as Record<string, boolean>,
+      } as any,
     });
 
     res.json({ success: true, user: updated });
@@ -229,7 +229,7 @@ router.get('/users/:id/hpcsa', async (req: Request, res: Response, next: NextFun
         hcpsaNumber: true,
         hcpsaVerified: true,
         hcpsaVerifiedAt: true,
-      } as Record<string, boolean>,
+      } as any,
     });
     if (!user) {
       res.status(404).json({ error: 'User not found.' });
