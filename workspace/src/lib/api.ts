@@ -284,8 +284,17 @@ export interface EarlyWarningSummary {
 export interface RiskProfile {
   smoker?: boolean;
   hypertension?: boolean;
+  diabetes?: boolean;
+  asthmaOrCopd?: boolean;
+  pregnancy?: boolean;
+  familyHistoryCvd?: boolean;
+  activityLevel?: 'LOW' | 'MODERATE' | 'HIGH';
+  alcoholUse?: 'NONE' | 'LOW' | 'MODERATE' | 'HIGH';
   cholesterolKnown?: boolean;
   cholesterolValue?: number;
+  consentAcknowledged?: boolean;
+  onboardingCompleted?: boolean;
+  surveyVersion?: number;
 }
 
 export interface TriageRequest {
@@ -658,4 +667,3 @@ export const doctorProfileApi = {
 };
 
 export default apiClient;
-

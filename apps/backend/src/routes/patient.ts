@@ -580,13 +580,21 @@ router.get('/early-warning', authMiddleware, async (req: AuthenticatedRequest, r
   }
 });
 
-// Update patient risk profile (smoker, hypertension) for CVD algorithms
 const riskProfileSchema = Joi.object({
   smoker: Joi.boolean().optional(),
   hypertension: Joi.boolean().optional(),
+  diabetes: Joi.boolean().optional(),
+  asthmaOrCopd: Joi.boolean().optional(),
+  pregnancy: Joi.boolean().optional(),
+  familyHistoryCvd: Joi.boolean().optional(),
+  activityLevel: Joi.string().valid('LOW', 'MODERATE', 'HIGH').optional(),
+  alcoholUse: Joi.string().valid('NONE', 'LOW', 'MODERATE', 'HIGH').optional(),
   cholesterolKnown: Joi.boolean().optional(),
   cholesterolValue: Joi.number().min(2).max(15).optional(),
-});
+  consentAcknowledged: Joi.boolean().optional(),
+  onboardingCompleted: Joi.boolean().optional(),
+  surveyVersion: Joi.number().integer().min(1).max(10).optional(),
+}).min(1);
 router.patch('/risk-profile', authMiddleware, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { error, value } = riskProfileSchema.validate(req.body);
@@ -594,11 +602,41 @@ router.patch('/risk-profile', authMiddleware, async (req: AuthenticatedRequest, 
       return res.status(400).json({ error: error.details[0].message });
     }
     const userId = req.user!.id;
+    const current = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { dateOfBirth: true, gender: true, riskProfile: true },
+    });
+
+    const merged = {
+      ...((current?.riskProfile as Record<string, unknown> | null) ?? {}),
+      ...(value as Record<string, unknown>),
+      updatedAt: new Date().toISOString(),
+    };
+
     await prisma.user.update({
       where: { id: userId },
-      data: { riskProfile: value as object },
+      data: { riskProfile: merged as object },
     });
-    res.json({ success: true, riskProfile: value });
+
+    const ML_URL = (process.env.ML_SERVICE_URL ?? '').replace(/\/$/, '');
+    const mlServiceAvailable = !!ML_URL && !ML_URL.includes('localhost');
+    if (mlServiceAvailable) {
+      const age = current?.dateOfBirth
+        ? Math.floor((Date.now() - new Date(current.dateOfBirth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
+        : 50;
+      const context = {
+        age: Math.max(18, Math.min(120, age)),
+        smoker: Boolean((merged as any).smoker),
+        hypertension: Boolean((merged as any).hypertension),
+        cholesterol_known: Boolean((merged as any).cholesterolKnown),
+        cholesterol_mmol_per_L: (merged as any).cholesterolValue ?? null,
+      };
+      axios
+        .put(`${ML_URL}/early-warning/context/${encodeURIComponent(userId)}`, context, { timeout: 8000 })
+        .catch(() => {});
+    }
+
+    res.json({ success: true, riskProfile: merged });
   } catch (e) {
     next(e);
   }
@@ -806,4 +844,3 @@ router.post('/demo/start-stream', authMiddleware, async (req: AuthenticatedReque
 });
 
 export default router;
-

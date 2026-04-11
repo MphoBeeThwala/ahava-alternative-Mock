@@ -16,6 +16,7 @@ interface User {
   phone?: string;
   dateOfBirth?: string;
   gender?: string;
+  riskProfile?: Record<string, unknown> | null;
 }
 
 interface AuthContextType {
@@ -160,4 +161,3 @@ export function useAuth() {
   }
   return context;
 }
-

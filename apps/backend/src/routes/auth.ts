@@ -387,6 +387,7 @@ router.get('/me', async (req, res, next) => {
         profileImage: true,
         dateOfBirth: true,
         gender: true,
+        riskProfile: true,
         preferredLanguage: true,
         timezone: true,
         createdAt: true,

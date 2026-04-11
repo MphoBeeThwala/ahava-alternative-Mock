@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "../contexts/AuthContext";
 import { authApi } from "../lib/api";
 
@@ -17,6 +17,7 @@ export default function DashboardLayout({
 }) {
   const { user, logout, isAuthenticated } = useAuth();
   const pathname = usePathname();
+  const router = useRouter();
   const [verifyBannerDismissed, setVerifyBannerDismissed] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
   const [resendSent, setResendSent] = useState(false);
@@ -36,6 +37,21 @@ export default function DashboardLayout({
   };
 
   const showVerifyBanner = isAuthenticated && user && !(user as { isVerified?: boolean }).isVerified && !verifyBannerDismissed;
+  const riskProfile = user?.riskProfile;
+  const onboardingCompleted = Boolean(
+    riskProfile &&
+      typeof riskProfile === "object" &&
+      (riskProfile as Record<string, unknown>)["onboardingCompleted"] === true
+  );
+
+  useEffect(() => {
+    if (!isAuthenticated || !user) return;
+    if (user.role !== "PATIENT") return;
+    if (onboardingCompleted) return;
+    if (pathname.startsWith("/auth")) return;
+    if (pathname.startsWith("/profile")) return;
+    router.push("/profile");
+  }, [isAuthenticated, user, onboardingCompleted, pathname, router]);
 
   const getDashboardPath = () => {
     if (!user) return "/";
@@ -119,7 +135,7 @@ export default function DashboardLayout({
                 <span aria-hidden>📅</span>Book a Visit
               </Link>
               <Link href="/patient/early-warning" className={linkClass(pathname === "/patient/early-warning")} aria-current={pathname === "/patient/early-warning" ? "page" : undefined}>
-                <span aria-hidden>⚠️</span>Early Warning (ML)
+                <span aria-hidden>⚠️</span>Early Warning
               </Link>
               <Link href="/patient/ai-doctor" className={linkClass(pathname === "/patient/ai-doctor")} aria-current={pathname === "/patient/ai-doctor" ? "page" : undefined}>
                 <span aria-hidden>🩺</span>AI Doctor
