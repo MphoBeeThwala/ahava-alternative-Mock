@@ -38,7 +38,11 @@ export async function sendEmail(options: SendEmailOptions): Promise<{ id?: strin
     });
     if (error) {
       console.error('[email] Resend error:', error);
-      return { error: new Error(error.message) };
+      const msg = error.message || 'Resend error';
+      if (/only send testing emails/i.test(msg) || /verify a domain/i.test(msg)) {
+        return { error: new Error(`RESEND_DOMAIN_NOT_VERIFIED: ${msg}`) };
+      }
+      return { error: new Error(msg) };
     }
     return { id: data?.id };
   } catch (err) {
