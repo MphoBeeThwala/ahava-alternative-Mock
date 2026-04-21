@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Ahava Healthcare - Full-stack healthcare platform for South Africa - patient bookings, nurse home visits, doctor oversight",
   "private": true,
+  "type": "module",
   "workspaces": [
     "apps/*",
     "packages/*",
