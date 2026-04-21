@@ -1,10 +1,13 @@
-import axios, { AxiosInstance, AxiosError } from 'axios';
+import axios, { AxiosInstance, AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
 
 // Always use same-origin /api - Next.js rewrites handle the proxy to backend
 // This avoids CORS issues entirely and works in both dev and production
 function getApiBaseUrl(): string {
   return '/api';
 }
+
+// Extend axios request config so we can tag retried requests
+type RetriableRequestConfig = AxiosRequestConfig & { _retry?: boolean };
 
 // Create axios instance with default config
 const apiClient: AxiosInstance = axios.create({
@@ -18,7 +21,7 @@ const apiClient: AxiosInstance = axios.create({
 
 // Request interceptor: ensure dev uses direct backend URL and token is always attached
 apiClient.interceptors.request.use(
-  (config) => {
+  (config: InternalAxiosRequestConfig) => {
     config.baseURL = getApiBaseUrl();
     const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
     if (token) {
@@ -29,102 +32,137 @@ apiClient.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Track if we're already attempting refresh to avoid infinite loops
+// ─────────────────────────────────────────────────────────────────────────────
+// Refresh coordination
+//
+// When the access token expires, multiple in-flight requests will all 401.
+// We must:
+//   1) kick off ONE refresh (not N of them)
+//   2) queue the other 401s until the refresh resolves
+//   3) ACTUALLY retry each queued request with the new token (returning the
+//      real axios Response to the caller) — the previous implementation
+//      resolved queued promises with the raw token string, which silently
+//      broke every dashboard data-fetch and hung the UI.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type QueueItem = {
+  resolve: (value: unknown) => void;
+  reject: (reason: unknown) => void;
+  config: RetriableRequestConfig;
+};
+
 let isRefreshing = false;
-let failedQueue: Array<{
-  onSuccess: (token: string) => void;
-  onFailure: (error: AxiosError) => void;
-}> = [];
+let failedQueue: QueueItem[] = [];
 
 const processQueue = (error: AxiosError | null, token: string | null = null) => {
-  failedQueue.forEach((prom) => {
-    if (error) {
-      prom.onFailure(error);
-    } else {
-      prom.onSuccess(token!);
-    }
-  });
+  const queue = failedQueue;
   failedQueue = [];
+  queue.forEach(({ resolve, reject, config }) => {
+    if (error || !token) {
+      reject(error ?? new Error('Token refresh failed'));
+      return;
+    }
+    // Retry the original request with the new token. Returning a promise from
+    // the interceptor's rejection handler means axios will resolve the caller
+    // with this value — so the caller receives a real AxiosResponse, not a
+    // token string.
+    config.headers = { ...(config.headers || {}), Authorization: `Bearer ${token}` };
+    resolve(apiClient(config));
+  });
 };
+
+// Refresh the access token by calling /auth/refresh directly (bypassing the
+// interceptor) so we don't attach the stale Bearer token or recurse through
+// the 401-handler when the refresh endpoint itself errors.
+async function performTokenRefresh(refreshToken: string): Promise<{ accessToken: string; refreshToken: string }> {
+  const res = await fetch(`${getApiBaseUrl()}/auth/refresh`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Refresh failed: ${res.status} ${body}`);
+  }
+  const data = await res.json();
+  if (!data?.accessToken || !data?.refreshToken) {
+    throw new Error('Refresh response missing tokens');
+  }
+  return { accessToken: data.accessToken, refreshToken: data.refreshToken };
+}
+
+function clearSessionAndRedirect() {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem('token');
+  localStorage.removeItem('refreshToken');
+  localStorage.removeItem('user');
+  // Avoid redirect-loop if we're already on an auth page
+  if (!window.location.pathname.startsWith('/auth/')) {
+    window.location.href = '/auth/login';
+  }
+}
 
 // Response interceptor with automatic token refresh
 apiClient.interceptors.response.use(
   (response) => response,
-  async (error) => {
-    const originalRequest = error.config;
+  async (error: AxiosError) => {
+    const originalRequest = (error.config || {}) as RetriableRequestConfig;
 
-    if (error.response?.status === 401 && typeof window !== 'undefined') {
-      const path = window.location.pathname || '';
-      
-      // Don't attempt refresh if already on auth pages
-      if (path.startsWith('/auth/')) {
-        return Promise.reject(error);
-      }
+    // Only handle 401s in the browser, and never for the refresh endpoint itself
+    const status = error.response?.status;
+    const url = (originalRequest.url || '').toString();
+    const isAuthPath = typeof window !== 'undefined' && window.location.pathname.startsWith('/auth/');
 
-      // Prevent multiple simultaneous refresh attempts
-      if (!isRefreshing) {
-        isRefreshing = true;
-        const refreshToken = localStorage.getItem('refreshToken');
+    if (status !== 401 || typeof window === 'undefined' || isAuthPath || url.includes('/auth/refresh') || url.includes('/auth/login')) {
+      return Promise.reject(error);
+    }
 
-        if (refreshToken) {
-          try {
-            console.log('[API] Attempting to refresh token...');
-            
-            // Attempt to refresh token
-            const response = await apiClient.post('/auth/refresh', { refreshToken });
-            const { accessToken, refreshToken: newRefreshToken } = response.data;
-            
-            console.log('[API] Token refreshed successfully');
-            
-            // Update stored tokens
-            localStorage.setItem('token', accessToken);
-            localStorage.setItem('refreshToken', newRefreshToken);
-            
-            // Update the original request with new token
-            if (originalRequest.headers) {
-              originalRequest.headers.Authorization = `Bearer ${accessToken}`;
-            }
-            
-            // Process queued requests with new token
-            processQueue(null, accessToken);
-            
-            // Retry original request with new token
-            return apiClient(originalRequest);
-          } catch (refreshError) {
-            console.error('[API] Token refresh failed:', refreshError);
-            
-            // Refresh failed, log out
-            localStorage.removeItem('token');
-            localStorage.removeItem('user');
-            localStorage.removeItem('refreshToken');
-            
-            processQueue(refreshError, null);
-            
-            // Redirect to login
-            window.location.href = '/auth/login';
-            return Promise.reject(refreshError);
-          } finally {
-            isRefreshing = false;
-          }
-        } else {
-          console.warn('[API] No refresh token available, logging out');
-          
-          // No refresh token available, log out
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
-          window.location.href = '/auth/login';
-          
-          return Promise.reject(error);
-        }
-      }
+    // Prevent infinite retry loops for a single request
+    if (originalRequest._retry) {
+      clearSessionAndRedirect();
+      return Promise.reject(error);
+    }
 
-      // If already refreshing, queue this request
-      return new Promise((onSuccess, onFailure) => {
-        failedQueue.push({ onSuccess, onFailure });
+    const refreshToken = localStorage.getItem('refreshToken');
+    if (!refreshToken) {
+      console.warn('[API] 401 with no refresh token — logging out');
+      clearSessionAndRedirect();
+      return Promise.reject(error);
+    }
+
+    // If a refresh is already in flight, queue this request and wait for it.
+    if (isRefreshing) {
+      return new Promise((resolve, reject) => {
+        failedQueue.push({ resolve, reject, config: originalRequest });
       });
     }
 
-    return Promise.reject(error);
+    isRefreshing = true;
+    originalRequest._retry = true;
+
+    try {
+      console.log('[API] Attempting to refresh token…');
+      const { accessToken, refreshToken: newRefreshToken } = await performTokenRefresh(refreshToken);
+      console.log('[API] Token refreshed successfully');
+
+      localStorage.setItem('token', accessToken);
+      localStorage.setItem('refreshToken', newRefreshToken);
+
+      // Release queued requests with the new token (each gets actually retried)
+      processQueue(null, accessToken);
+
+      // Retry the request that triggered the refresh
+      originalRequest.headers = { ...(originalRequest.headers || {}), Authorization: `Bearer ${accessToken}` };
+      return apiClient(originalRequest);
+    } catch (refreshError) {
+      console.error('[API] Token refresh failed:', refreshError);
+      processQueue(refreshError as AxiosError, null);
+      clearSessionAndRedirect();
+      return Promise.reject(refreshError);
+    } finally {
+      isRefreshing = false;
+    }
   }
 );
 
@@ -173,6 +211,10 @@ export const authApi = {
   },
   refreshToken: async (refreshToken: string): Promise<AuthResponse> => {
     const res = await apiClient.post('/auth/refresh', { refreshToken });
+    return res.data;
+  },
+  me: async () => {
+    const res = await apiClient.get('/auth/me');
     return res.data;
   },
   forgotPassword: async (email: string) => {
@@ -235,14 +277,14 @@ export interface EarlyWarningSummary {
   riskLevel?: string;
   alert_level?: 'GREEN' | 'YELLOW' | 'RED';
   recommendations?: string[];
-  
+
   // Trend analysis from fallback or ML response
   trendAnalysis?: {
     heartRate?: string;
     oxygenSaturation?: string;
     sleepQuality?: string;
   };
-  
+
   // Baseline metrics or current biometrics
   baselineMetrics?: {
     timestamp?: string;
@@ -257,7 +299,7 @@ export interface EarlyWarningSummary {
     ecg_rhythm?: string;
     temperature_trend?: string;
   };
-  
+
   // Optional ML-specific fields
   user_id?: string;
   processed_at?: string;
