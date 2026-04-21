@@ -1,0 +1,37 @@
+name = "ahava-healthcare"
+compatibility_date = "2025-06-17"
+compatibility_flags = ["nodejs_compat"]
+main = "src/worker/index.ts"
+
+# Pages configuration - static assets directory
+pages_build_output_dir = "dist/client"
+
+# Functions directory (for Cloudflare Pages Functions)
+# The worker code will be in src/worker/index.ts and needs to be built
+
+# D1 Database
+[[d1_databases]]
+binding = "DB"
+database_name = "ahava-healthcare-db"
+database_id = "019beed4-58f9-79ea-8acd-d59b2c121f81"
+
+# R2 Buckets
+[[r2_buckets]]
+binding = "R2_BUCKET"
+bucket_name = "ahava-healthcare-storage"
+
+[[r2_buckets]]
+binding = "MEDICAL_IMAGES_BUCKET"
+bucket_name = "ahava-medical-images"
+
+# Environment variables (set in .dev.vars for local, Cloudflare Dashboard for production)
+[vars]
+APP_URL = "http://localhost:5173"
+
+# Development settings
+[dev]
+ip = "127.0.0.1"
+local_protocol = "http"
+upstream_protocol = "http"
+port = 8788
+

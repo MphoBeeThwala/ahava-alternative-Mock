@@ -1,0 +1,5 @@
+# Backend service — Root Directory must be set to "apps/backend" in Railway dashboard.
+# Build context is apps/backend/, Dockerfile is self-contained (uses npm, no workspace).
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"

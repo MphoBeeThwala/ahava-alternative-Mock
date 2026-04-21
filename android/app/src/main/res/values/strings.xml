@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Ahava Healthcare</string>
+    <string name="title_activity_main">Ahava Healthcare</string>
+    <string name="package_name">co.za.ahavahealthcare.app</string>
+    <string name="custom_url_scheme">co.za.ahavahealthcare.app</string>
+</resources>

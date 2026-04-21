@@ -1,0 +1,241 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Playfair+Display:wght@700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --primary: #004aad;
+  --primary-light: #1a6dd4;
+  --nurse: #10b981;
+  --nurse-light: #34d399;
+  --doctor: #7c3aed;
+  --doctor-light: #8b5cf6;
+  --bg: #f0f4fa;
+  --surface: #ffffff;
+  --border: #e2e8f0;
+  --text: #0f172a;
+  --text-muted: #64748b;
+  --text-light: #94a3b8;
+  --shadow: 0 4px 24px rgba(0,74,173,0.08);
+  --shadow-lg: 0 8px 40px rgba(0,74,173,0.14);
+  --radius: 14px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: 'DM Sans', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* ── SHELL ── */
+.app-shell { display: flex; min-height: 100vh; }
+
+.sidebar {
+  width: 240px; min-height: 100vh; background: var(--surface);
+  border-right: 1px solid var(--border); display: flex;
+  flex-direction: column; position: fixed; top: 0; left: 0;
+  z-index: 100; box-shadow: 2px 0 16px rgba(0,0,0,0.04);
+}
+
+.main-content {
+  margin-left: 240px; flex: 1; padding: 28px;
+  min-height: 100vh; overflow-x: hidden;
+}
+
+/* ── SIDEBAR INTERNALS ── */
+.sidebar-logo {
+  padding: 20px 18px 16px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 10px;
+}
+.sidebar-logo-text { font-size: 15px; font-weight: 700; color: var(--primary); }
+
+.sidebar-role-badge {
+  margin: 12px 14px; padding: 8px 14px; border-radius: 8px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; display: flex; align-items: center; gap: 7px;
+}
+.role-PATIENT { background: #eff6ff; color: var(--primary); }
+.role-NURSE   { background: #ecfdf5; color: #065f46; }
+.role-DOCTOR  { background: #f5f3ff; color: #4c1d95; }
+.role-ADMIN   { background: #f8fafc; color: #1e293b; }
+
+.nav-items { padding: 8px 10px; flex: 1; overflow-y: auto; }
+.nav-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; border-radius: 8px;
+  cursor: pointer; color: var(--text-muted); font-size: 13.5px; font-weight: 500;
+  transition: all 0.18s; margin-bottom: 2px; user-select: none;
+}
+.nav-item:hover { background: var(--bg); color: var(--text); }
+.nav-item.active { background: #eff6ff; color: var(--primary); font-weight: 600; }
+
+.sidebar-footer {
+  padding: 14px; border-top: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.user-chip {
+  display: flex; align-items: center; gap: 9px;
+  padding: 8px 10px; border-radius: 8px; background: var(--bg);
+}
+.user-avatar {
+  width: 32px; height: 32px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 700; color: white;
+  background: var(--primary); flex-shrink: 0;
+}
+.popia-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700;
+  background: #f0fdf4; color: #14532d; border: 1px solid #bbf7d0;
+}
+
+/* ── HERO CARD ── */
+.hero-card {
+  border-radius: 20px; padding: 26px; color: white;
+  position: relative; overflow: hidden; margin-bottom: 22px;
+}
+.hero-card::before {
+  content: ''; position: absolute; top: -30px; right: -30px;
+  width: 140px; height: 140px; border-radius: 50%; background: rgba(255,255,255,0.1);
+}
+.hero-card::after {
+  content: ''; position: absolute; bottom: -50px; right: 60px;
+  width: 200px; height: 200px; border-radius: 50%; background: rgba(255,255,255,0.06);
+}
+.header-PATIENT { background: linear-gradient(135deg, var(--primary), #1a6dd4); }
+.header-NURSE   { background: linear-gradient(135deg, #065f46, var(--nurse)); }
+.header-DOCTOR  { background: linear-gradient(135deg, #4c1d95, var(--doctor)); }
+.header-ADMIN   { background: linear-gradient(135deg, #0f172a, #1e293b); }
+
+/* ── BIOMETRIC CARD ── */
+.biometric-card {
+  background: var(--surface); border-radius: var(--radius);
+  border: 1px solid var(--border); padding: 16px;
+  box-shadow: var(--shadow); position: relative;
+}
+.sigma-badge {
+  font-size: 12px; font-weight: 600; padding: 3px 8px;
+  border-radius: 20px; display: inline-block; margin-top: 6px;
+}
+.sigma-red    { background: #fee2e2; color: #dc2626; }
+.sigma-yellow { background: #fef3c7; color: #d97706; }
+.sigma-green  { background: #dcfce7; color: #16a34a; }
+
+/* ── STAT / GENERIC CARD ── */
+.dash-card {
+  background: var(--surface); border-radius: var(--radius);
+  border: 1px solid var(--border); padding: 20px;
+  box-shadow: var(--shadow);
+}
+.card-section-title {
+  font-size: 11px; font-weight: 700; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 14px;
+  display: flex; align-items: center; gap: 7px;
+}
+
+/* ── TRIAGE LEVEL PILLS ── */
+.triage-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px; border-radius: 20px; font-size: 11.5px; font-weight: 600;
+}
+.triage-1 { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+.triage-2 { background: #fff7ed; color: #9a3412; border: 1px solid #fed7aa; }
+.triage-3 { background: #fef3c7; color: #78350f; border: 1px solid #fde68a; }
+.triage-4 { background: #f0fdf4; color: #14532d; border: 1px solid #bbf7d0; }
+.triage-5 { background: #dcfce7; color: #14532d; border: 1px solid #86efac; }
+
+/* ── TRIAGE CASE CARD ── */
+.triage-case-card {
+  background: var(--surface); border-radius: var(--radius);
+  border: 1.5px solid var(--border); padding: 16px;
+  margin-bottom: 12px; cursor: pointer; transition: all 0.2s;
+}
+.triage-case-card:hover { box-shadow: var(--shadow); transform: translateY(-1px); }
+.triage-case-card.selected { border-color: var(--doctor); box-shadow: 0 0 0 3px rgba(124,58,237,0.15); }
+
+/* ── AI PANEL ── */
+.ai-panel {
+  background: linear-gradient(135deg, #eff6ff 0%, #f0f9ff 100%);
+  border: 1px solid #bfdbfe; border-radius: var(--radius); padding: 18px;
+}
+
+/* ── VAULT CARD ── */
+.vault-card {
+  background: var(--surface); border-radius: var(--radius);
+  border: 1px solid var(--border); padding: 20px;
+  transition: all 0.2s; cursor: pointer; overflow: hidden; position: relative;
+}
+.vault-card:hover { box-shadow: var(--shadow-lg); transform: translateY(-2px); }
+
+/* ── AVAILABILITY TOGGLE ── */
+.availability-toggle {
+  display: flex; align-items: center; gap: 12px;
+  padding: 16px 20px; border-radius: var(--radius);
+  border: 2px solid var(--border); cursor: pointer;
+  transition: all 0.2s; user-select: none;
+}
+.availability-toggle.online { border-color: var(--nurse); background: #f0fdf4; }
+.toggle-track {
+  width: 48px; height: 26px; border-radius: 13px;
+  background: var(--border); position: relative; transition: background 0.2s; flex-shrink: 0;
+}
+.toggle-track.on { background: var(--nurse); }
+.toggle-knob {
+  width: 20px; height: 20px; border-radius: 50%; background: white;
+  position: absolute; top: 3px; left: 3px; transition: left 0.2s;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+}
+.toggle-track.on .toggle-knob { left: 25px; }
+
+/* ── VISIT STEP INDICATOR ── */
+.visit-steps { display: flex; gap: 0; margin: 16px 0; }
+.visit-step { flex: 1; text-align: center; position: relative; }
+.visit-step::before {
+  content: ''; position: absolute; top: 16px; left: 50%; right: -50%;
+  height: 2px; background: var(--border); z-index: 0;
+}
+.visit-step:last-child::before { display: none; }
+.step-dot {
+  width: 32px; height: 32px; border-radius: 50%;
+  border: 2px solid var(--border); background: var(--surface);
+  margin: 0 auto 6px; position: relative; z-index: 1;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 700; transition: all 0.3s;
+}
+.visit-step.done .step-dot { border-color: var(--nurse); background: var(--nurse); color: white; }
+.visit-step.active .step-dot { border-color: var(--primary); background: var(--primary); color: white; box-shadow: 0 0 0 4px rgba(0,74,173,0.2); }
+.visit-step.done::before { background: var(--nurse); }
+.step-label { font-size: 11px; font-weight: 600; color: var(--text-muted); }
+.visit-step.done .step-label { color: var(--nurse); }
+.visit-step.active .step-label { color: var(--primary); }
+
+/* ── NOTIFICATION TOAST ── */
+.toast-stack {
+  position: fixed; top: 20px; right: 20px; z-index: 600;
+  display: flex; flex-direction: column; gap: 10px; width: 320px;
+  pointer-events: none;
+}
+.toast {
+  background: var(--surface); border-radius: 12px; padding: 14px 16px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.15); border: 1px solid var(--border);
+  display: flex; align-items: flex-start; gap: 12px;
+  animation: slideInRight 0.3s ease; pointer-events: all;
+}
+@keyframes slideInRight { from{opacity:0;transform:translateX(40px)} to{opacity:1;transform:none} }
+@keyframes pulseAlert { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.7;transform:scale(1.05)} }
+.pulse-alert { animation: pulseAlert 2s infinite; }
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-light); }
+
+/* ── RESPONSIVE ── */
+@media (max-width: 768px) {
+  .sidebar { transform: translateX(-100%); }
+  .main-content { margin-left: 0; padding: 16px; }
+}

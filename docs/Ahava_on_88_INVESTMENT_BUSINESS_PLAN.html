@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ahava on 88 – Investment Business Plan</title>
+  <style>
+    :root { --text: #1a1a1a; --muted: #555; --border: #ddd; }
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; line-height: 1.5; color: var(--text); max-width: 800px; margin: 0 auto; padding: 2rem; }
+    h1 { font-size: 1.75rem; margin-top: 0; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+    h2 { font-size: 1.25rem; margin-top: 1.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1rem; }
+    p { margin: 0.5rem 0; }
+    ul { margin: 0.5rem 0; padding-left: 1.5rem; }
+    li { margin: 0.25rem 0; }
+    hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
+    strong { font-weight: 600; }
+    code { font-size: 0.9em; background: #f5f5f5; padding: 0.1em 0.3em; border-radius: 3px; }
+    .subtitle { color: var(--muted); font-weight: 600; margin-bottom: 1rem; }
+    .no-print { margin-bottom: 1rem; padding: 0.75rem; background: #f0f7ff; border-radius: 6px; font-size: 0.9rem; }
+    @media print {
+      body { padding: 1rem; }
+      .no-print { display: none !important; }
+      h2 { page-break-after: avoid; }
+      ul, p { page-break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <p class="no-print">To save as PDF: <strong>Ctrl+P</strong> (or Cmd+P on Mac) &rarr; choose &ldquo;Save as PDF&rdquo; or &ldquo;Microsoft Print to PDF&rdquo; &rarr; save as <strong>Ahava on 88 NVESTMENT BUSINESS PLAN.pdf</strong></p>
+
+  <h1>Ahava Healthcare (on 88) – Investment Business Plan</h1>
+  <p class="subtitle">AI-powered home healthcare platform for South Africa</p>
+  <hr>
+  <h2>1. Cover and Executive Summary</h2>
+  <h3>Title</h3>
+  <p>Ahava Healthcare (on 88) – Investment Business Plan</p>
+  <h3>Subtitle</h3>
+  <p>AI-powered home healthcare platform for South Africa</p>
+  <h3>Executive Summary</h3>
+  <p><strong>Problem.</strong> South Africa faces constrained access to quality primary care, overcrowded facilities, and a growing need for home-based care and triage. Patients struggle to book visits, coordinate with nurses, and get timely oversight from doctors. Care is fragmented and payment options are limited.</p>
+  <p><strong>Solution.</strong> Ahava Healthcare is a single platform that connects patients with qualified nurses for home visits, provides doctor oversight for quality assurance, and adds AI-assisted triage using symptoms, medical images, and biometric data. Patients book visits, pay by card or insurance (Paystack), and receive care with full visibility for clinicians. All AI output is reviewed by licensed professionals (human-in-the-loop).</p>
+  <p><strong>Market.</strong> The platform is built for South Africa: timezone (Africa/Johannesburg), currency (ZAR), and alignment with local healthcare guidelines (NDOH, EML). Target segments include primary care, chronic care, and post-discharge follow-up.</p>
+  <p><strong>Traction.</strong> The platform is built and production-ready: backend API (Express, PostgreSQL, Prisma), unified Next.js web app (Patient, Nurse, Doctor, Admin dashboards), Paystack integration, AI triage (Google Gemini), and deployment configs for Railway, Render, and Fly.io. Pre-launch checklist items (production env, DB backups, monitoring) are documented and addressable.</p>
+  <p><strong>Ask.</strong> [To be completed: funding amount, runway, and key milestones.]</p>
+  <hr>
+  <h2>2. Business Case</h2>
+  <h3>Problem Statement</h3>
+  <ul>
+    <li>Access to quality primary care in South Africa is limited; facilities are overburdened.</li>
+    <li>Home-based care and nurse-led visits are underused due to coordination and trust frictions.</li>
+    <li>Triage and symptom assessment are often delayed or inconsistent.</li>
+    <li>Payment and insurance claims add administrative load for providers and patients.</li>
+  </ul>
+  <h3>Solution</h3>
+  <p>Ahava delivers one integrated platform:</p>
+  <ul>
+    <li><strong>Patient booking:</strong> Scheduling of home healthcare visits with address, date, duration, and payment method (card or insurance).</li>
+    <li><strong>Nurse operations:</strong> Real-time visit management, GPS-based assignment, status updates (scheduled, en route, arrived, in progress, completed), and in-app messaging.</li>
+    <li><strong>Doctor oversight:</strong> Review and approval of visits, review of AI triage cases (approve, override, or refer), and quality assurance.</li>
+    <li><strong>AI-assisted triage:</strong> Patients submit symptoms, optional medical images (e.g. X-ray, dermatology), and biometric data. Google Gemini powers preliminary analysis; cases are routed by specialty and priority. All outputs are reviewed by a doctor or nurse before release.</li>
+    <li><strong>Payments:</strong> Paystack for card payments and insurance claim processing; payment status and refunds tracked in-platform.</li>
+  </ul>
+  <h3>Market</h3>
+  <ul>
+    <li><strong>Geography:</strong> South Africa first; design supports local compliance (POPIA) and healthcare norms.</li>
+    <li><strong>Segments:</strong> Primary care, chronic disease management, post-discharge follow-up, and home-based nursing.</li>
+    <li><strong>Regulatory context:</strong> Alignment with NDOH/EML and clinical guidelines; human oversight of AI to support safe, accountable care.</li>
+  </ul>
+  <h3>Revenue Model</h3>
+  <ul>
+    <li><strong>Booking and visit fees:</strong> Revenue from completed home visits (patient or insurer pays).</li>
+    <li><strong>Paystack:</strong> Transaction flow for card payments; platform can retain a margin or pass-through per commercial agreement.</li>
+    <li><strong>Insurance:</strong> Insurance claim processing and verification (CARD and INSURANCE payment methods in-platform).</li>
+    <li><strong>AI triage (optional):</strong> Specialty- and priority-based pricing in ZAR (e.g. Nursing R500 base, General Practice R800, Cardiology R2,000, Emergency R3,000; adjusted by priority: LOW 0.8x, MEDIUM 1x, HIGH 1.3x, URGENT 1.5x). Examples: skin rash (Dermatology, LOW) ~R960; chest pain (Cardiology, URGENT) ~R3,000.</li>
+  </ul>
+  <h3>Competitive Edge</h3>
+  <ul>
+    <li><strong>Integration:</strong> Combined home visits, doctor oversight, and AI triage in one product (no separate triage and visit tools).</li>
+    <li><strong>South Africa–first:</strong> Built for SA timezone, language (en-ZA), currency (ZAR), and guideline alignment.</li>
+    <li><strong>Human-in-the-loop:</strong> AI supports clinicians; every triage output is reviewed before release to the patient.</li>
+  </ul>
+  <hr>
+  <h2>3. Technical Overview</h2>
+  <h3>Tech Stack (Current Codebase)</h3>
+  <p><strong>Backend</strong></p>
+  <ul>
+    <li>Runtime: Node.js (>=20) with TypeScript</li>
+    <li>Framework: Express.js</li>
+    <li>Database: PostgreSQL with Prisma ORM</li>
+    <li>Cache and queue: Redis, BullMQ for background jobs</li>
+    <li>Authentication: JWT with refresh tokens, bcrypt</li>
+    <li>AI: Google Generative AI (Gemini) for symptom and image analysis</li>
+    <li>Payments: Paystack (card and insurance; webhooks)</li>
+    <li>File processing: Sharp, PDFKit</li>
+    <li>Real-time: WebSocket (visit and location updates)</li>
+  </ul>
+  <p><strong>Frontend</strong></p>
+  <ul>
+    <li>Framework: Next.js 15 (React 19)</li>
+    <li>Language: TypeScript</li>
+    <li>Styling: Tailwind CSS</li>
+    <li>Single app: Unified web app with role-based dashboards (Patient, Nurse, Doctor, Admin)</li>
+  </ul>
+  <p><strong>Infrastructure</strong></p>
+  <ul>
+    <li>Deployment: Railway (primary), Render, Fly.io</li>
+    <li>CI/CD: GitHub Actions</li>
+    <li>Package management: pnpm; monorepo with workspaces (e.g. apps/backend, workspace)</li>
+  </ul>
+  <h3>Architecture</h3>
+  <ul>
+    <li><strong>Monorepo:</strong> Backend (Express API), frontend (Next.js in <code>workspace</code>), shared packages.</li>
+    <li><strong>Single API:</strong> One backend serves all roles; role-based access control (PATIENT, NURSE, DOCTOR, ADMIN).</li>
+    <li><strong>Real-time:</strong> WebSocket for nurse location and visit status; supports "notify nearby nurses" for booking assignment.</li>
+    <li><strong>Data model (Prisma):</strong> Users (with role, verification, availability, location for nurses); Bookings (patient, scheduled date, address, payment method, insurance fields); Visits (booking, nurse, doctor, status lifecycle); Payments (visit, status, Paystack reference); Messages; BiometricReadings; HealthAlerts; TriageCases (patient, AI output, doctor review status).</li>
+  </ul>
+  <h3>Core Capabilities</h3>
+  <ul>
+    <li><strong>Auth and RBAC:</strong> JWT with refresh tokens; encrypted sensitive fields; rate limiting and Helmet for security headers.</li>
+    <li><strong>Bookings and visits:</strong> Full lifecycle from booking creation to completed visit; nurse assignment (including location-based); doctor approval and status updates.</li>
+    <li><strong>Payments:</strong> Paystack integration with webhooks; payment method CARD or INSURANCE; insurance provider and member number support; status tracking (PENDING, PROCESSING, COMPLETED, FAILED, REFUNDED).</li>
+    <li><strong>AI triage:</strong> Patient submits symptoms and optional images; Gemini used for analysis; specialty routing and priority (LOW/MEDIUM/HIGH/URGENT); doctor review (approve, override, or refer); cost calculation by specialty and priority.</li>
+    <li><strong>Biometric monitoring:</strong> Biometric readings and health alerts; supports baseline and early warning.</li>
+    <li><strong>Storage and encryption:</strong> Sensitive data encrypted; file handling via Sharp/PDFKit; production storage can use local volumes or external object storage.</li>
+  </ul>
+  <h3>Security and Compliance</h3>
+  <ul>
+    <li>HTTPS, secure headers (Helmet), and CORS configuration.</li>
+    <li>Encryption for sensitive fields (e.g. address, ID number); JWT secrets and encryption keys via environment variables.</li>
+    <li>Rate limiting on the API.</li>
+    <li>Human-in-the-loop: all AI triage output is reviewed by a licensed professional before release.</li>
+    <li>POPIA and healthcare compliance: design supports consent, audit trail, and data minimisation; legal and compliance roadmap to be formalised with advisors.</li>
+  </ul>
+  <h3>Deployment and Operations</h3>
+  <ul>
+    <li><strong>Ready:</strong> Backend API, database schema, auth, bookings, visits, payments, AI triage, deployment configs (Railway, Render, Fly.io), PNPM and Prisma set up.</li>
+    <li><strong>Pre-launch:</strong> Production environment variables (JWT, encryption keys, Paystack production keys, DATABASE_URL, REDIS_URL); run production migrations; database backups and connection pooling; CORS for production domains; monitoring and error tracking (e.g. Sentry); optional ML service URL or disable if not used.</li>
+    <li><strong>Frontend:</strong> Next.js app in <code>workspace</code> contains all four role dashboards; deployment configs can be updated to build and serve this app (e.g. as the primary frontend).</li>
+  </ul>
+  <hr>
+  <h2>4. Operations</h2>
+  <h3>Day-to-Day Operations</h3>
+  <ul>
+    <li><strong>Nurse scheduling and visit assignment:</strong> Assign visits to available nurses; use location and status (scheduled, en route, arrived, in progress, completed) to manage workload.</li>
+    <li><strong>Patient support:</strong> Handle booking and payment queries; support for insurance verification and payment failures.</li>
+    <li><strong>Payment and insurance:</strong> Monitor Paystack webhooks and payment status; support insurance verification and claim follow-up.</li>
+    <li><strong>Platform monitoring:</strong> Uptime, error rates, and critical flows (auth, booking, payment, triage); alerts for failures and capacity.</li>
+  </ul>
+  <h3>Clinical Operations</h3>
+  <ul>
+    <li><strong>Doctor oversight:</strong> Review and approve visits; review AI triage cases (approve, add diagnosis, or refer); ensure every triage output is signed off before release.</li>
+    <li><strong>Workflows:</strong> Triage case statuses (e.g. PENDING_REVIEW, APPROVED, DOCTOR_OVERRIDE, REFERRED) support clear escalation and referral paths.</li>
+    <li><strong>Guidelines:</strong> Clinical content and triage logic aligned with NDOH/EML and local guidelines; prompts and specialty routing designed for SA context.</li>
+  </ul>
+  <h3>Compliance and Risk</h3>
+  <ul>
+    <li><strong>POPIA:</strong> Consent, purpose limitation, and secure handling of personal and health data; encryption and access control in place; audit trail to be enhanced where required.</li>
+    <li><strong>Human-in-the-loop:</strong> AI is an aid; final responsibility remains with the licensed professional.</li>
+    <li><strong>Incidents and escalation:</strong> Defined escalation paths (e.g. refer to in-person or partner); incident response plan to be documented and tested.</li>
+  </ul>
+  <hr>
+  <h2>5. Financial and Cost Overview</h2>
+  <h3>Revenue Streams</h3>
+  <ul>
+    <li>Visit and booking fees (ZAR).</li>
+    <li>Insurance claims processed through the platform.</li>
+    <li>Optional AI triage fees (ZAR), with pricing by specialty and priority as described in the Business Case.</li>
+  </ul>
+  <h3>Operational Cost Summary (Order of Magnitude)</h3>
+  <ul>
+    <li><strong>Hosting (Railway or equivalent):</strong> Managed PostgreSQL and Redis; application hosting; variable with usage.</li>
+    <li><strong>AI (Google Gemini):</strong> Usage-based; on the order of tens of USD per month for moderate volume (e.g. thousands of analyses).</li>
+    <li><strong>Payments (Paystack):</strong> Transaction fees per payment; terms as per Paystack agreement.</li>
+    <li><strong>Storage and bandwidth:</strong> Depends on volume of images and data; local or cloud object storage.</li>
+    <li><strong>Monitoring and tools:</strong> Optional (e.g. error tracking, uptime); low to moderate monthly cost.</li>
+  </ul>
+  <p><em>Note: The live stack uses Express, PostgreSQL, and Railway (or Render/Fly.io), not Cloudflare Workers or D1. Cost estimates should be based on this stack.</em></p>
+  <h3>Use of Funds</h3>
+  <p>[To be completed: allocation of investment (e.g. product, operations, compliance, marketing, runway).]</p>
+  <h3>Funding Ask</h3>
+  <p>[To be completed: amount, key milestones, and use of funds.]</p>
+  <hr>
+  <h2>6. Risks and Mitigation</h2>
+  <h3>Technical</h3>
+  <ul>
+    <li><strong>Dependency on third-party APIs (e.g. Gemini, Paystack):</strong> Mitigation: environment-based configuration; monitoring and alerts; fallbacks or graceful degradation where feasible.</li>
+    <li><strong>Uptime and performance:</strong> Mitigation: deployment on reliable infrastructure (Railway/Render/Fly.io); database backups; health checks and monitoring.</li>
+  </ul>
+  <h3>Regulatory</h3>
+  <ul>
+    <li><strong>Healthcare and data protection in South Africa:</strong> Mitigation: compliance roadmap; legal and regulatory advice; human oversight of AI; consent and audit trail.</li>
+    <li><strong>Evolving regulation:</strong> Mitigation: stay abreast of POPIA and healthcare authority guidance; design for data portability and retention policies.</li>
+  </ul>
+  <h3>Operational</h3>
+  <ul>
+    <li><strong>Nurse and doctor availability:</strong> Mitigation: verification and onboarding; clear assignment and queue management; escalation paths.</li>
+    <li><strong>Quality of care:</strong> Mitigation: doctor oversight of visits and triage; structured review and release workflow; feedback and incident handling.</li>
+  </ul>
+  <hr>
+  <h2>7. Team and Next Steps</h2>
+  <h3>Team</h3>
+  <p>Ahava is structured for lean, startup-friendly execution. The team combines technical leadership (full-stack, backend, frontend), operations and general management (scheduling, support, partners), and clinical leadership (medical oversight, guideline alignment, and AI-review policy). Roles can be combined or expanded as the company scales. A dedicated team structure document can outline exact roles and hiring plan.</p>
+  <h3>Next Steps</h3>
+  <ul>
+    <li><strong>Launch checklist:</strong> Complete production environment variables (JWT, encryption, Paystack production, DATABASE_URL, REDIS_URL); run production migrations; enable database backups; configure CORS and monitoring; deploy frontend (e.g. from <code>workspace</code>) and point to production API.</li>
+    <li><strong>First pilots:</strong> Run controlled pilots with a small set of patients, nurses, and doctors; validate booking-to-visit flow, payments, and triage review; gather feedback.</li>
+    <li><strong>Metrics:</strong> Define and track KPIs (e.g. bookings per week, visit completion rate, payment success rate, triage review time, user satisfaction) and iterate on product and operations.</li>
+  </ul>
+  <hr>
+  <p><em>Document version: 1.0. Export this document to PDF as needed (e.g. "Ahava on 88 NVESTMENT BUSINESS PLAN.pdf").</em></p>
+</body>
+</html>

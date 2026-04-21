@@ -1,0 +1,5 @@
+
+DROP INDEX idx_diagnostic_reports_is_released;
+DROP INDEX idx_diagnostic_reports_doctor_id;
+DROP INDEX idx_diagnostic_reports_patient_id;
+DROP TABLE diagnostic_reports;

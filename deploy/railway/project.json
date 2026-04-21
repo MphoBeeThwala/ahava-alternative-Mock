@@ -1,0 +1,50 @@
+{
+  "name": "ahava-healthcare",
+  "services": [
+    {
+      "name": "api",
+      "source": {
+        "path": "apps/backend"
+      },
+      "envs": [
+        { "key": "NODE_ENV", "value": "production" },
+        { "key": "DATABASE_URL", "generated": true },
+        { "key": "JWT_SECRET", "generated": true },
+        { "key": "PAYSTACK_SECRET_KEY", "required": true },
+        { "key": "PAYSTACK_WEBHOOK_SECRET", "required": true },
+        { "key": "REDIS_URL", "generated": true },
+        { "key": "ENCRYPTION_KEY", "required": true },
+        { "key": "ENCRYPTION_IV_SALT", "required": true },
+        { "key": "TIMEZONE", "value": "Africa/Johannesburg" }
+      ]
+    },
+    {
+      "name": "admin",
+      "source": { "path": "apps/admin" },
+      "envs": [
+        { "key": "NODE_ENV", "value": "production" },
+        { "key": "NEXT_PUBLIC_API_URL", "required": true }
+      ]
+    },
+    {
+      "name": "doctor",
+      "source": { "path": "apps/doctor" },
+      "envs": [
+        { "key": "NODE_ENV", "value": "production" },
+        { "key": "NEXT_PUBLIC_API_URL", "required": true }
+      ]
+    },
+    {
+      "name": "worker",
+      "source": { "path": "apps/worker" },
+      "envs": [
+        { "key": "NODE_ENV", "value": "production" },
+        { "key": "REDIS_URL", "generated": true },
+        { "key": "EXPORT_STORAGE_DIR", "required": true }
+      ]
+    },
+    { "name": "postgres", "serviceType": "postgres" },
+    { "name": "redis", "serviceType": "redis" }
+  ]
+}
+

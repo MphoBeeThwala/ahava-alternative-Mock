@@ -1,0 +1,596 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  PATIENT
+  NURSE
+  DOCTOR
+  ADMIN
+}
+
+enum VisitStatus {
+  SCHEDULED
+  EN_ROUTE
+  ARRIVED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  CARD
+  INSURANCE
+}
+
+enum InsuranceStatus {
+  PENDING_VERIFICATION
+  VERIFIED
+  REJECTED
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  FILE
+  SYSTEM
+}
+
+enum TriageCaseStatus {
+  PENDING_REVIEW      // AI done, waiting for doctor
+  ASSIGNED            // Doctor claimed the case
+  REVIEWED            // Doctor saved notes but not yet released
+  RELEASED            // Doctor released result to patient
+  ESCALATED           // SLA breached, escalated
+  EMERGENCY_REFERRAL  // Doctor declared emergency, referral issued
+  PRESCRIPTION_ISSUED // Doctor treated remotely, script written
+  APPROVED            // Legacy: doctor agrees with AI assessment
+  DOCTOR_OVERRIDE     // Legacy: doctor disagreed
+  REFERRED            // In-person or partner appointment needed
+}
+
+model User {
+  id                String   @id @default(cuid())
+  email             String   @unique
+  phone             String?  @unique
+  firstName         String
+  lastName          String
+  role              UserRole
+  isActive          Boolean  @default(true)
+  isVerified        Boolean  @default(false)
+  isAvailable       Boolean  @default(false) // For nurses/doctors to toggle "Online"
+  profileImage      String?
+  dateOfBirth       DateTime?
+  gender            String?
+  preferredLanguage String   @default("en-ZA")
+  timezone          String   @default("Africa/Johannesburg")
+  
+  // Encrypted fields
+  encryptedAddress  String?
+  encryptedIdNumber String?
+  
+  // Location tracking (for nurses)
+  lastKnownLat      Float?
+  lastKnownLng      Float?
+  lastLocationUpdate DateTime?
+  
+  // Push notification tokens
+  pushTokens        String[]
+
+  // CVD risk context for early warning (POPIA: minimal storage)
+  riskProfile       Json?    // { smoker?: boolean, hypertension?: boolean, cholesterolKnown?: boolean }
+
+  // Terra API wearable integration
+  terraUserId       String?  @unique
+  connectedDevices  String[] @default([])
+
+  // SANC verification (nurses)
+  sancId                  String?
+  sancVerificationStatus  String?  // NOT_FOUND | NAME_MISMATCH | EXPIRED | SUSPENDED | Active
+  sancVerificationDate    DateTime?
+  sancCategory            String?  // Professional Nurse | Enrolled Nurse | Enrolled Nursing Auxiliary
+
+  // HPCSA practice number (doctors)
+  hcpsaNumber             String?
+  hcpsaVerified           Boolean  @default(false)
+  hcpsaVerifiedAt         DateTime?
+
+  // Auth
+  passwordHash              String?
+  passwordResetToken        String?   @unique
+  passwordResetExpiry       DateTime?
+  emailVerificationToken    String?   @unique
+  refreshTokens             RefreshToken[]
+  
+  // Relations
+  patientBookings   Booking[] @relation("PatientBookings")
+  nurseVisits       Visit[]   @relation("NurseVisits")
+  doctorOversight   Visit[]   @relation("DoctorOversight")
+  sentMessages      Message[] @relation("SentMessages")
+  receivedMessages  Message[] @relation("ReceivedMessages")
+  biometricReadings BiometricReading[] @relation("UserBiometrics")
+  healthAlerts      HealthAlert[] @relation("UserAlerts")
+  triageCasesAsPatient TriageCase[] @relation("TriageCasePatient")
+  triageCasesAsDoctor  TriageCase[] @relation("TriageCaseDoctor")
+  doctorSessions       DoctorSession[]
+  consents             PatientConsent[]
+  baseline             UserBaseline?
+  prescriptionsAsPatient Prescription[] @relation("PatientPrescriptions")
+  prescriptionsAsDoctor  Prescription[] @relation("DoctorPrescriptions")
+  referralsAsPatient     Referral[]     @relation("PatientReferrals")
+  referralsAsDoctor      Referral[]     @relation("DoctorReferrals")
+
+  // Audit
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model Booking {
+  id              String        @id @default(cuid())
+  patientId       String
+  nurseId         String?
+  doctorId        String?
+  
+  // Encrypted address
+  encryptedAddress String
+  
+  // Scheduling
+  scheduledDate   DateTime
+  estimatedDuration Int         @default(60) // minutes
+  
+  // Payment
+  paymentMethod   PaymentMethod
+  paymentStatus   PaymentStatus @default(PENDING)
+  amountInCents   Int
+  
+  // Insurance (if applicable)
+  insuranceProvider String?
+  insuranceMemberNumber String?
+  insuranceStatus InsuranceStatus?
+  
+  // Paystack
+  paystackReference String?
+  
+  // Relations
+  patient         User          @relation("PatientBookings", fields: [patientId], references: [id])
+  visit           Visit?
+  
+  // Audit
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  @@index([patientId])
+  @@index([nurseId])
+  @@index([doctorId])
+  @@index([scheduledDate])
+  @@index([paymentStatus])
+  @@index([paystackReference])
+  @@map("bookings")
+}
+
+model Visit {
+  id              String      @id @default(cuid())
+  bookingId       String      @unique
+  nurseId         String
+  doctorId        String?
+  
+  status          VisitStatus @default(SCHEDULED)
+  
+  // Timing
+  scheduledStart  DateTime
+  actualStart     DateTime?
+  actualEnd       DateTime?
+  
+  // Location tracking
+  gpsCoordinates  Json?       // { lat: number, lng: number, timestamp: string }[]
+  
+  // Biometrics (for patients without wearable devices)
+  biometrics      Json?       // { bloodPressure: { systolic: number, diastolic: number }, heartRate: number, temperature: number, oxygenSaturation: number, weight: number, height: number, glucose: number, timestamp: string }[]
+  
+  // Treatment information
+  treatment       Json?       // { medications: [{ name: string, dosage: string, frequency: string }], procedures: string[], notes: string, timestamp: string }
+  
+  // Reports
+  nurseReport     String?     // Encrypted - Detailed visit report
+  doctorReview    String?
+  doctorRating    Int?        // 1-5 stars
+  
+  // Relations
+  booking         Booking     @relation(fields: [bookingId], references: [id])
+  nurse           User        @relation("NurseVisits", fields: [nurseId], references: [id])
+  doctor          User?       @relation("DoctorOversight", fields: [doctorId], references: [id])
+  messages        Message[]
+  payments        Payment[]
+  
+  // Audit
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  
+  @@index([nurseId])
+  @@index([doctorId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("visits")
+}
+
+model Message {
+  id              String      @id @default(cuid())
+  visitId         String
+  senderId        String
+  recipientId     String
+  
+  type            MessageType @default(TEXT)
+  content         String      // Encrypted
+  isRead          Boolean     @default(false)
+  
+  // File attachments
+  attachmentUrl   String?
+  attachmentType  String?
+  
+  // Relations
+  visit           Visit       @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  sender          User        @relation("SentMessages", fields: [senderId], references: [id])
+  recipient       User        @relation("ReceivedMessages", fields: [recipientId], references: [id])
+  
+  // Audit
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  
+  @@index([visitId, createdAt])
+  @@index([senderId, createdAt])
+  @@index([recipientId, createdAt])
+  @@map("messages")
+}
+
+model Payment {
+  id              String        @id @default(cuid())
+  visitId         String
+  amountInCents   Int
+  currency        String        @default("ZAR")
+  status          PaymentStatus @default(PENDING)
+  
+  // Paystack
+  paystackReference String?
+  paystackData    Json?         // Store Paystack response
+  
+  // Relations
+  visit           Visit         @relation(fields: [visitId], references: [id])
+  
+  // Audit
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  @@index([visitId, createdAt])
+  @@index([status])
+  @@index([paystackReference])
+  @@map("payments")
+}
+
+model AuditLog {
+  id              String      @id @default(cuid())
+  userId          String?
+  userRole        UserRole?
+  action          String
+  resource        String
+  resourceId      String?
+  metadata        Json?
+  checksum        String      // For integrity verification
+  
+  // Audit
+  createdAt       DateTime    @default(now())
+  
+  @@map("audit_logs")
+}
+
+model ExportJob {
+  id              String      @id @default(cuid())
+  userId          String
+  userRole        UserRole
+  type            String      // "visit_report", "user_list", etc.
+  filters         Json        // Store filter criteria
+  status          String      @default("PENDING") // PENDING, PROCESSING, COMPLETED, FAILED
+  fileUrl         String?
+  fileSize        Int?
+  checksum        String?
+  
+  // Audit
+  createdAt       DateTime    @default(now())
+  completedAt     DateTime?
+  
+  @@map("export_jobs")
+}
+
+model BiometricReading {
+  id              String      @id @default(cuid())
+  userId          String
+  
+  // Core vitals
+  heartRate       Float?
+  heartRateResting Float?
+  hrvRmssd        Float?      // Heart Rate Variability
+  bloodPressureSystolic Float?
+  bloodPressureDiastolic Float?
+  oxygenSaturation Float?    // SpO2
+  temperature     Float?
+  respiratoryRate Float?
+  weight          Float?
+  height          Float?
+  glucose         Float?
+  
+  // Activity context (for wearable devices)
+  stepCount       Int?
+  activeCalories  Float?
+  skinTempOffset  Float?
+  sleepDurationHours Float?   // hours per night (wearable)
+  ecgRhythm       String?     // "regular" | "irregular" (single-lead ECG)
+  temperatureTrend String?    // "normal" | "elevated_single_day" | "elevated_over_3_days"
+  
+  // Source tracking
+  source          String      @default("manual") // "wearable" | "manual"
+  deviceType      String?    // e.g., "apple_watch", "fitbit", "manual_entry"
+  
+  // Early warning analysis results
+  alertLevel      String?    // "GREEN" | "YELLOW" | "RED"
+  anomalies       Json?      // Array of detected anomalies
+  readinessScore  Int?       // 0-100
+  
+  // Audit
+  createdAt       DateTime   @default(now())
+  
+  // Relations
+  user            User       @relation("UserBiometrics", fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId, createdAt])
+  @@map("biometric_readings")
+}
+
+model HealthAlert {
+  id              String      @id @default(cuid())
+  userId          String
+  
+  alertLevel      String      // "YELLOW" | "RED"
+  title           String
+  message         String
+  detectedAnomalies Json?     // Array of anomalies that triggered alert
+  
+  // Alert metadata
+  acknowledged    Boolean     @default(false)
+  acknowledgedAt  DateTime?
+  resolved        Boolean     @default(false)
+  resolvedAt      DateTime?
+  
+  // Related data
+  biometricReadingId String?  // Link to the reading that triggered alert
+  visitId         String?    // Link to visit if alert led to booking
+  
+  // Audit
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  
+  // Relations
+  user            User       @relation("UserAlerts", fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId, createdAt])
+  @@index([userId, acknowledged, resolved])
+  @@map("health_alerts")
+}
+
+model TriageCase {
+  id                String           @id @default(cuid())
+  patientId         String
+  doctorId          String?
+  
+  symptoms          String
+  imageStorageRef   String?          // Optional reference to stored image
+  aiTriageLevel     Int              // 1-5
+  aiRecommendedAction String
+  aiPossibleConditions Json          // string[]
+  aiReasoning       String
+  
+  status            TriageCaseStatus  @default(PENDING_REVIEW)
+  doctorNotes       String?
+  doctorDiagnosis   String?          // Doctor's clinical diagnosis
+  doctorRecommendations String?      // Doctor's recommendations to patient
+  finalDiagnosis    String?          // Legacy field
+  finalTriageLevel  Int?             // Doctor's approved or overridden triage level
+  overrideReason    String?          // Required if finalTriageLevel != aiTriageLevel
+  referredTo        String?          // e.g. "In-person with Dr X" or "Partner clinic near patient"
+  reviewedAt        DateTime?        // When doctor saved review
+  releasedAt        DateTime?        // When doctor released to patient
+
+  // AI audit fields
+  aiModel           String?          // e.g. "claude-sonnet-4-20250514"
+  aiContextUsed     Boolean          @default(false)  // was patient context available?
+  statPearlsUsed    Boolean          @default(false)  // was StatPearls context available?
+
+  // SLA & escalation
+  slaDeadline       DateTime?        // Set on creation based on aiTriageLevel
+  escalatedAt       DateTime?
+  escalationLevel   Int              @default(0)  // 0=normal, 1=escalated, 2=critical
+  reviewedWithinSla Boolean?
+
+  // Doctor compensation
+  doctorFeeCents    Int?             // ZAR cents paid to reviewing doctor
+  feePaid           Boolean          @default(false)
+
+  patient           User             @relation("TriageCasePatient", fields: [patientId], references: [id], onDelete: Cascade)
+  doctor            User?            @relation("TriageCaseDoctor", fields: [doctorId], references: [id], onDelete: SetNull)
+  prescription      Prescription?
+  referral          Referral?
+
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  @@index([status])
+  @@index([patientId])
+  @@index([doctorId])
+  @@index([slaDeadline])
+  @@map("triage_cases")
+}
+
+model UserBaseline {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+
+  hrMean          Float?
+  hrStd           Float?
+  hrvMean         Float?
+  hrvStd          Float?
+  spo2Mean        Float?
+  spo2Std         Float?
+  rrMean          Float?
+  rrStd           Float?
+
+  demographicSeed Json?    // { age_group, gender } — SA NDoH reference values
+  dataPointCount  Int      @default(0)
+  confidencePct   Int      @default(0)  // 0-100
+  stage           String   @default("PROVISIONAL") // PROVISIONAL|CALIBRATING|PERSONALISING|PERSONAL
+  lastCalculated  DateTime?
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_baselines")
+}
+
+model SancRegister {
+  id                 String    @id @default(cuid())
+  registrationNumber String    @unique
+  firstName          String
+  lastName           String
+  category           String    // Professional Nurse | Enrolled Nurse | Enrolled Nursing Auxiliary
+  status             String    // Active | Suspended | Cancelled | Lapsed
+  expiryDate         DateTime?
+  importedAt         DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([registrationNumber])
+  @@index([status])
+  @@map("sanc_register")
+}
+
+model PatientConsent {
+  id          String    @id @default(cuid())
+  userId      String
+  consentType String    // AI_TRIAGE | BIOMETRIC_MONITORING | DATA_SHARING | MARKETING
+  version     String    @default("1.0")
+  givenAt     DateTime  @default(now())
+  ipAddress   String?
+  userAgent   String?
+  withdrawn   Boolean   @default(false)
+  withdrawnAt DateTime?
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, consentType, version])
+  @@index([userId, consentType])
+  @@map("patient_consents")
+}
+
+model DoctorSession {
+  id            String    @id @default(cuid())
+  doctorId      String
+  startsAt      DateTime
+  endsAt        DateTime
+  maxCases      Int       @default(20)
+  isActive      Boolean   @default(true)
+  casesReviewed Int       @default(0)
+
+  doctor        User      @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  createdAt     DateTime  @default(now())
+
+  @@index([doctorId, isActive])
+  @@index([startsAt, endsAt])
+  @@map("doctor_sessions")
+}
+
+model Prescription {
+  id              String    @id @default(cuid())
+  triageCaseId    String    @unique
+  patientId       String
+  doctorId        String
+
+  medications     Json      // [{ name, dosage, frequency, duration, instructions }]
+  diagnosis       String
+  doctorNotes     String?
+
+  // Auditable snapshot of prescriber identity at time of issuing
+  hcpsaNumberSnapshot String?
+  doctorNameSnapshot  String
+
+  issuedAt        DateTime  @default(now())
+
+  triageCase      TriageCase @relation(fields: [triageCaseId], references: [id], onDelete: Cascade)
+  patient         User       @relation("PatientPrescriptions", fields: [patientId], references: [id])
+  doctor          User       @relation("DoctorPrescriptions", fields: [doctorId], references: [id])
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([patientId])
+  @@index([doctorId])
+  @@map("prescriptions")
+}
+
+model Referral {
+  id              String    @id @default(cuid())
+  triageCaseId    String    @unique
+  patientId       String
+  doctorId        String
+
+  referralType        String    // EMERGENCY | URGENT | ROUTINE | SPECIALIST
+  provisionalDiagnosis String
+  clinicalNotes       String    // Doctor's preliminary assessment / referral narrative
+  recommendedFacility String    // HOSPITAL | CLINIC | SPECIALIST | EMS
+
+  // Auditable snapshot of referring doctor
+  hcpsaNumberSnapshot String?
+  doctorNameSnapshot  String
+
+  issuedAt        DateTime  @default(now())
+
+  // SMS delivery tracking (stub — populated when SMS provider is configured)
+  smsStatus       String    @default("NO_SMS_PROVIDER") // NO_SMS_PROVIDER | PENDING | SENT | FAILED
+  smsSentAt       DateTime?
+
+  triageCase      TriageCase @relation(fields: [triageCaseId], references: [id], onDelete: Cascade)
+  patient         User       @relation("PatientReferrals", fields: [patientId], references: [id])
+  doctor          User       @relation("DoctorReferrals", fields: [doctorId], references: [id])
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([patientId])
+  @@index([doctorId])
+  @@map("referrals")
+}

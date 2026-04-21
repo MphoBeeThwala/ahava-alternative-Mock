@@ -1,0 +1,32 @@
+{
+  "name": "workspace",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "node -e \"const fs=require('fs'); const {spawn}=require('child_process'); const candidates=['next/standalone/server.js','next/standalone/workspace/server.js','workspace/next/standalone/server.js','workspace/next/standalone/workspace/server.js']; const target=candidates.find(p=>fs.existsSync(p)); if(!target){console.error('Standalone server.js not found. Tried: '+candidates.join(', ')); process.exit(1);} const env={...process.env, HOSTNAME:'0.0.0.0', HOST:'0.0.0.0'}; spawn(process.execPath,[target],{stdio:'inherit', env}).on('exit',c=>process.exit(c ?? 1));\"",
+    "lint": "eslint",
+    "test": "echo \"No tests configured for workspace\""
+  },
+  "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/material": "^7.3.2",
+    "axios": "^1.12.2",
+    "next": "^15.5.9",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "^15.5.9",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}

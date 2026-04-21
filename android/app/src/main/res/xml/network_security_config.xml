@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!--
+        Allow cleartext (HTTP) traffic to the Android emulator host (10.0.2.2)
+        during local development. Capacitor serves over https://localhost but the
+        backend runs on http locally.
+        IMPORTANT: Remove the <domain-config> block before Play Store release
+        and point CAPACITOR_API_URL to your HTTPS Railway backend instead.
+    -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+
+    <!-- All other traffic keeps the default (cleartext blocked) -->
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

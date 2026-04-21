@@ -1,0 +1,9 @@
+# Railway frontend service — builds the Next.js workspace app via Docker.
+# Backend service should set Root Directory to "apps/backend" (uses its own Dockerfile).
+# ML service should set Root Directory to "apps/ml-service".
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "workspace/Dockerfile"
+
+[deploy]
+startCommand = "node workspace/server.js"

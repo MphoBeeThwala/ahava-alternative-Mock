@@ -1,0 +1,32 @@
+# Dependencies and build outputs
+node_modules
+**/node_modules
+**/.next
+**/dist
+**/coverage
+**/.pnpm-store
+
+# Env and secrets (never in image)
+.env
+.env.*
+!.env.example
+
+# Git and IDE
+.git
+.gitignore
+.github
+*.md
+!README.md
+
+# Tests and scripts (not needed in production image)
+**/*.test.ts
+**/*.spec.ts
+**/__tests__
+**/test-*.js
+**/test-*.ps1
+**/*.ps1
+
+# Misc
+*.log
+.DS_Store
+Thumbs.db

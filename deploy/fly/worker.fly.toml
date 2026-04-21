@@ -1,0 +1,16 @@
+app = "ahava-healthcare-worker"
+primary_region = "jnb"
+
+[build]
+  dockerfile = "apps/worker/Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  TIMEZONE = "Africa/Johannesburg"
+
+[processes]
+  worker = "node dist/worker.js"
+
+[[vm]]
+  size = "shared-cpu-1x"
+

@@ -1,0 +1,78 @@
+services:
+  - type: web
+    name: ahava-healthcare-api
+    env: node
+    plan: standard
+    branch: main
+    rootDir: apps/backend
+    buildCommand: yarn install --immutable && yarn build
+    startCommand: node dist/index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_WEBHOOK_SECRET
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: ENCRYPTION_IV_SALT
+        sync: false
+      - key: TIMEZONE
+        value: Africa/Johannesburg
+  - type: web
+    name: ahava-healthcare-admin
+    env: node
+    plan: standard
+    branch: main
+    rootDir: apps/admin
+    buildCommand: yarn install --immutable && yarn build
+    startCommand: yarn start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_API_URL
+        sync: false
+  - type: web
+    name: ahava-healthcare-doctor
+    env: node
+    plan: standard
+    branch: main
+    rootDir: apps/doctor
+    buildCommand: yarn install --immutable && yarn build
+    startCommand: yarn start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_API_URL
+        sync: false
+  - type: worker
+    name: ahava-healthcare-worker
+    env: node
+    plan: standard
+    branch: main
+    rootDir: apps/worker
+    buildCommand: yarn install --immutable && yarn build
+    startCommand: node dist/worker.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: REDIS_URL
+        sync: false
+      - key: EXPORT_STORAGE_DIR
+        sync: false
+databases:
+  - name: ahava-healthcare-postgres
+    databaseName: ahava-healthcare
+    plan: standard
+  - name: ahava-healthcare-redis
+    plan: standard
+

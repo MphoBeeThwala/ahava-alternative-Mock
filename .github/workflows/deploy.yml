@@ -1,0 +1,101 @@
+name: Deploy (Multi-Provider)
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4.3.1
+      - uses: actions/setup-node@v4.4.0
+        with:
+          node-version: 20
+      - name: Install Yarn
+        run: corepack enable && corepack prepare yarn@4.3.1 --activate
+      - name: Install dependencies
+        run: yarn install --immutable
+      - name: Build packages
+        run: yarn workspaces foreach -A -pt run build || true
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3.12.0
+      - name: Login to GHCR
+        uses: docker/login-action@v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build & push API image
+        uses: docker/build-push-action@v6.19.2
+        with:
+          context: .
+          file: apps/backend/Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/kykthuto-api:latest
+      - name: Build & push Worker image
+        uses: docker/build-push-action@v6.19.2
+        with:
+          context: .
+          file: apps/worker/Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/kykthuto-worker:latest
+
+  deploy-railway:
+    needs: build-and-publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.3.1
+      - name: Install Railway
+        run: curl -fsSL https://railway.app/install.sh | sh
+      - name: Railway Deploy (Default)
+        if: ${{ secrets.RAILWAY_TOKEN }}
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          echo "Deploying to Railway (Default Provider)..."
+          ~/.railway/bin/railway up --service api || echo "API deployment skipped - no Railway token"
+          ~/.railway/bin/railway up --service admin || echo "Admin deployment skipped - no Railway token"
+          ~/.railway/bin/railway up --service doctor || echo "Doctor deployment skipped - no Railway token"
+          ~/.railway/bin/railway up --service worker || echo "Worker deployment skipped - no Railway token"
+      - name: Railway Setup Instructions
+        if: ${{ !secrets.RAILWAY_TOKEN }}
+        run: |
+          echo "::warning::Railway token not found. Add RAILWAY_TOKEN secret to enable automatic deployment."
+          echo "To set up Railway deployment:"
+          echo "1. Get Railway token from https://railway.app/account/tokens"
+          echo "2. Add RAILWAY_TOKEN secret to GitHub repository"
+          echo "3. Push to main branch to trigger deployment"
+
+  deploy-render:
+    needs: build-and-publish
+    if: ${{ secrets.RENDER_API_KEY }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.3.1
+      - name: Render Deploy (Alternative)
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        run: |
+          echo "Deploying to Render (Alternative Provider)..."
+          echo "Import render.yaml in Render dashboard to create services"
+
+  deploy-fly:
+    needs: build-and-publish
+    if: ${{ secrets.FLY_API_TOKEN }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.3.1
+      - name: Setup Flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@1.5
+      - name: Deploy to Fly.io (Alternative)
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          echo "Deploying to Fly.io (Alternative Provider)..."
+          flyctl deploy -c deploy/fly/api.fly.toml --image ghcr.io/${{ github.repository_owner }}/kykthuto-api:latest --remote-only || echo "API deployment failed"
+          flyctl deploy -c deploy/fly/worker.fly.toml --image ghcr.io/${{ github.repository_owner }}/kykthuto-worker:latest --remote-only || echo "Worker deployment failed"
+

@@ -1,0 +1,20 @@
+app = "ahava-healthcare-api"
+primary_region = "jnb"
+
+[build]
+  dockerfile = "apps/backend/Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  TIMEZONE = "Africa/Johannesburg"
+
+[http_service]
+  internal_port = 4000
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  size = "shared-cpu-1x"
+
