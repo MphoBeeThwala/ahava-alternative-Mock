@@ -23,7 +23,7 @@ const GENDERS = [
 ];
 
 export default function ProfilePage() {
-  const { user, refreshUser } = useAuth();
+  const { user, refreshUser, updateUser } = useAuth();
   const [form, setForm] = useState({
     firstName: "",
     lastName: "",
@@ -124,7 +124,20 @@ export default function ProfilePage() {
       } else {
         setSuccess("Profile updated successfully.");
       }
-      if (refreshUser) await refreshUser();
+      // Optimistically update context from the posted values so the sidebar
+      // and any downstream pages reflect the save even if /auth/me is slow.
+      if (updateUser) {
+        const patch: Record<string, unknown> = {
+          firstName: form.firstName,
+          lastName: form.lastName,
+          phone: form.phone || undefined,
+          dateOfBirth: form.dateOfBirth || undefined,
+          gender: form.gender || undefined,
+          preferredLanguage: form.preferredLanguage || undefined,
+        };
+        updateUser(patch as Parameters<typeof updateUser>[0]);
+      }
+      if (refreshUser) { refreshUser().catch(() => {}); }
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
       setError(msg ?? "Failed to save changes. Please try again.");
@@ -154,17 +167,16 @@ export default function ProfilePage() {
         surveyVersion: riskProfile.surveyVersion ?? 1,
       };
       const res = await patientApi.updateRiskProfile(payload);
+      // Update React state + localStorage IMMEDIATELY so DashboardLayout's
+      // "if patient && !onboardingCompleted → push(/profile)" effect sees the
+      // new value and lets us navigate away. Doing this before (and in
+      // addition to) refreshUser() prevents a redirect-bounce caused by
+      // stale context state while /auth/me is in flight.
+      const savedRiskProfile = res?.riskProfile ?? payload;
+      if (updateUser) updateUser({ riskProfile: savedRiskProfile });
       setRiskSuccess("Health profile saved. You can now view Early Warning risk signals and choose whether to consult a clinician.");
-      if (refreshUser) await refreshUser();
-      if (res?.riskProfile && typeof window !== "undefined") {
-        const storedUser = localStorage.getItem("user");
-        if (storedUser) {
-          try {
-            const parsed = JSON.parse(storedUser);
-            localStorage.setItem("user", JSON.stringify({ ...parsed, riskProfile: res.riskProfile }));
-          } catch {}
-        }
-      }
+      // Best-effort refresh from server (non-blocking for navigation)
+      if (refreshUser) { refreshUser().catch(() => {}); }
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
       setRiskError(msg ?? "Failed to save health profile. Please try again.");

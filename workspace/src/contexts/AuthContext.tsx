@@ -28,6 +28,8 @@ interface AuthContextType {
   register: (data: RegisterData) => Promise<void>;
   logout: () => void;
   refreshUser: () => Promise<void>;
+  /** Merge a partial user update into both React state and localStorage */
+  updateUser: (patch: Partial<User>) => void;
   isAuthenticated: boolean;
 }
 
@@ -178,19 +180,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(response.user as User);
   };
 
+  /**
+   * Imperatively merge a partial user update into both React state and
+   * localStorage. Use this right after a mutation (e.g. the risk-profile
+   * survey save) so the rest of the app sees the fresh state *immediately*
+   * — without waiting for a slow /auth/me roundtrip that might 401 and
+   * leave the context stale, which was the root of the "stuck on profile /
+   * can't transact" bug.
+   */
+  const updateUser = useCallback((patch: Partial<User>) => {
+    setUser((prev) => {
+      const next = prev ? ({ ...prev, ...patch } as User) : prev;
+      if (next && typeof window !== 'undefined') {
+        try { localStorage.setItem('user', JSON.stringify(next)); } catch { /* noop */ }
+      }
+      return next;
+    });
+  }, []);
+
+  /**
+   * Refresh the in-memory user from /auth/me. If the call 401s we attempt
+   * a one-shot silent refresh and retry once. Any failure is non-fatal —
+   * we just keep the previous state rather than nuking it, which used to
+   * cause transient logouts on flaky networks.
+   */
   const refreshUser = useCallback(async () => {
+    const doFetch = async (bearer: string) => fetch('/api/auth/me', {
+      credentials: 'include',
+      headers: { Authorization: `Bearer ${bearer}` },
+    });
+
     try {
       const storedToken = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
       if (!storedToken) return;
-      const res = await fetch('/api/auth/me', {
-        headers: { Authorization: `Bearer ${storedToken}` },
-      });
+      let res = await doFetch(storedToken);
+      if (res.status === 401) {
+        const rt = localStorage.getItem('refreshToken');
+        const refreshed = rt ? await silentRefresh(rt) : null;
+        if (!refreshed) return;
+        setToken(refreshed.accessToken);
+        res = await doFetch(refreshed.accessToken);
+      }
       if (!res.ok) return;
       const data = await res.json();
-      if (data.user) {
+      if (data?.user) {
         setUser(data.user as User);
         if (typeof window !== 'undefined') {
-          localStorage.setItem('user', JSON.stringify(data.user));
+          try { localStorage.setItem('user', JSON.stringify(data.user)); } catch { /* noop */ }
         }
       }
     } catch { /* non-fatal */ }
@@ -230,6 +266,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         register,
         logout,
         refreshUser,
+        updateUser,
         isAuthenticated: !loading && !!user && !!token,
       }}
     >

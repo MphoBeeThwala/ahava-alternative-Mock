@@ -15,7 +15,7 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { user, logout, isAuthenticated } = useAuth();
+  const { user, logout, isAuthenticated, loading } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
   const [verifyBannerDismissed, setVerifyBannerDismissed] = useState(false);
@@ -37,7 +37,33 @@ export default function DashboardLayout({
   };
 
   const showVerifyBanner = isAuthenticated && user && !(user as { isVerified?: boolean }).isVerified && !verifyBannerDismissed;
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Onboarding gate (PATIENT only).
+  //
+  // Previously this effect forced every patient page back to /profile whenever
+  // user.riskProfile.onboardingCompleted wasn't exactly true. That had three
+  // failure modes that combined into the "I can save the survey but can't
+  // leave the page / can't transact anywhere else" bug:
+  //
+  //   a) AuthContext state wasn't updated after the survey save — the
+  //      profile page patched localStorage but never called setUser(...),
+  //      so the effect still saw `onboardingCompleted === undefined`.
+  //   b) If /auth/me 401'd (see console) the silent validation failure left
+  //      riskProfile undefined in context, which ALSO triggered the redirect
+  //      back to /profile.
+  //   c) The effect ran before AuthContext finished its mount-time validation
+  //      (loading === true), causing a redirect flash on top of every page.
+  //
+  // The fix:
+  //   - Wait for `loading === false` before deciding anything.
+  //   - Distinguish "riskProfile not loaded yet" (don't redirect) from
+  //     "riskProfile loaded AND onboardingCompleted !== true" (do redirect).
+  //   - Profile save now calls `updateUser` on AuthContext, so this effect
+  //     immediately sees the fresh state and DOES NOT redirect back.
+  // ─────────────────────────────────────────────────────────────────────────
   const riskProfile = user?.riskProfile;
+  const riskProfileLoaded = riskProfile !== undefined; // null or object both count as loaded
   const onboardingCompleted = Boolean(
     riskProfile &&
       typeof riskProfile === "object" &&
@@ -45,13 +71,15 @@ export default function DashboardLayout({
   );
 
   useEffect(() => {
+    if (loading) return;                          // wait for auth bootstrap
     if (!isAuthenticated || !user) return;
     if (user.role !== "PATIENT") return;
-    if (onboardingCompleted) return;
+    if (!riskProfileLoaded) return;               // don't redirect on missing data
+    if (onboardingCompleted) return;              // already onboarded
     if (pathname.startsWith("/auth")) return;
     if (pathname.startsWith("/profile")) return;
     router.push("/profile");
-  }, [isAuthenticated, user, onboardingCompleted, pathname, router]);
+  }, [loading, isAuthenticated, user, riskProfileLoaded, onboardingCompleted, pathname, router]);
 
   const getDashboardPath = () => {
     if (!user) return "/";
