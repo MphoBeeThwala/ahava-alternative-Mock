@@ -7,25 +7,30 @@ import { useAuth } from '../../../contexts/AuthContext';
 
 export default function LoginPage() {
     const router = useRouter();
-    const { login, isAuthenticated } = useAuth();
+    const { login, isAuthenticated, loading: authLoading } = useAuth();
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
 
-    // Redirect if already authenticated
+    // Redirect if already authenticated — but only AFTER the AuthContext has
+    // finished validating the stored session with the backend. Before this
+    // check, an expired-but-present localStorage token would make the login
+    // page immediately bounce to the dashboard ("login gets skipped"), even
+    // though the session was actually dead.
     React.useEffect(() => {
-        if (isAuthenticated) {
-            const user = JSON.parse(localStorage.getItem('user') || '{}');
-            switch (user.role) {
-                case 'PATIENT': router.push('/patient/dashboard'); break;
-                case 'DOCTOR': router.push('/doctor/dashboard'); break;
-                case 'NURSE': router.push('/nurse/dashboard'); break;
-                case 'ADMIN': router.push('/admin/dashboard'); break;
-                default: router.push('/');
-            }
+        if (authLoading) return;
+        if (!isAuthenticated) return;
+
+        const user = JSON.parse(localStorage.getItem('user') || '{}');
+        switch (user.role) {
+            case 'PATIENT': router.push('/patient/dashboard'); break;
+            case 'DOCTOR': router.push('/doctor/dashboard'); break;
+            case 'NURSE': router.push('/nurse/dashboard'); break;
+            case 'ADMIN': router.push('/admin/dashboard'); break;
+            default: router.push('/');
         }
-    }, [isAuthenticated, router]);
+    }, [isAuthenticated, authLoading, router]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -34,10 +39,10 @@ export default function LoginPage() {
 
         try {
             await login(email, password);
-            
+
             // Get user from localStorage after login
             const user = JSON.parse(localStorage.getItem('user') || '{}');
-            
+
             // Redirect based on role
             switch (user.role) {
                 case 'PATIENT': router.push('/patient/dashboard'); break;
@@ -69,6 +74,18 @@ export default function LoginPage() {
         outline: 'none', background: '#fafaf9', color: '#1c1917',
         boxSizing: 'border-box', transition: 'border-color 0.18s',
     };
+
+    // While AuthContext is still validating the stored session on page load,
+    // render a tiny neutral shell instead of the form — this prevents the
+    // form from flashing on-screen right before an auto-redirect (or from
+    // appearing wrongly after a failed silent refresh).
+    if (authLoading) {
+        return (
+            <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fafaf9' }}>
+                <div style={{ color: '#57534e', fontSize: 14 }}>Loading…</div>
+            </div>
+        );
+    }
 
     return (
         <div style={{ display: 'flex', minHeight: '100vh', fontFamily: 'inherit' }}>
