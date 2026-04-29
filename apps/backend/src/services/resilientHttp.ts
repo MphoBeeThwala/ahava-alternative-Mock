@@ -11,6 +11,7 @@ type ResilienceOptions = {
   backoffMs?: number;
   circuitThreshold?: number;
   circuitOpenMs?: number;
+  maxElapsedMs?: number;
 };
 
 const state = new Map<string, CircuitState>();
@@ -21,6 +22,7 @@ const defaults: Required<ResilienceOptions> = {
   backoffMs: Math.max(50, parseInt(process.env.HTTP_RETRY_BACKOFF_MS ?? '250', 10) || 250),
   circuitThreshold: Math.max(1, parseInt(process.env.HTTP_CIRCUIT_THRESHOLD ?? '5', 10) || 5),
   circuitOpenMs: Math.max(1000, parseInt(process.env.HTTP_CIRCUIT_OPEN_MS ?? '15000', 10) || 15000),
+  maxElapsedMs: Math.max(1000, parseInt(process.env.HTTP_MAX_ELAPSED_MS ?? '30000', 10) || 30000),
 };
 
 function sleep(ms: number): Promise<void> {
@@ -28,10 +30,10 @@ function sleep(ms: number): Promise<void> {
 }
 
 function shouldRetry(err: unknown): boolean {
-  if (!axios.isAxiosError(err)) return true;
+  if (!axios.isAxiosError(err)) return false;
   const status = err.response?.status;
   if (!status) return true; // network/dns/timeout
-  return status >= 500 || status === 429;
+  return status >= 500 || status === 429 || status === 408 || status === 425;
 }
 
 function getState(key: string): CircuitState {
@@ -52,10 +54,13 @@ export async function withResilientHttp<T>(
   const now = Date.now();
 
   if (circuit.openedUntil > now) {
-    throw new Error(`Circuit open for ${key}`);
+    const err = new Error(`Circuit open for ${key}`) as Error & { code?: string };
+    err.code = 'CIRCUIT_OPEN';
+    throw err;
   }
 
   let lastError: unknown;
+  const startedAt = Date.now();
   for (let attempt = 0; attempt <= cfg.retries; attempt++) {
     try {
       const response = await operation(cfg.timeoutMs);
@@ -64,7 +69,8 @@ export async function withResilientHttp<T>(
       return response;
     } catch (err) {
       lastError = err;
-      if (!shouldRetry(err) || attempt === cfg.retries) break;
+      const elapsed = Date.now() - startedAt;
+      if (!shouldRetry(err) || attempt === cfg.retries || elapsed >= cfg.maxElapsedMs) break;
       const jitter = Math.floor(Math.random() * 100);
       await sleep(cfg.backoffMs * (attempt + 1) + jitter);
     }
@@ -76,4 +82,3 @@ export async function withResilientHttp<T>(
   }
   throw lastError;
 }
-

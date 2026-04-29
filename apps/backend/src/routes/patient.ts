@@ -2,12 +2,15 @@ import { Router } from 'express';
 import { AuthenticatedRequest, authMiddleware } from '../middleware/auth';
 import { rateLimiter } from '../middleware/rateLimiter';
 import { idempotencyMiddleware } from '../middleware/idempotency';
+import { aiTriageBudgetMiddleware } from '../middleware/aiTriageBudget';
 import axios from 'axios';
 import Joi from 'joi';
 import { processBiometricReading, getMonitoringSummary, detectEarlyWarningSigns } from '../services/monitoring';
 import { analyzeSymptoms } from '../services/aiTriage';
 import { startDemoStream } from '../services/demoStream';
 import prisma from '../lib/prisma';
+import { randomUUID } from 'crypto';
+import { hashValue, writeClinicalAudit } from '../services/clinicalAudit';
 
 const router: Router = Router();
 
@@ -556,6 +559,48 @@ router.get('/early-warning', authMiddleware, async (req: AuthenticatedRequest, r
       }
     }
 
+    // Safety envelope: enforce uncertainty/provenance contract even on legacy/fallback payloads.
+    if (!(mlData as any).uncertainty) {
+      (mlData as any).uncertainty = {
+        score: (mlData as any)._source === 'db_rules' ? 0.55 : 0.4,
+        reasons: (mlData as any)._source === 'db_rules' ? ['ML_SERVICE_UNAVAILABLE_FALLBACK'] : [],
+      };
+    }
+    if (!(mlData as any).provenance) {
+      (mlData as any).provenance = {
+        evidence_sources: ['Local rule-based fallback'],
+        clinical_basis: ['Deterministic threshold checks'],
+        model_version: (mlData as any)._source === 'db_rules' ? 'fallback-rules-v1' : 'unknown',
+        decision_trace_id: hashValue(`${userId}:${Date.now()}`).slice(0, 24),
+      };
+    }
+    const uncertaintyScore = Number((mlData as any)?.uncertainty?.score ?? 0.5);
+    (mlData as any).requires_clinician_review = Boolean(
+      (mlData as any)?.requires_clinician_review
+      || uncertaintyScore >= 0.45
+      || (mlData as any)?.alert_level === 'RED'
+      || (mlData as any)?.alert_level === 'YELLOW'
+    );
+
+    const responseSource = String((mlData as any)?._source ?? 'ml_service');
+    await writeClinicalAudit({
+      userId,
+      userRole: req.user?.role,
+      action: 'EARLY_WARNING_ASSESSMENT',
+      resource: 'early_warning_summary',
+      resourceId: userId,
+      metadata: {
+        source: responseSource,
+        alertLevel: (mlData as any)?.alert_level ?? 'UNKNOWN',
+        riskLevel: (mlData as any)?.riskLevel ?? 'UNKNOWN',
+        anomalyCount: Array.isArray((mlData as any)?.anomalies) ? (mlData as any).anomalies.length : 0,
+        alertTriggered: Boolean((mlData as any)?.fusion?.alert_triggered),
+        uncertaintyScore,
+        requiresClinicianReview: Boolean((mlData as any)?.requires_clinician_review),
+        decisionTraceId: (mlData as any)?.provenance?.decision_trace_id ?? null,
+      },
+    });
+
     res.json({
       success: true,
       data: mlData,
@@ -644,7 +689,7 @@ router.patch('/risk-profile', authMiddleware, async (req: AuthenticatedRequest, 
 });
 
 // Enhanced triage with biometrics
-router.post('/triage', rateLimiter, authMiddleware, async (req: AuthenticatedRequest, res, next) => {
+router.post('/triage', rateLimiter, authMiddleware, aiTriageBudgetMiddleware, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { error, value } = submitTriageWithBiometricsSchema.validate(req.body);
     if (error) {
@@ -652,9 +697,26 @@ router.post('/triage', rateLimiter, authMiddleware, async (req: AuthenticatedReq
     }
 
     const { symptoms, imageBase64, biometrics } = value;
+    const patientId = req.user!.id;
+    const caseId = randomUUID();
+    const vitalsSnapshot = biometrics ? {
+      heartRateResting: biometrics.heartRateResting ?? biometrics.heartRate ?? null,
+      oxygenSaturation: biometrics.oxygenSaturation ?? null,
+      respiratoryRate: biometrics.respiratoryRate ?? null,
+      temperature: biometrics.temperature ?? null,
+      bloodPressureSystolic: biometrics.bloodPressure?.systolic ?? null,
+      bloodPressureDiastolic: biometrics.bloodPressure?.diastolic ?? null,
+      hrvRmssd: biometrics.hrvRmssd ?? null,
+    } : undefined;
 
     // Call AI triage service directly (avoids network self-call)
-    const triageResult = await analyzeSymptoms({ symptoms, imageBase64 });
+    const triageResult = await analyzeSymptoms({
+      symptoms,
+      imageBase64,
+      patientId,
+      caseId,
+      vitalsSnapshot,
+    });
 
     // If biometrics provided, enhance triage with biometric context
     let biometricContext = null;
@@ -690,12 +752,30 @@ router.post('/triage', rateLimiter, authMiddleware, async (req: AuthenticatedReq
 
       biometricContext = biometricAnalysis;
 
-      // Adjust triage level if biometrics indicate urgency
+      // Conservative override: never reduce urgency, only escalate if abnormalities exist.
       if (biometricAnalysis.abnormal.length > 0 && triageResult.triageLevel > 2) {
-        triageResult.triageLevel = Math.max(1, triageResult.triageLevel - 1) as any; // Increase urgency
-        triageResult.reasoning += ` Note: Biometric readings show ${biometricAnalysis.abnormal.join(', ')}.`;
+        triageResult.triageLevel = Math.max(1, triageResult.triageLevel - 1) as any;
+        triageResult.reasoning += ` Note: Additional biometric red flags: ${biometricAnalysis.abnormal.join(', ')}.`;
+        triageResult.requiresDoctorReview = true;
       }
     }
+
+    await writeClinicalAudit({
+      userId: patientId,
+      userRole: req.user?.role,
+      action: 'AI_TRIAGE_PREVIEW',
+      resource: 'patient_triage',
+      resourceId: caseId,
+      metadata: {
+        triageLevel: triageResult.triageLevel,
+        confidence: triageResult.confidence,
+        requiresDoctorReview: triageResult.requiresDoctorReview,
+        uncertaintyFlags: triageResult.uncertaintyFlags,
+        evidenceSources: triageResult.evidenceSources,
+        symptomsHash: hashValue(symptoms),
+        hasBiometrics: Boolean(biometrics),
+      },
+    });
 
     res.json({
       success: true,

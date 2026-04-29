@@ -3,17 +3,21 @@ import { analyzeSymptoms } from '../services/aiTriage';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth';
 import { rateLimiter } from '../middleware/rateLimiter';
 import { requireConsent } from '../middleware/consentMiddleware';
+import { aiTriageBudgetMiddleware } from '../middleware/aiTriageBudget';
 import { calculateSlaDeadline, getDoctorFee } from '../jobs/triageEscalation';
 import { broadcastToUsers } from '../services/websocket';
 import prisma from '../lib/prisma';
+import { randomUUID } from 'crypto';
+import { hashValue, writeClinicalAudit } from '../services/clinicalAudit';
 
 const router: Router = Router();
 
 // POST /api/triage – run AI triage and create a case for doctor review
-router.post('/', rateLimiter, authMiddleware, requireConsent('AI_TRIAGE'), async (req: AuthenticatedRequest, res, next) => {
+router.post('/', rateLimiter, authMiddleware, aiTriageBudgetMiddleware, requireConsent('AI_TRIAGE'), async (req: AuthenticatedRequest, res, next) => {
     try {
         const { symptoms, imageBase64 } = req.body;
         const patientId = req.user?.id;
+        const caseId = randomUUID();
 
         if (!symptoms) {
             return res.status(400).json({ error: 'Symptoms description is required' });
@@ -24,6 +28,17 @@ router.post('/', rateLimiter, authMiddleware, requireConsent('AI_TRIAGE'), async
 
         // ── Enrich AI prompt with patient's real health data ──────────────────
         let patientContext: string | undefined;
+        let latestVitalsSnapshot:
+            | {
+                heartRateResting?: number | null;
+                oxygenSaturation?: number | null;
+                respiratoryRate?: number | null;
+                temperature?: number | null;
+                bloodPressureSystolic?: number | null;
+                bloodPressureDiastolic?: number | null;
+                hrvRmssd?: number | null;
+            }
+            | undefined;
         try {
             const [readings, alerts, baseline, userInfo] = await Promise.all([
                 prisma.biometricReading.findMany({
@@ -61,6 +76,15 @@ router.post('/', rateLimiter, authMiddleware, requireConsent('AI_TRIAGE'), async
 
             if (readings.length > 0) {
                 const latest = readings[0];
+                latestVitalsSnapshot = {
+                    heartRateResting: latest.heartRate ?? null,
+                    oxygenSaturation: latest.oxygenSaturation ?? null,
+                    respiratoryRate: latest.respiratoryRate ?? null,
+                    temperature: latest.temperature ?? null,
+                    bloodPressureSystolic: latest.bloodPressureSystolic ?? null,
+                    bloodPressureDiastolic: latest.bloodPressureDiastolic ?? null,
+                    hrvRmssd: latest.hrvRmssd ?? null,
+                };
                 const parts: string[] = [];
                 if (latest.heartRate != null) parts.push(`HR ${latest.heartRate} bpm`);
                 if (latest.oxygenSaturation != null) parts.push(`SpO2 ${latest.oxygenSaturation}%`);
@@ -97,7 +121,14 @@ router.post('/', rateLimiter, authMiddleware, requireConsent('AI_TRIAGE'), async
         }
         // ─────────────────────────────────────────────────────────────────────
 
-        const result = await analyzeSymptoms({ symptoms, imageBase64, patientContext });
+        const result = await analyzeSymptoms({
+            symptoms,
+            imageBase64,
+            patientContext,
+            patientId,
+            caseId,
+            vitalsSnapshot: latestVitalsSnapshot,
+        });
 
         const now         = new Date();
         const slaDeadline  = calculateSlaDeadline(result.triageLevel, now);
@@ -116,7 +147,27 @@ router.post('/', rateLimiter, authMiddleware, requireConsent('AI_TRIAGE'), async
                 doctorFeeCents: feeCents,
                 aiModel: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514',
                 aiContextUsed: !!patientContext,
+                statPearlsUsed: result.evidenceSources.includes('StatPearls/NCBI'),
             } as any,
+        });
+
+        await writeClinicalAudit({
+            userId: patientId,
+            userRole: req.user?.role,
+            action: 'AI_TRIAGE_DECISION',
+            resource: 'triage_case',
+            resourceId: triageCase.id,
+            metadata: {
+                caseId,
+                triageLevel: result.triageLevel,
+                confidence: result.confidence,
+                requiresDoctorReview: result.requiresDoctorReview,
+                uncertaintyFlags: result.uncertaintyFlags,
+                evidenceSources: result.evidenceSources,
+                aiContextUsed: !!patientContext,
+                statPearlsUsed: result.evidenceSources.includes('StatPearls/NCBI'),
+                symptomsHash: hashValue(symptoms),
+            },
         });
 
         // Notify all available doctors via WebSocket that a new case needs review
