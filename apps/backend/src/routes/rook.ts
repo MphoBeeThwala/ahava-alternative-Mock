@@ -16,16 +16,26 @@ import crypto from 'crypto';
 
 const router: Router = Router();
 
-// Default to production, but allow override for Sandbox
-const ROOK_BASE_URL    = process.env.ROOK_BASE_URL ?? 'https://api.rook-health.com/api/v1';
+// Current ROOK documented API hosts:
+// - Production: https://api.rook-connect.com/api/v1
+// - Sandbox:    https://api.rook-connect.review/api/v1
+// Keep override support via ROOK_BASE_URL and legacy compatibility fallbacks.
+const ROOK_BASE_URL = process.env.ROOK_BASE_URL ?? 'https://api.rook-connect.com/api/v1';
 const ROOK_CLIENT_UUID = process.env.ROOK_CLIENT_UUID ?? '';
-const ROOK_API_KEY     = process.env.ROOK_API_KEY ?? '';
+const ROOK_SECRET_KEY = process.env.ROOK_SECRET_KEY ?? process.env.ROOK_API_KEY ?? '';
+const ROOK_DEFAULT_DATA_SOURCE = process.env.ROOK_DEFAULT_DATA_SOURCE ?? 'Fitbit';
 
 function rookHeaders() {
+  const basicAuth = Buffer.from(`${ROOK_CLIENT_UUID}:${ROOK_SECRET_KEY}`).toString('base64');
   return {
     'Content-Type': 'application/json',
-    'x-api-key': ROOK_API_KEY,
+    // ROOK currently uses Basic auth with client_uuid:secret_key.
+    Authorization: `Basic ${basicAuth}`,
+    // Keep legacy headers for backward compatibility.
+    'x-api-key': ROOK_SECRET_KEY,
     'x-client-uuid': ROOK_CLIENT_UUID,
+    // ROOK docs specify User-Agent as mandatory.
+    'User-Agent': 'Ahava-Healthcare/1.0',
   };
 }
 
@@ -35,33 +45,50 @@ function rookHeaders() {
 router.post('/connect', authMiddleware, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user.id;
+    const dataSource: string = req.body?.dataSource || ROOK_DEFAULT_DATA_SOURCE;
+    const redirectBase =
+      process.env.ROOK_REDIRECT_URL ||
+      (process.env.FRONTEND_URL ? `${process.env.FRONTEND_URL.replace(/\/$/, '')}/patient/wearable-connected` : undefined);
 
-    // ROOK usually requires registering a user first or using their ID
-    // For the trial, we'll use our internal userId as the user_id in ROOK
-    
-    const body = {
-      user_id: userId,
-      // Optional: redirect URLs if ROOK supports them in the session call
-    };
+    // Preferred current flow: /authorizer endpoint per ROOK docs.
+    try {
+      const url = `${ROOK_BASE_URL}/user_id/${encodeURIComponent(userId)}/data_source/${encodeURIComponent(dataSource)}/authorizer`;
+      const rookRes = await axios.get(url, {
+        headers: rookHeaders(),
+        params: redirectBase ? { redirect_url: redirectBase } : undefined,
+      });
+      const data = rookRes.data || {};
+      const authorizationUrl = data.authorization_url || data.url || data.link_url;
 
-    // Note: ROOK's exact endpoint for session/URL generation might vary by version
-    // Standard ROOK Connect flow:
-    const rookRes = await axios.post(`${ROOK_BASE_URL}/auth/session`, body, {
-      headers: rookHeaders(),
-    });
-
-    if (rookRes.status !== 200) {
-      console.error('[rook] auth/session error:', rookRes.data);
-      return res.status(502).json({ success: false, error: 'ROOK API error' });
+      if (authorizationUrl) {
+        res.json({
+          success: true,
+          url: authorizationUrl,
+          dataSource,
+          authorized: Boolean(data.authorized),
+        });
+        return;
+      }
+    } catch (authorizerError: any) {
+      console.warn('[rook] /authorizer flow failed, trying legacy /auth/session fallback:', authorizerError.response?.data || authorizerError.message);
     }
 
-    // ROOK returns a session or a direct URL
-    // Adjusting based on common ROOK response structure
-    const data = rookRes.data;
-    res.json({ 
-      success: true, 
-      url: data.url || data.link_url, 
-      sessionId: data.session_id 
+    // Legacy fallback flow (older ROOK integrations)
+    const legacyBody = { user_id: userId };
+    const legacyRes = await axios.post(`${ROOK_BASE_URL}/auth/session`, legacyBody, {
+      headers: rookHeaders(),
+    });
+    const legacyData = legacyRes.data || {};
+    const legacyUrl = legacyData.url || legacyData.link_url;
+
+    if (!legacyUrl) {
+      return res.status(502).json({ success: false, error: 'ROOK authorization URL missing from response' });
+    }
+
+    res.json({
+      success: true,
+      url: legacyUrl,
+      sessionId: legacyData.session_id,
     });
   } catch (error: any) {
     console.error('[rook] Connect failed:', error.response?.data || error.message);
