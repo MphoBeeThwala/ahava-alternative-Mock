@@ -24,6 +24,7 @@ import triageCaseReviewRoutes from './routes/triageCaseReview';
 import nurseRoutes from './routes/nurse';
 import patientRoutes from './routes/patient';
 import terraRoutes from './routes/terra';
+import rookRoutes from './routes/rook';
 import consentRoutes from './routes/consent';
 import healthConnectRoutes from './routes/healthConnect';
 
@@ -97,8 +98,13 @@ app.use(morgan(':method :url :status :res[content-length] - :response-time ms', 
   },
 }));
 
-// Body parsing
-app.use(express.json({ limit: '10mb' }));
+// Body parsing with raw body capture for webhook verification
+app.use(express.json({
+  limit: '10mb',
+  verify: (req: any, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Rate limiting
@@ -132,6 +138,7 @@ app.use('/api/triage-review', triageCaseReviewRoutes);
 app.use('/api/nurse', authMiddleware, nurseRoutes);
 app.use('/api/patient', authMiddleware, patientRoutes);
 app.use('/api/terra', terraRoutes);
+app.use('/api/rook', rookRoutes);
 app.use('/api/consent', authMiddleware, consentRoutes);  // moved from /api/patient/consent to avoid prefix conflict
 app.use('/api/biometrics/health-connect', healthConnectRoutes);
 app.use('/webhooks', webhookRoutes);

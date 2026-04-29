@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import RoleGuard, { UserRole } from "../../../components/RoleGuard";
 import DashboardLayout from "../../../components/DashboardLayout";
-import { terraApi, TerraStatus } from "../../../lib/api";
+import { terraApi, TerraStatus, rookApi, RookStatus } from "../../../lib/api";
 import { useToast } from "../../../contexts/ToastContext";
 
 const SUPPORTED_DEVICES = [
@@ -37,18 +37,24 @@ const STEPS = [
 export default function WearablePage() {
   const toast = useToast();
   const [status, setStatus] = useState<TerraStatus | null>(null);
+  const [rookStatus, setRookStatus] = useState<RookStatus | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [connecting, setConnecting] = useState(false);
+  const [connectingRook, setConnectingRook] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchStatus = useCallback(async () => {
     try {
-      const s = await terraApi.getStatus();
-      setStatus(s);
-      return s;
+      const [s, rs] = await Promise.all([
+        terraApi.getStatus().catch(() => null),
+        rookApi.getStatus().catch(() => null)
+      ]);
+      if (s) setStatus(s);
+      if (rs) setRookStatus(rs);
+      return { terra: s, rook: rs };
     } catch {
-      // silently ignore — backend may be starting
+      // silently ignore
     } finally {
       setLoadingStatus(false);
     }
@@ -59,16 +65,20 @@ export default function WearablePage() {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [fetchStatus]);
 
-  const startPolling = () => {
+  const startPolling = (type: 'terra' | 'rook') => {
     if (pollRef.current) clearInterval(pollRef.current);
     let attempts = 0;
     pollRef.current = setInterval(async () => {
       attempts += 1;
-      const s = await fetchStatus();
-      if (s?.connected || attempts >= 30) {
+      const { terra, rook } = await fetchStatus() || {};
+      const connected = type === 'terra' ? terra?.connected : rook?.connected;
+      
+      if (connected || attempts >= 30) {
         clearInterval(pollRef.current!);
-        setConnecting(false);
-        if (s?.connected) toast.success("Device connected! Data will start syncing shortly.");
+        if (type === 'terra') setConnecting(false);
+        else setConnectingRook(false);
+        
+        if (connected) toast.success(`${type === 'terra' ? 'Terra' : 'ROOK'} device connected! Data will start syncing shortly.`);
       }
     }, 3000);
   };
@@ -83,11 +93,29 @@ export default function WearablePage() {
         window.location.href = url;
         return;
       }
-      startPolling();
+      startPolling('terra');
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } }; message?: string };
       toast.error(e.response?.data?.error || e.message || "Failed to start device connection.");
       setConnecting(false);
+    }
+  };
+
+  const handleConnectRook = async () => {
+    setConnectingRook(true);
+    try {
+      const { url } = await rookApi.connect();
+      if (!url) throw new Error("No ROOK connection URL returned");
+      const popup = window.open(url, "rook-connect", "width=520,height=680,left=200,top=100");
+      if (!popup) {
+        window.location.href = url;
+        return;
+      }
+      startPolling('rook');
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } }; message?: string };
+      toast.error(e.response?.data?.error || e.message || "Failed to start ROOK connection.");
+      setConnectingRook(false);
     }
   };
 
@@ -101,6 +129,21 @@ export default function WearablePage() {
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } }; message?: string };
       toast.error(e.response?.data?.error || "Failed to disconnect device.");
+    } finally {
+      setDisconnecting(false);
+    }
+  };
+
+  const handleDisconnectRook = async () => {
+    if (!confirm("Disconnect ROOK? Data syncing will stop.")) return;
+    setDisconnecting(true);
+    try {
+      await rookApi.disconnect();
+      await fetchStatus();
+      toast.success("ROOK disconnected.");
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } }; message?: string };
+      toast.error(e.response?.data?.error || "Failed to disconnect ROOK.");
     } finally {
       setDisconnecting(false);
     }
@@ -132,7 +175,7 @@ export default function WearablePage() {
 
           <div style={{ maxWidth: 900, margin: "0 auto", padding: "32px 24px", display: "flex", flexDirection: "column", gap: 28 }}>
 
-            {/* ── Connection status card ── */}
+            {/* ── Connection status card (Terra) ── */}
             <div style={{ background: "var(--card)", borderRadius: 20, border: "1.5px solid var(--border)", padding: "28px 32px", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 20 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
                 <div style={{ width: 56, height: 56, borderRadius: 16, background: isConnected ? "rgba(16,185,129,0.12)" : "rgba(148,163,184,0.1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, flexShrink: 0 }}>
@@ -140,7 +183,7 @@ export default function WearablePage() {
                 </div>
                 <div>
                   <div style={{ fontSize: 16, fontWeight: 800, color: "var(--foreground)", marginBottom: 4 }}>
-                    {loadingStatus ? "Checking status…" : isConnected ? "Device Connected" : "No Device Connected"}
+                    {loadingStatus ? "Checking status…" : isConnected ? "Terra Connected" : "Connect via Terra"}
                   </div>
                   {isConnected && devices.length > 0 && (
                     <div style={{ fontSize: 13, color: "var(--muted)", display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -152,7 +195,7 @@ export default function WearablePage() {
                     </div>
                   )}
                   {!isConnected && !loadingStatus && (
-                    <div style={{ fontSize: 13, color: "var(--muted)" }}>Connect a smartwatch to start automatic biometric syncing</div>
+                    <div style={{ fontSize: 13, color: "var(--muted)" }}>Connect Fitbit, Garmin, Oura, and more via Terra</div>
                   )}
                 </div>
               </div>
@@ -164,7 +207,7 @@ export default function WearablePage() {
                     disabled={connecting}
                     style={{ padding: "13px 28px", borderRadius: 12, border: "none", background: connecting ? "#94a3b8" : "linear-gradient(135deg,#0d9488,#059669)", color: "white", fontSize: 15, fontWeight: 700, cursor: connecting ? "not-allowed" : "pointer", fontFamily: "inherit", boxShadow: connecting ? "none" : "0 4px 16px rgba(13,148,136,0.35)", transition: "all 0.2s" }}
                   >
-                    {connecting ? "Opening device list…" : "Connect a Device →"}
+                    {connecting ? "Opening Terra…" : "Connect Terra →"}
                   </button>
                 ) : (
                   <>
@@ -173,7 +216,7 @@ export default function WearablePage() {
                       disabled={connecting}
                       style={{ padding: "11px 20px", borderRadius: 12, border: "1.5px solid var(--border)", background: "transparent", color: "var(--foreground)", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
                     >
-                      + Add another device
+                      + Add device
                     </button>
                     <button
                       onClick={handleDisconnect}
@@ -187,13 +230,59 @@ export default function WearablePage() {
               </div>
             </div>
 
-            {/* ── Polling notice ── */}
+            {/* ── Connection status card (ROOK) ── */}
+            <div style={{ background: "var(--card)", borderRadius: 20, border: "1.5px solid var(--border)", padding: "28px 32px", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 20, borderLeft: "4px solid #3b82f6" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                <div style={{ width: 56, height: 56, borderRadius: 16, background: rookStatus?.connected ? "rgba(59,130,246,0.12)" : "rgba(148,163,184,0.1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, flexShrink: 0 }}>
+                  {loadingStatus ? "⏳" : rookStatus?.connected ? "✅" : "🐦"}
+                </div>
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: "var(--foreground)", marginBottom: 4 }}>
+                    {loadingStatus ? "Checking status…" : rookStatus?.connected ? "ROOK Connected" : "Connect via ROOK (Trial)"}
+                  </div>
+                  <div style={{ fontSize: 13, color: "var(--muted)" }}>
+                    {rookStatus?.connected ? "Active ROOK health data sync" : "Access more biometric sources with our new ROOK integration"}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                {!rookStatus?.connected ? (
+                  <button
+                    onClick={handleConnectRook}
+                    disabled={connectingRook}
+                    style={{ padding: "13px 28px", borderRadius: 12, border: "none", background: connectingRook ? "#94a3b8" : "linear-gradient(135deg,#3b82f6,#2563eb)", color: "white", fontSize: 15, fontWeight: 700, cursor: connectingRook ? "not-allowed" : "pointer", fontFamily: "inherit", boxShadow: connectingRook ? "none" : "0 4px 16px rgba(59,130,246,0.35)", transition: "all 0.2s" }}
+                  >
+                    {connectingRook ? "Opening ROOK…" : "Connect ROOK →"}
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleDisconnectRook}
+                    disabled={disconnecting}
+                    style={{ padding: "11px 20px", borderRadius: 12, border: "1.5px solid #fca5a5", background: "transparent", color: "#dc2626", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
+                  >
+                    {disconnecting ? "Disconnecting…" : "Disconnect ROOK"}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* ── Polling notice (Terra) ── */}
             {connecting && (
               <div style={{ background: "rgba(13,148,136,0.08)", border: "1px solid rgba(13,148,136,0.2)", borderRadius: 14, padding: "16px 20px", display: "flex", alignItems: "center", gap: 12 }}>
                 <div style={{ width: 20, height: 20, border: "2.5px solid #0d9488", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.9s linear infinite", flexShrink: 0 }} />
                 <div style={{ fontSize: 14, color: "var(--foreground)", lineHeight: 1.5 }}>
-                  <strong>Complete the connection in the popup window.</strong> Once you finish, this page will update automatically.
-                  <span style={{ color: "var(--muted)", display: "block", fontSize: 12, marginTop: 2 }}>No popup? <button onClick={handleConnect} style={{ background: "none", border: "none", color: "#0d9488", fontWeight: 700, cursor: "pointer", fontSize: 12, fontFamily: "inherit", padding: 0 }}>Try again</button></span>
+                  <strong>Complete the Terra connection in the popup window.</strong> Once you finish, this page will update automatically.
+                </div>
+              </div>
+            )}
+
+            {/* ── Polling notice (ROOK) ── */}
+            {connectingRook && (
+              <div style={{ background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: 14, padding: "16px 20px", display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ width: 20, height: 20, border: "2.5px solid #3b82f6", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.9s linear infinite", flexShrink: 0 }} />
+                <div style={{ fontSize: 14, color: "var(--foreground)", lineHeight: 1.5 }}>
+                  <strong>Complete the ROOK connection in the popup window.</strong> Once you finish, this page will update automatically.
                 </div>
               </div>
             )}
