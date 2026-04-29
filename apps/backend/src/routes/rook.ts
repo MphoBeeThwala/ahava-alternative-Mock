@@ -141,16 +141,21 @@ export async function handleRookWebhook(
 
     const payload = req.body;
     // ROOK webhooks often have a 'type' or 'category'
-    // categories: 'physical', 'sleep', 'body'
-    const category = payload?.category as string | undefined;
-    const userId = payload?.user_id as string | undefined;
+    // Simulator uses 'data_structure', Production often uses 'category'
+    const category = payload?.category || payload?.data_structure;
+    const userId = payload?.user_id;
 
-    console.log(`[rook] Webhook received for user ${userId}, category: ${category}`);
+    console.log(`[rook] Webhook received for user ${userId}, category/structure: ${category}`);
 
     if (userId && category) {
       // Find the user in our DB
       const user = await prisma.user.findFirst({
-        where: { id: userId } // We use our userId as ROOK's user_id
+        where: { 
+          OR: [
+            { id: userId },
+            { rookUserId: userId }
+          ]
+        }
       });
 
       if (user) {
@@ -184,28 +189,39 @@ async function processRookData(payload: any): Promise<void> {
   const userId = payload?.user_id as string;
   if (!userId) return;
 
-  // ROOK data is typically in payload.data
-  const data = payload?.data;
-  if (!data) return;
-
   let biometricData: Record<string, any> | null = null;
+  const category = payload?.category || payload?.data_structure;
 
-  // ROOK 'body' or 'physical' often contains heart rate, spo2, etc.
-  // Mapping based on typical ROOK Health data structures
-  if (payload.category === 'body' || payload.category === 'physical') {
+  // 1. Handle Production Structure (payload.data)
+  if (payload.data) {
+    const data = payload.data;
+    if (category === 'body' || category === 'physical') {
+      biometricData = {
+        timestamp:            new Date().toISOString(),
+        heart_rate_resting:   data?.heart_rate?.resting_hr || data?.heart_rate?.avg_hr || 70,
+        hrv_rmssd:            data?.heart_rate?.hrv_rmssd || 40,
+        spo2:                 data?.oxygen_saturation?.avg || 97,
+        respiratory_rate:     data?.respiration?.rate || 16,
+        step_count:           data?.activity?.steps || 0,
+      };
+    } else if (category === 'sleep') {
+      biometricData = {
+        timestamp:            new Date().toISOString(),
+        sleep_duration_hours: (data?.duration_seconds || 0) / 3600,
+        sleep_score:          data?.score || 70,
+      };
+    }
+  } 
+  // 2. Handle Simulator Structure (body_health.summary.body_summary)
+  else if (payload.body_health?.summary?.body_summary) {
+    const summary = payload.body_health.summary.body_summary;
     biometricData = {
       timestamp:            new Date().toISOString(),
-      heart_rate_resting:   data?.heart_rate?.resting_hr || data?.heart_rate?.avg_hr || 70,
-      hrv_rmssd:            data?.heart_rate?.hrv_rmssd || 40,
-      spo2:                 data?.oxygen_saturation?.avg || 97,
-      respiratory_rate:     data?.respiration?.rate || 16,
-      step_count:           data?.activity?.steps || 0,
-    };
-  } else if (payload.category === 'sleep') {
-    biometricData = {
-      timestamp:            new Date().toISOString(),
-      sleep_duration_hours: (data?.duration_seconds || 0) / 3600,
-      sleep_score:          data?.score || 70,
+      heart_rate_resting:   summary.heart_rate?.hr_resting_bpm_int || summary.heart_rate?.hr_avg_bpm_int || 70,
+      hrv_rmssd:            summary.heart_rate?.hrv_avg_rmssd_float || 40,
+      spo2:                 summary.oxygenation?.saturation_avg_percentage_int || 97,
+      respiratory_rate:     16, // Simulator might not provide this in the snippet
+      step_count:           summary.body_metrics?.steps_int || 0,
     };
   }
 
