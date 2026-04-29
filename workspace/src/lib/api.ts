@@ -53,7 +53,7 @@ apiClient.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
-    if (error.response?.status === 401 && !originalRequest._retry && typeof window !== 'undefined') {
+    if (error.response?.status === 401 && originalRequest && !originalRequest._retry && typeof window !== 'undefined') {
       originalRequest._retry = true;
       const path = window.location.pathname || '';
       
@@ -79,7 +79,7 @@ apiClient.interceptors.response.use(
             
             // Update stored tokens
             localStorage.setItem('token', accessToken);
-            localStorage.setItem('refreshToken', newRefreshToken);
+            localStorage.setItem('refreshToken', newRefreshToken || refreshToken);
             
             // Update the original request with new token
             if (originalRequest.headers) {
@@ -113,6 +113,7 @@ apiClient.interceptors.response.use(
           // No refresh token available, log out
           localStorage.removeItem('token');
           localStorage.removeItem('user');
+          localStorage.removeItem('refreshToken');
           window.location.href = '/auth/login';
           
           return Promise.reject(error);
@@ -120,8 +121,14 @@ apiClient.interceptors.response.use(
       }
 
       // If already refreshing, queue this request
-      return new Promise((onSuccess, onFailure) => {
+      return new Promise<string>((onSuccess, onFailure) => {
         failedQueue.push({ onSuccess, onFailure });
+      }).then((newToken) => {
+        originalRequest.headers = {
+          ...(originalRequest.headers || {}),
+          Authorization: `Bearer ${newToken}`,
+        };
+        return apiClient(originalRequest);
       });
     }
 
@@ -186,6 +193,14 @@ export const authApi = {
   },
   verifyEmail: async (token: string) => {
     const res = await apiClient.get(`/auth/verify-email?token=${encodeURIComponent(token)}`);
+    return res.data;
+  },
+  me: async () => {
+    const res = await apiClient.get('/auth/me');
+    return res.data;
+  },
+  logout: async (refreshToken?: string | null) => {
+    const res = await apiClient.post('/auth/logout', { refreshToken: refreshToken ?? null });
     return res.data;
   },
   resendVerification: async (email: string) => {
@@ -524,7 +539,11 @@ export interface TriageCase {
 export const doctorApi = {
   getPendingVisits: async () => {
     const res = await apiClient.get('/visits?status=PENDING_REVIEW');
-    return res.data;
+    const data = res.data ?? {};
+    return {
+      ...data,
+      visits: Array.isArray(data.visits) ? data.visits : [],
+    };
   },
   approveVisit: async (visitId: string, review?: string) => {
     const res = await apiClient.post(`/visits/${visitId}/approve`, review != null ? { review } : {});
@@ -568,7 +587,11 @@ export const doctorApi = {
   },
   getTriageReviewQueue: async (status = 'PENDING_REVIEW') => {
     const res = await apiClient.get(`/triage-review?status=${status}`);
-    return res.data;
+    const data = res.data ?? {};
+    return {
+      ...data,
+      cases: Array.isArray(data.cases) ? data.cases : [],
+    };
   },
   issuePrescription: async (caseId: string, payload: {
     diagnosis: string;

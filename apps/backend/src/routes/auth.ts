@@ -384,6 +384,7 @@ router.get('/me', async (req, res, next) => {
         role: true,
         isActive: true,
         isVerified: true,
+        phone: true,
         profileImage: true,
         dateOfBirth: true,
         gender: true,
@@ -401,6 +402,9 @@ router.get('/me', async (req, res, next) => {
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
+    }
+    if (!user.isActive) {
+      return res.status(401).json({ error: 'Account is deactivated' });
     }
 
     res.json({ success: true, user });

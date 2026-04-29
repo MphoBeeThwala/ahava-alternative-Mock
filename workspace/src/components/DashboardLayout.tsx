@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useAuth } from "../contexts/AuthContext";
 import { authApi } from "../lib/api";
 
@@ -15,9 +15,8 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { user, logout, isAuthenticated, loading, refreshUser } = useAuth();
+  const { user, logout, isAuthenticated, refreshUser } = useAuth();
   const pathname = usePathname();
-  const router = useRouter();
   const [verifyBannerDismissed, setVerifyBannerDismissed] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
   const [resendSent, setResendSent] = useState(false);
@@ -57,24 +56,7 @@ export default function DashboardLayout({
       typeof riskProfile === "object" &&
       (riskProfile as Record<string, unknown>)["onboardingCompleted"] === true
   );
-
-  useEffect(() => {
-    if (!isAuthenticated || !user) return;
-    if (user.role !== "PATIENT") return;
-    
-    // Don't redirect if we're already on an auth or profile page
-    if (pathname.startsWith("/auth") || pathname.startsWith("/profile")) return;
-    
-    // Allow AI Doctor and Smartwatch pages even if onboarding is not complete
-    // but maybe show a reminder on those pages instead of a forced redirect.
-    if (pathname.startsWith("/patient/ai-doctor") || pathname.startsWith("/patient/wearable")) return;
-    
-    // If onboarding is not completed, we'll let them stay on the dashboard 
-    // but maybe some features will be restricted there.
-    if (!onboardingCompleted && !loading) {
-      router.push("/profile");
-    }
-  }, [isAuthenticated, user, onboardingCompleted, pathname, router, loading]);
+  const showOnboardingReminder = isAuthenticated && user?.role === "PATIENT" && !onboardingCompleted;
 
   const getDashboardPath = () => {
     if (!user) return "/";
@@ -205,7 +187,7 @@ export default function DashboardLayout({
 
           <button
             type="button"
-            onClick={() => logout()}
+            onClick={() => { void logout(); }}
             className="nav-link w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-[var(--muted)] hover:bg-red-50 hover:text-red-600"
             aria-label="Log out"
           >
@@ -216,6 +198,41 @@ export default function DashboardLayout({
 
       {/* Main content */}
       <main className="flex-1 overflow-auto" id="main-content" aria-label="Main content">
+        {showOnboardingReminder && !pathname.startsWith("/profile") && (
+          <div
+            role="status"
+            style={{
+              background: "#eff6ff",
+              borderBottom: "1px solid #bfdbfe",
+              padding: "10px 20px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              flexWrap: "wrap",
+              fontSize: 13,
+            }}
+          >
+            <span style={{ color: "#1e3a8a", display: "flex", alignItems: "center", gap: 8 }}>
+              <span>🩺</span>
+              <span><strong>Finish your health survey</strong> to personalise Early Warning risk signals.</span>
+            </span>
+            <Link
+              href="/profile"
+              style={{
+                background: "#2563eb",
+                color: "white",
+                borderRadius: 7,
+                padding: "5px 12px",
+                fontSize: 12,
+                fontWeight: 700,
+                textDecoration: "none",
+              }}
+            >
+              Complete Survey
+            </Link>
+          </div>
+        )}
         {showVerifyBanner && (
           <div role="alert" style={{ background: '#fffbeb', borderBottom: '1px solid #fde68a', padding: '10px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', fontSize: 13 }}>
             <span style={{ color: '#92400e', display: 'flex', alignItems: 'center', gap: 8 }}>
