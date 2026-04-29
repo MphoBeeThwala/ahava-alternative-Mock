@@ -196,7 +196,13 @@ export const authApi = {
     return res.data;
   },
   me: async () => {
-    const res = await apiClient.get('/auth/me');
+    // Bust intermediary/browser caches so auth state (role/riskProfile) is always fresh.
+    const res = await apiClient.get(`/auth/me?t=${Date.now()}`, {
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        Pragma: 'no-cache',
+      },
+    });
     return res.data;
   },
   logout: async (refreshToken?: string | null) => {
