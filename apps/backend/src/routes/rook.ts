@@ -59,6 +59,7 @@ const ROOK_BASE_URL = resolveRookBaseUrl();
 const ROOK_CLIENT_UUID = process.env.ROOK_CLIENT_UUID ?? '';
 const ROOK_SECRET_KEY = process.env.ROOK_SECRET_KEY ?? process.env.ROOK_API_KEY ?? '';
 const ROOK_DEFAULT_DATA_SOURCE = process.env.ROOK_DEFAULT_DATA_SOURCE ?? 'Fitbit';
+const ROOK_ENABLE_LEGACY_SESSION_FALLBACK = process.env.ROOK_ENABLE_LEGACY_SESSION_FALLBACK === 'true';
 
 function rookHeaders() {
   const basicAuth = Buffer.from(`${ROOK_CLIENT_UUID}:${ROOK_SECRET_KEY}`).toString('base64');
@@ -74,11 +75,46 @@ function rookHeaders() {
   };
 }
 
+type RookApiError = {
+  error?: string;
+  exception?: string;
+  path?: string;
+  method?: string;
+};
+
+function missingRookCredentials(): boolean {
+  return !ROOK_CLIENT_UUID || !ROOK_SECRET_KEY;
+}
+
+function isRookAuthFailure(err: unknown): boolean {
+  if (!axios.isAxiosError(err)) return false;
+  const status = err.response?.status;
+  return status === 401 || status === 403;
+}
+
+function toRookErrorPayload(err: unknown): RookApiError | undefined {
+  if (!axios.isAxiosError(err)) return undefined;
+  const data = err.response?.data;
+  if (data && typeof data === 'object') {
+    return data as RookApiError;
+  }
+  return undefined;
+}
+
 // ---------------------------------------------------------------------------
 // POST /api/rook/connect — generate connection URL
 // ---------------------------------------------------------------------------
 router.post('/connect', authMiddleware, async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (missingRookCredentials()) {
+      return res.status(503).json({
+        success: false,
+        error: 'ROOK is not configured on server',
+        code: 'ROOK_CONFIG_MISSING',
+        hint: 'Set ROOK_CLIENT_UUID and ROOK_SECRET_KEY in backend environment variables',
+      });
+    }
+
     const userId = (req as any).user.id;
     const dataSource: string = req.body?.dataSource || ROOK_DEFAULT_DATA_SOURCE;
     const redirectBase =
@@ -104,11 +140,48 @@ router.post('/connect', authMiddleware, async (req: Request, res: Response, next
         });
         return;
       }
+      return res.status(502).json({
+        success: false,
+        error: 'ROOK did not return an authorization URL',
+        code: 'ROOK_AUTHORIZE_URL_MISSING',
+      });
     } catch (authorizerError: any) {
-      console.warn(`[rook] /authorizer flow failed on ${ROOK_BASE_URL}, trying legacy /auth/session fallback:`, authorizerError.response?.data || authorizerError.message);
+      const rookError = toRookErrorPayload(authorizerError);
+      if (isRookAuthFailure(authorizerError)) {
+        console.error(`[rook] Authorizer auth failed on ${ROOK_BASE_URL}:`, rookError || authorizerError.message);
+        return res.status(502).json({
+          success: false,
+          error: 'ROOK credentials rejected by upstream API',
+          code: 'ROOK_INVALID_CREDENTIALS',
+          hint: 'Verify ROOK_CLIENT_UUID and ROOK_SECRET_KEY match the selected ROOK environment (Sandbox vs Production)',
+          upstream: {
+            error: rookError?.error,
+            exception: rookError?.exception,
+            path: rookError?.path,
+          },
+        });
+      }
+
+      // Optional legacy fallback for older integrations only.
+      if (!ROOK_ENABLE_LEGACY_SESSION_FALLBACK) {
+        console.error(`[rook] /authorizer failed on ${ROOK_BASE_URL}:`, rookError || authorizerError.message);
+        return res.status(502).json({
+          success: false,
+          error: 'Failed to create ROOK authorizer URL',
+          code: 'ROOK_AUTHORIZE_FAILED',
+          hint: 'Check ROOK_BASE_URL and ROOK credentials',
+          upstream: {
+            error: rookError?.error,
+            exception: rookError?.exception,
+            path: rookError?.path,
+          },
+        });
+      }
+
+      console.warn(`[rook] /authorizer failed on ${ROOK_BASE_URL}; attempting legacy /auth/session fallback`);
     }
 
-    // Legacy fallback flow (older ROOK integrations)
+    // Legacy fallback flow (older ROOK integrations). Disabled by default.
     const legacyBody = { user_id: userId };
     const legacyRes = await axios.post(`${ROOK_BASE_URL}/auth/session`, legacyBody, {
       headers: rookHeaders(),
