@@ -16,11 +16,46 @@ import crypto from 'crypto';
 
 const router: Router = Router();
 
+function resolveRookBaseUrl(): string {
+  const fallback = 'https://api.rook-connect.com/api/v1';
+  const raw = (process.env.ROOK_BASE_URL || '').trim();
+  if (!raw) return fallback;
+
+  // Normalize trailing slash noise.
+  let normalized = raw.replace(/\/+$/, '');
+
+  // Legacy host migration safety net.
+  // Some deployments still point at deprecated rook-health domains.
+  if (/rook-health\.com/i.test(normalized)) {
+    const sandboxLike = /sandbox|review/i.test(normalized);
+    normalized = sandboxLike
+      ? 'https://api.rook-connect.review/api/v1'
+      : 'https://api.rook-connect.com/api/v1';
+    console.warn(`[rook] ROOK_BASE_URL used deprecated host; auto-mapped to ${normalized}`);
+  }
+
+  // If only host is supplied, add the expected API base path.
+  try {
+    const parsed = new URL(normalized);
+    if (
+      /api\.rook-connect\.(com|review)$/i.test(parsed.hostname) &&
+      !/\/api\/v1$/i.test(parsed.pathname)
+    ) {
+      normalized = `${parsed.origin}/api/v1`;
+    }
+  } catch {
+    console.warn(`[rook] Invalid ROOK_BASE_URL "${raw}", using default ${fallback}`);
+    return fallback;
+  }
+
+  return normalized;
+}
+
 // Current ROOK documented API hosts:
 // - Production: https://api.rook-connect.com/api/v1
 // - Sandbox:    https://api.rook-connect.review/api/v1
 // Keep override support via ROOK_BASE_URL and legacy compatibility fallbacks.
-const ROOK_BASE_URL = process.env.ROOK_BASE_URL ?? 'https://api.rook-connect.com/api/v1';
+const ROOK_BASE_URL = resolveRookBaseUrl();
 const ROOK_CLIENT_UUID = process.env.ROOK_CLIENT_UUID ?? '';
 const ROOK_SECRET_KEY = process.env.ROOK_SECRET_KEY ?? process.env.ROOK_API_KEY ?? '';
 const ROOK_DEFAULT_DATA_SOURCE = process.env.ROOK_DEFAULT_DATA_SOURCE ?? 'Fitbit';
@@ -70,7 +105,7 @@ router.post('/connect', authMiddleware, async (req: Request, res: Response, next
         return;
       }
     } catch (authorizerError: any) {
-      console.warn('[rook] /authorizer flow failed, trying legacy /auth/session fallback:', authorizerError.response?.data || authorizerError.message);
+      console.warn(`[rook] /authorizer flow failed on ${ROOK_BASE_URL}, trying legacy /auth/session fallback:`, authorizerError.response?.data || authorizerError.message);
     }
 
     // Legacy fallback flow (older ROOK integrations)
