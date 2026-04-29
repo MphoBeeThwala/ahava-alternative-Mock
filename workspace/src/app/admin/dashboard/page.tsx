@@ -43,9 +43,10 @@ export default function AdminDashboard() {
     }, []);
 
     useEffect(() => {
+        if (user?.role !== 'ADMIN') return;
         loadUsers();
         loadStats();
-    }, [loadUsers, loadStats]);
+    }, [user, loadUsers, loadStats]);
 
     const toggleUserStatus = async (userId: string, currentStatus: boolean) => {
         try {

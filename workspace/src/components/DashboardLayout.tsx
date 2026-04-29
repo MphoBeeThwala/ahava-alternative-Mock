@@ -65,9 +65,12 @@ export default function DashboardLayout({
     // Don't redirect if we're already on an auth or profile page
     if (pathname.startsWith("/auth") || pathname.startsWith("/profile")) return;
     
+    // Allow AI Doctor and Smartwatch pages even if onboarding is not complete
+    // but maybe show a reminder on those pages instead of a forced redirect.
+    if (pathname.startsWith("/patient/ai-doctor") || pathname.startsWith("/patient/wearable")) return;
+    
     // If onboarding is not completed, we'll let them stay on the dashboard 
     // but maybe some features will be restricted there.
-    // For now, let's keep the redirect but make it more reliable by checking AuthContext loading state.
     if (!onboardingCompleted && !loading) {
       router.push("/profile");
     }

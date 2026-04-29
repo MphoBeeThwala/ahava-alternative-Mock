@@ -135,10 +135,11 @@ export default function DoctorDashboard() {
     }, []);
 
     useEffect(() => {
+        if (user?.role !== 'DOCTOR') return;
         loadPendingVisits();
         loadTriageCases();
         loadHcpsaStatus();
-    }, [loadPendingVisits, loadTriageCases, loadHcpsaStatus]);
+    }, [user, loadPendingVisits, loadTriageCases, loadHcpsaStatus]);
 
     const handleApprove = async (visitId: string) => {
         try {
