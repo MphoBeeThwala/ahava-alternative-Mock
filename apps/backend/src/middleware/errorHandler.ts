@@ -17,8 +17,9 @@ export const errorHandler = (
 
   // Log error
   console.error('Error:', {
+    requestId: (req as any).requestId,
     message: err.message,
-    stack: err.stack,
+    ...(process.env.NODE_ENV !== 'production' && { stack: err.stack }),
     url: req.url,
     method: req.method,
     timestamp: new Date().toISOString(),
@@ -79,6 +80,7 @@ export const errorHandler = (
   res.status(statusCode).json({
     success: false,
     error: message,
+    requestId: (req as any).requestId,
     ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
   });
 };

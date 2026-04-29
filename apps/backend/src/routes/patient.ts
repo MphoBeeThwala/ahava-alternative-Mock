@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { AuthenticatedRequest, authMiddleware } from '../middleware/auth';
 import { rateLimiter } from '../middleware/rateLimiter';
+import { idempotencyMiddleware } from '../middleware/idempotency';
 import axios from 'axios';
 import Joi from 'joi';
 import { processBiometricReading, getMonitoringSummary, detectEarlyWarningSigns } from '../services/monitoring';
@@ -50,7 +51,7 @@ const submitTriageWithBiometricsSchema = Joi.object({
 });
 
 // Submit biometrics (from wearable or manual entry)
-router.post('/biometrics', rateLimiter, authMiddleware, async (req: AuthenticatedRequest, res, next) => {
+router.post('/biometrics', rateLimiter, authMiddleware, idempotencyMiddleware({ scope: 'patient-biometrics' }), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { error, value } = submitBiometricsSchema.validate(req.body);
     if (error) {

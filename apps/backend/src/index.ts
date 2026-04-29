@@ -33,6 +33,7 @@ import { errorHandler } from './middleware/errorHandler';
 import { rateLimiter } from './middleware/rateLimiter';
 import { authMiddleware } from './middleware/auth';
 import { attachRateLimitUserKey } from './middleware/rateLimitUserKey';
+import { attachRequestId } from './middleware/requestId';
 
 // Import services
 import { initializeRedis } from './services/redis';
@@ -85,12 +86,13 @@ app.use(cors({
   origin: corsOrigins,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'X-Request-Id'],
 }));
 
 // Compression and logging
 app.use(compression());
-app.use(morgan(':method :url :status :res[content-length] - :response-time ms', {
+app.use(attachRequestId);
+app.use(morgan(':req[x-request-id] :method :url :status :res[content-length] - :response-time ms', {
   stream: {
     write: (message: string) => {
       console.log(message.replace(/\?[^\s]+/, '?[REDACTED]').trim());

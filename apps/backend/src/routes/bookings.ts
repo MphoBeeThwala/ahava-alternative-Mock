@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { UserRole } from '@prisma/client';
 import { AuthenticatedRequest, authMiddleware, requirePatient } from '../middleware/auth';
+import { idempotencyMiddleware } from '../middleware/idempotency';
 import { notifyNearbyNurses } from '../services/websocket';
 import Joi from 'joi';
 import prisma from '../lib/prisma';
@@ -28,7 +29,7 @@ const createBookingSchema = Joi.object({
 });
 
 // Create new booking (Patient only)
-router.post('/', requirePatient, async (req: AuthenticatedRequest, res, next) => {
+router.post('/', requirePatient, idempotencyMiddleware({ scope: 'booking-create' }), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { error, value } = createBookingSchema.validate(req.body);
     if (error) {

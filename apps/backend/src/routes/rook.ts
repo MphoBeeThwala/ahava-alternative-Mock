@@ -13,6 +13,7 @@ import { authMiddleware } from '../middleware/auth';
 import prisma from '../lib/prisma';
 import axios from 'axios';
 import crypto from 'crypto';
+import { withResilientHttp } from '../services/resilientHttp';
 
 const router: Router = Router();
 
@@ -124,10 +125,13 @@ router.post('/connect', authMiddleware, async (req: Request, res: Response, next
     // Preferred current flow: /authorizer endpoint per ROOK docs.
     try {
       const url = `${ROOK_BASE_URL}/user_id/${encodeURIComponent(userId)}/data_source/${encodeURIComponent(dataSource)}/authorizer`;
-      const rookRes = await axios.get(url, {
-        headers: rookHeaders(),
-        params: redirectBase ? { redirect_url: redirectBase } : undefined,
-      });
+      const rookRes = await withResilientHttp('rook-authorizer', (timeoutMs) =>
+        axios.get(url, {
+          headers: rookHeaders(),
+          params: redirectBase ? { redirect_url: redirectBase } : undefined,
+          timeout: timeoutMs,
+        })
+      );
       const data = rookRes.data || {};
       const authorizationUrl = data.authorization_url || data.url || data.link_url;
 
@@ -183,9 +187,12 @@ router.post('/connect', authMiddleware, async (req: Request, res: Response, next
 
     // Legacy fallback flow (older ROOK integrations). Disabled by default.
     const legacyBody = { user_id: userId };
-    const legacyRes = await axios.post(`${ROOK_BASE_URL}/auth/session`, legacyBody, {
-      headers: rookHeaders(),
-    });
+    const legacyRes = await withResilientHttp('rook-legacy-session', (timeoutMs) =>
+      axios.post(`${ROOK_BASE_URL}/auth/session`, legacyBody, {
+        headers: rookHeaders(),
+        timeout: timeoutMs,
+      })
+    );
     const legacyData = legacyRes.data || {};
     const legacyUrl = legacyData.url || legacyData.link_url;
 
@@ -363,7 +370,16 @@ async function processRookData(payload: any): Promise<void> {
   if (biometricData) {
     try {
       console.log(`[rook] Forwarding data to ML for user ${userId}`);
-      await axios.post(`${mlUrl}/early-warning/ingest/${userId}`, biometricData);
+      await withResilientHttp('rook-ml-ingest', (timeoutMs) =>
+        axios.post(`${mlUrl}/early-warning/ingest/${userId}`, biometricData, {
+          timeout: timeoutMs,
+        }),
+        {
+          retries: 1,
+          circuitThreshold: 3,
+          circuitOpenMs: 10000,
+        }
+      );
     } catch (err: any) {
       console.error('[rook] ML ingestion failed:', err.message);
     }
