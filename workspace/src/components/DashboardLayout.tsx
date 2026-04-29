@@ -15,7 +15,7 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { user, logout, isAuthenticated, loading } = useAuth();
+  const { user, logout, isAuthenticated, loading, refreshUser } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
   const [verifyBannerDismissed, setVerifyBannerDismissed] = useState(false);
