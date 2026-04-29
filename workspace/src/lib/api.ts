@@ -191,6 +191,10 @@ export const authApi = {
     const res = await apiClient.post('/auth/resend-verification', { email });
     return res.data;
   },
+  manualVerify: async () => {
+    const res = await apiClient.post('/auth/manual-verify');
+    return res.data;
+  },
   updateProfile: async (data: {
     firstName?: string;
     lastName?: string;

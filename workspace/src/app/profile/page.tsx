@@ -369,14 +369,31 @@ export default function ProfilePage() {
                       <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, padding: "12px 16px", marginTop: 14, color: "#166534", fontSize: 14 }}>{riskSuccess}</div>
                     )}
 
-                    <button
-                      type="button"
-                      onClick={() => handleRiskSubmit()}
-                      disabled={riskSaving}
-                      style={{ width: "100%", marginTop: 16, padding: "14px", background: riskSaving ? "#94a3b8" : "linear-gradient(135deg,#2563eb,#0ea5e9)", color: "white", border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: riskSaving ? "not-allowed" : "pointer" }}
-                    >
-                      {riskSaving ? "Saving…" : "Save Health Profile"}
-                    </button>
+                    <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
+                      <button
+                        type="button"
+                        onClick={() => handleRiskSubmit()}
+                        disabled={riskSaving}
+                        style={{ flex: 2, padding: "14px", background: riskSaving ? "#94a3b8" : "linear-gradient(135deg,#2563eb,#0ea5e9)", color: "white", border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: riskSaving ? "not-allowed" : "pointer" }}
+                      >
+                        {riskSaving ? "Saving…" : "Save Health Profile"}
+                      </button>
+                      
+                      {!riskProfile.onboardingCompleted && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (confirm("Skip onboarding? You can complete this later in your profile to enable AI risk signals.")) {
+                              setRiskProfile(prev => ({ ...prev, onboardingCompleted: true }));
+                              handleRiskSubmit();
+                            }
+                          }}
+                          style={{ flex: 1, padding: "14px", background: "white", color: "#64748b", border: "1.5px solid #e2e8f0", borderRadius: 12, fontSize: 14, fontWeight: 600, cursor: "pointer" }}
+                        >
+                          Skip for now
+                        </button>
+                      )}
+                    </div>
                 </div>
               )}
 

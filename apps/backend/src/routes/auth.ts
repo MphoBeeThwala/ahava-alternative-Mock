@@ -588,6 +588,22 @@ router.post('/resend-verification', authRateLimiter, async (req, res, next) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// POST /auth/manual-verify — bypass email verification (Trial/Dev mode)
+// ---------------------------------------------------------------------------
+router.post('/manual-verify', authMiddleware, async (req: AuthenticatedRequest, res) => {
+  try {
+    const userId = req.user!.id;
+    await (prisma.user.update as Function)({
+      where: { id: userId },
+      data: { isVerified: true, emailVerificationToken: null },
+    });
+    res.json({ success: true, message: 'Account manually verified.' });
+  } catch (error) {
+    res.status(500).json({ error: 'Manual verification failed.' });
+  }
+});
+
 /** Parse expiry string (e.g. "15m", "7d") to seconds for jwt.SignOptions */
 function parseExpiry(s: string): number {
   const n = parseInt(s, 10);

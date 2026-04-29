@@ -15,7 +15,7 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { user, logout, isAuthenticated } = useAuth();
+  const { user, logout, isAuthenticated, loading } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
   const [verifyBannerDismissed, setVerifyBannerDismissed] = useState(false);
@@ -36,6 +36,20 @@ export default function DashboardLayout({
     }
   };
 
+  const handleManualVerify = async () => {
+     setResendLoading(true);
+     try {
+       await authApi.manualVerify();
+       setVerifyBannerDismissed(true);
+       if (refreshUser) await refreshUser();
+     } catch {
+       // fallback if API fails
+       setVerifyBannerDismissed(true);
+     } finally {
+       setResendLoading(false);
+     }
+   };
+
   const showVerifyBanner = isAuthenticated && user && !(user as { isVerified?: boolean }).isVerified && !verifyBannerDismissed;
   const riskProfile = user?.riskProfile;
   const onboardingCompleted = Boolean(
@@ -47,11 +61,17 @@ export default function DashboardLayout({
   useEffect(() => {
     if (!isAuthenticated || !user) return;
     if (user.role !== "PATIENT") return;
-    if (onboardingCompleted) return;
-    if (pathname.startsWith("/auth")) return;
-    if (pathname.startsWith("/profile")) return;
-    router.push("/profile");
-  }, [isAuthenticated, user, onboardingCompleted, pathname, router]);
+    
+    // Don't redirect if we're already on an auth or profile page
+    if (pathname.startsWith("/auth") || pathname.startsWith("/profile")) return;
+    
+    // If onboarding is not completed, we'll let them stay on the dashboard 
+    // but maybe some features will be restricted there.
+    // For now, let's keep the redirect but make it more reliable by checking AuthContext loading state.
+    if (!onboardingCompleted && !loading) {
+      router.push("/profile");
+    }
+  }, [isAuthenticated, user, onboardingCompleted, pathname, router, loading]);
 
   const getDashboardPath = () => {
     if (!user) return "/";
@@ -203,14 +223,24 @@ export default function DashboardLayout({
               {resendSent ? (
                 <span style={{ color: '#059669', fontSize: 12, fontWeight: 600 }}>✓ Email sent!</span>
               ) : (
-                <button
-                  type="button"
-                  onClick={handleResendVerification}
-                  disabled={resendLoading}
-                  style={{ background: '#f59e0b', border: 'none', color: 'white', borderRadius: 7, padding: '5px 12px', fontSize: 12, fontWeight: 700, cursor: resendLoading ? 'not-allowed' : 'pointer', opacity: resendLoading ? 0.7 : 1 }}
-                >
-                  {resendLoading ? 'Sending…' : 'Resend email'}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={handleResendVerification}
+                    disabled={resendLoading}
+                    style={{ background: '#f59e0b', border: 'none', color: 'white', borderRadius: 7, padding: '5px 12px', fontSize: 12, fontWeight: 700, cursor: resendLoading ? 'not-allowed' : 'pointer', opacity: resendLoading ? 0.7 : 1 }}
+                  >
+                    {resendLoading ? 'Sending…' : 'Resend email'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleManualVerify}
+                    disabled={resendLoading}
+                    style={{ background: 'white', border: '1px solid #d97706', color: '#d97706', borderRadius: 7, padding: '4px 10px', fontSize: 11, fontWeight: 700, cursor: resendLoading ? 'not-allowed' : 'pointer' }}
+                  >
+                    Verify Now (Trial)
+                  </button>
+                </>
               )}
               <button
                 type="button"
