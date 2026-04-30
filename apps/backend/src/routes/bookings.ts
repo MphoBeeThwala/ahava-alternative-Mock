@@ -3,13 +3,15 @@ import { UserRole } from '@prisma/client';
 import { AuthenticatedRequest, authMiddleware, requirePatient } from '../middleware/auth';
 import { idempotencyMiddleware } from '../middleware/idempotency';
 import { notifyNearbyNurses } from '../services/websocket';
+import { encryptData, isEncryptedPayload } from '../utils/encryption';
 import Joi from 'joi';
 import prisma from '../lib/prisma';
 
 const router: Router = Router();
 
 const createBookingSchema = Joi.object({
-  encryptedAddress: Joi.string().required(),
+  encryptedAddress: Joi.string().optional(),
+  address: Joi.string().optional(),
   scheduledDate: Joi.date().iso().required(),
   estimatedDuration: Joi.number().min(30).max(240).default(60),
   paymentMethod: Joi.string().valid('CARD', 'INSURANCE').required(),
@@ -26,7 +28,7 @@ const createBookingSchema = Joi.object({
     then: Joi.required(),
     otherwise: Joi.optional(),
   }),
-});
+}).or('encryptedAddress', 'address');
 
 // Create new booking (Patient only)
 router.post('/', requirePatient, idempotencyMiddleware({ scope: 'booking-create' }), async (req: AuthenticatedRequest, res, next) => {
@@ -37,7 +39,7 @@ router.post('/', requirePatient, idempotencyMiddleware({ scope: 'booking-create'
     }
 
     const {
-      encryptedAddress,
+      encryptedAddress: addressOrEncryptedAddress,
       scheduledDate,
       estimatedDuration,
       paymentMethod,
@@ -53,6 +55,11 @@ router.post('/', requirePatient, idempotencyMiddleware({ scope: 'booking-create'
     if (new Date(scheduledDate) <= now) {
       return res.status(400).json({ error: 'Scheduled date must be in the future' });
     }
+
+    // Server-side enforce encryption-at-rest for address data.
+    const encryptedAddress = isEncryptedPayload(addressOrEncryptedAddress)
+      ? addressOrEncryptedAddress
+      : encryptData(addressOrEncryptedAddress);
 
     // Create booking
     const booking = await prisma.booking.create({

@@ -127,19 +127,34 @@ def ensure_schema() -> None:
                 logger.info("[db] TIMESCALE_MODE=off; plain PostgreSQL table ready")
                 return
 
-            # Try TimescaleDB first; fall back gracefully to plain Postgres table
-            try:
+            if _timescale_mode == "on":
                 cur.execute(HYPERTABLE_SQL)
                 conn.commit()
                 logger.info("[db] TimescaleDB hypertable ready")
-            except Exception as ts_err:
-                conn.rollback()
-                logger.warning(
-                    "[db] TimescaleDB extension unavailable (%s); "
-                    "creating plain table as fallback", ts_err
+                return
+
+            # AUTO mode: only attempt CREATE EXTENSION when extension exists on host.
+            cur.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM pg_available_extensions
+                    WHERE name = 'timescaledb'
                 )
+                """
+            )
+            available = bool(cur.fetchone()[0])
+
+            if available:
+                cur.execute(HYPERTABLE_SQL)
+                conn.commit()
+                logger.info("[db] TimescaleDB available; hypertable ready")
+            else:
                 cur.execute(PLAIN_TABLE_SQL)
                 conn.commit()
+                logger.info(
+                    "[db] TimescaleDB not available on this host; using plain PostgreSQL table"
+                )
     finally:
         _put_conn(conn)
 

@@ -95,6 +95,10 @@ const refreshTokenSchema = Joi.object({
   refreshToken: Joi.string().required(),
 });
 
+function hashRefreshToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
 // Register new user
 router.post('/register', authRateLimiter, async (req, res, next) => {
   try {
@@ -143,7 +147,7 @@ router.post('/register', authRateLimiter, async (req, res, next) => {
     });
 
     // Generate tokens
-    const { accessToken, refreshToken } = generateTokens(user.id, user.role);
+    const { accessToken, refreshToken } = await generateTokens(user.id, user.role);
 
     // Send email verification (non-fatal — requires DB migration to be applied)
     try {
@@ -267,7 +271,7 @@ router.post('/login', authRateLimiter, async (req, res, next) => {
     await clearFailedAttempts(email);
 
     // Generate tokens
-    const { accessToken, refreshToken } = generateTokens(user.id, user.role);
+    const { accessToken, refreshToken } = await generateTokens(user.id, user.role);
 
     res.json({
       success: true,
@@ -305,10 +309,11 @@ router.post('/refresh', async (req, res, next) => {
     }
 
     const _decoded = jwt.verify(refreshToken, process.env.JWT_SECRET) as { userId: string };
+    const tokenHash = hashRefreshToken(refreshToken);
 
     // Check if refresh token exists in database
     const tokenRecord = await prisma.refreshToken.findUnique({
-      where: { token: refreshToken },
+      where: { token: tokenHash },
       include: { user: true },
     });
 
@@ -321,14 +326,14 @@ router.post('/refresh', async (req, res, next) => {
     }
 
     // Generate new tokens
-    const { accessToken, refreshToken: newRefreshToken } = generateTokens(
+    const { accessToken, refreshToken: newRefreshToken } = await generateTokens(
       tokenRecord.user.id,
       tokenRecord.user.role
     );
 
     // Delete old refresh token
     await prisma.refreshToken.delete({
-      where: { token: refreshToken },
+      where: { token: tokenHash },
     });
 
     res.json({
@@ -347,8 +352,9 @@ router.post('/logout', async (req, res, next) => {
     const { refreshToken } = req.body;
 
     if (refreshToken) {
+      const tokenHash = hashRefreshToken(refreshToken);
       await prisma.refreshToken.deleteMany({
-        where: { token: refreshToken },
+        where: { token: tokenHash },
       });
     }
 
@@ -634,7 +640,7 @@ function parseExpiry(s: string): number {
 }
 
 // Helper function to generate tokens
-function generateTokens(userId: string, role: string) {
+async function generateTokens(userId: string, role: string) {
   if (!process.env.JWT_SECRET) {
     throw new Error('JWT_SECRET not configured');
   }
@@ -645,18 +651,17 @@ function generateTokens(userId: string, role: string) {
   const refreshExpiry = process.env.REFRESH_TOKEN_EXPIRES_IN ? parseExpiry(process.env.REFRESH_TOKEN_EXPIRES_IN) : 604800; // 7d
   const accessToken = jwt.sign({ userId, role }, secret, { expiresIn: accessExpiry });
   const refreshToken = jwt.sign({ userId, role }, secret, { expiresIn: refreshExpiry });
+  const refreshTokenHash = hashRefreshToken(refreshToken);
 
   // Store refresh token in database
   const expiresAt = new Date(Date.now() + refreshExpiry * 1000);
 
-  prisma.refreshToken.create({
+  await prisma.refreshToken.create({
     data: {
-      token: refreshToken,
+      token: refreshTokenHash,
       userId,
       expiresAt,
     },
-  }).catch(error => {
-    console.error('Failed to store refresh token:', error);
   });
 
   return { accessToken, refreshToken };
