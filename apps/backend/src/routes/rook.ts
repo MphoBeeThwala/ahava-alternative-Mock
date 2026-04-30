@@ -164,6 +164,24 @@ router.post('/connect', authMiddleware, async (req: Request, res: Response, next
         });
         return;
       }
+
+      // Some ROOK responses indicate the user is already authorized and do not
+      // include a new authorization URL. Treat this as a successful connected state.
+      if (Boolean(data.authorized)) {
+        await prisma.user.update({
+          where: { id: userId },
+          data: { rookUserId: userId } as any,
+        });
+
+        return res.json({
+          success: true,
+          url: null,
+          dataSource,
+          authorized: true,
+          alreadyConnected: true,
+        });
+      }
+
       return res.status(502).json({
         success: false,
         error: 'ROOK did not return an authorization URL',
