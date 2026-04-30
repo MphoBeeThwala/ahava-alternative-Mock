@@ -43,8 +43,13 @@ export const authMiddleware = async (
       const jwtSecret = process.env.NODE_ENV === 'production' ? secret : (secret || 'dev_secret_key_change_me_in_prod');
       decoded = jwt.verify(token, jwtSecret) as any;
     } catch (error) {
-      console.error('[AuthMiddleware] Token verification failed:', error);
-      return res.status(401).json({ error: 'Invalid token' });
+      const errName = (error as { name?: string })?.name;
+      if (errName === 'TokenExpiredError') {
+        // Expected in normal access-token refresh flow; avoid noisy error logs.
+        return res.status(401).json({ error: 'Token expired', code: 'TOKEN_EXPIRED' });
+      }
+      console.warn('[AuthMiddleware] Token verification failed');
+      return res.status(401).json({ error: 'Invalid token', code: 'TOKEN_INVALID' });
     }
 
     const cacheTtlSeconds = Math.max(

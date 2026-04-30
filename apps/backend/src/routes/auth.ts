@@ -372,7 +372,16 @@ router.get('/me', async (req, res, next) => {
       throw new Error('JWT_SECRET not configured');
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET) as { userId: string };
+    let decoded: { userId: string };
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET) as { userId: string };
+    } catch (verifyError) {
+      const errName = (verifyError as { name?: string })?.name;
+      if (errName === 'TokenExpiredError') {
+        return res.status(401).json({ error: 'Token expired', code: 'TOKEN_EXPIRED' });
+      }
+      return res.status(401).json({ error: 'Invalid token', code: 'TOKEN_INVALID' });
+    }
 
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
@@ -638,8 +647,7 @@ function generateTokens(userId: string, role: string) {
   const refreshToken = jwt.sign({ userId, role }, secret, { expiresIn: refreshExpiry });
 
   // Store refresh token in database
-  const expiresAt = new Date();
-  expiresAt.setDate(expiresAt.getDate() + 7); // 7 days
+  const expiresAt = new Date(Date.now() + refreshExpiry * 1000);
 
   prisma.refreshToken.create({
     data: {
