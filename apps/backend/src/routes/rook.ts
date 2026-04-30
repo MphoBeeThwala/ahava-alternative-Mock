@@ -46,6 +46,18 @@ function resolveRookBaseUrl(): string {
   // If only host is supplied, add the expected API base path.
   try {
     const parsed = new URL(normalized);
+
+    // Guardrail: webhook URLs are inbound to *our* backend and cannot be used as ROOK API base URLs.
+    // A common misconfiguration is setting ROOK_BASE_URL to ".../webhooks/rook".
+    if (/\/webhooks\/rook\/?$/i.test(parsed.pathname)) {
+      const inferred = 'https://api.rook-connect.review/api/v1';
+      console.error(
+        `[rook] ROOK_BASE_URL appears to be a webhook endpoint (${normalized}). ` +
+        `Using ${inferred} instead. Set ROOK_BASE_URL to a ROOK API host.`
+      );
+      return inferred;
+    }
+
     if (
       /api\.rook-connect\.(com|review)$/i.test(parsed.hostname) &&
       !/\/api\/v1$/i.test(parsed.pathname)
