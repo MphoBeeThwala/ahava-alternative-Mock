@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 _db_url = os.getenv("DATABASE_URL")
 _use_db = bool(_db_url)
+_timescale_mode = (os.getenv("TIMESCALE_MODE", "auto") or "auto").strip().lower()
 _memory_biometrics: dict[str, list[dict]] = {}
 _memory_context: dict[str, ContextualProfile] = {}
 
@@ -91,6 +92,27 @@ CREATE INDEX IF NOT EXISTS bts_user_time_idx
     ON biometric_time_series (user_id, time DESC);
 """
 
+PLAIN_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS biometric_time_series (
+    time         TIMESTAMPTZ NOT NULL,
+    user_id      TEXT        NOT NULL,
+    hr_resting   DOUBLE PRECISION,
+    hrv_rmssd    DOUBLE PRECISION,
+    spo2         DOUBLE PRECISION,
+    resp_rate    DOUBLE PRECISION,
+    step_count   INTEGER,
+    active_cals  DOUBLE PRECISION,
+    sleep_hrs    DOUBLE PRECISION,
+    skin_temp    DOUBLE PRECISION,
+    ecg_rhythm   TEXT DEFAULT 'unknown',
+    temp_trend   TEXT DEFAULT 'normal',
+    alert_level  TEXT DEFAULT 'GREEN',
+    anomalies    JSONB DEFAULT '[]'
+);
+CREATE INDEX IF NOT EXISTS bts_user_time_idx
+    ON biometric_time_series (user_id, time DESC);
+"""
+
 
 def ensure_schema() -> None:
     """Call once at service startup to create hypertable if not already present."""
@@ -99,6 +121,12 @@ def ensure_schema() -> None:
     conn = _get_conn()
     try:
         with conn.cursor() as cur:
+            if _timescale_mode == "off":
+                cur.execute(PLAIN_TABLE_SQL)
+                conn.commit()
+                logger.info("[db] TIMESCALE_MODE=off; plain PostgreSQL table ready")
+                return
+
             # Try TimescaleDB first; fall back gracefully to plain Postgres table
             try:
                 cur.execute(HYPERTABLE_SQL)
@@ -110,27 +138,7 @@ def ensure_schema() -> None:
                     "[db] TimescaleDB extension unavailable (%s); "
                     "creating plain table as fallback", ts_err
                 )
-                plain_ddl = """
-                CREATE TABLE IF NOT EXISTS biometric_time_series (
-                    time         TIMESTAMPTZ NOT NULL,
-                    user_id      TEXT        NOT NULL,
-                    hr_resting   DOUBLE PRECISION,
-                    hrv_rmssd    DOUBLE PRECISION,
-                    spo2         DOUBLE PRECISION,
-                    resp_rate    DOUBLE PRECISION,
-                    step_count   INTEGER,
-                    active_cals  DOUBLE PRECISION,
-                    sleep_hrs    DOUBLE PRECISION,
-                    skin_temp    DOUBLE PRECISION,
-                    ecg_rhythm   TEXT DEFAULT 'unknown',
-                    temp_trend   TEXT DEFAULT 'normal',
-                    alert_level  TEXT DEFAULT 'GREEN',
-                    anomalies    JSONB DEFAULT '[]'
-                );
-                CREATE INDEX IF NOT EXISTS bts_user_time_idx
-                    ON biometric_time_series (user_id, time DESC);
-                """
-                cur.execute(plain_ddl)
+                cur.execute(PLAIN_TABLE_SQL)
                 conn.commit()
     finally:
         _put_conn(conn)
