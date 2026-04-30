@@ -17,6 +17,14 @@ import { withResilientHttp } from '../services/resilientHttp';
 
 const router: Router = Router();
 
+function envFirstNonEmpty(...keys: string[]): string {
+  for (const key of keys) {
+    const value = (process.env[key] || '').trim();
+    if (value.length > 0) return value;
+  }
+  return '';
+}
+
 function resolveRookBaseUrl(): string {
   const fallback = 'https://api.rook-connect.com/api/v1';
   const raw = (process.env.ROOK_BASE_URL || '').trim();
@@ -57,9 +65,9 @@ function resolveRookBaseUrl(): string {
 // - Sandbox:    https://api.rook-connect.review/api/v1
 // Keep override support via ROOK_BASE_URL and legacy compatibility fallbacks.
 const ROOK_BASE_URL = resolveRookBaseUrl();
-const ROOK_CLIENT_UUID = process.env.ROOK_CLIENT_UUID ?? '';
-const ROOK_SECRET_KEY = process.env.ROOK_SECRET_KEY ?? process.env.ROOK_API_KEY ?? '';
-const ROOK_DEFAULT_DATA_SOURCE = process.env.ROOK_DEFAULT_DATA_SOURCE ?? 'Fitbit';
+const ROOK_CLIENT_UUID = envFirstNonEmpty('ROOK_CLIENT_UUID');
+const ROOK_SECRET_KEY = envFirstNonEmpty('ROOK_SECRET_KEY', 'ROOK_API_KEY');
+const ROOK_DEFAULT_DATA_SOURCE = envFirstNonEmpty('ROOK_DEFAULT_DATA_SOURCE') || 'Fitbit';
 const ROOK_ENABLE_LEGACY_SESSION_FALLBACK = process.env.ROOK_ENABLE_LEGACY_SESSION_FALLBACK === 'true';
 
 function rookHeaders() {
