@@ -17,6 +17,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import { authMiddleware } from '../middleware/auth';
 import prisma from '../lib/prisma';
+import { mlServiceHeaders } from '../services/mlServiceAuth';
 
 const router: Router = Router();
 
@@ -146,9 +147,22 @@ export async function handleTerraWebhook(
   next: NextFunction
 ): Promise<void> {
   try {
+    const enforceSignedWebhooks =
+      process.env.NODE_ENV === 'production' ||
+      process.env.WEBHOOK_SIGNATURE_REQUIRED === 'true';
     const secret    = process.env.TERRA_WEBHOOK_SECRET ?? '';
     const signature = req.headers['terra-signature'] as string | undefined;
     const rawBody   = (req as any).rawBody as Buffer | undefined;
+
+    if (enforceSignedWebhooks && !secret) {
+      console.error('[terra] TERRA_WEBHOOK_SECRET is missing while signature enforcement is enabled');
+      res.status(503).json({ error: 'Webhook signature verification not configured' });
+      return;
+    }
+    if (enforceSignedWebhooks && (!signature || !rawBody)) {
+      res.status(401).json({ error: 'Missing webhook signature' });
+      return;
+    }
 
     // HMAC verification
     if (secret && signature && rawBody) {
@@ -282,7 +296,7 @@ async function processTerraData(payload: any, event: string): Promise<void> {
       `${mlUrl}/ingest?user_id=${encodeURIComponent(user.id)}`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...mlServiceHeaders() },
         body: JSON.stringify(biometricData),
         signal: AbortSignal.timeout(10000),
       }

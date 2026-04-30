@@ -8,6 +8,7 @@ import Joi from 'joi';
 import { processBiometricReading, getMonitoringSummary, detectEarlyWarningSigns } from '../services/monitoring';
 import { analyzeSymptoms } from '../services/aiTriage';
 import { startDemoStream } from '../services/demoStream';
+import { mlServiceHeaders } from '../services/mlServiceAuth';
 import prisma from '../lib/prisma';
 import { randomUUID } from 'crypto';
 import { hashValue, writeClinicalAudit } from '../services/clinicalAudit';
@@ -228,7 +229,10 @@ router.get('/biometrics/history', authMiddleware, async (req: AuthenticatedReque
     try {
       const scoreResponse = await axios.get(
         `${ML_SERVICE_URL}/readiness-score/${userId}`,
-        { timeout: 5000 }
+        {
+          timeout: 5000,
+          headers: mlServiceHeaders(),
+        }
       );
       readinessScore = scoreResponse.data.score;
       baselineStatus = scoreResponse.data.baseline_status;
@@ -417,7 +421,10 @@ router.get('/early-warning', authMiddleware, async (req: AuthenticatedRequest, r
         // 1. Try the cached summary first
         const summaryRes = await axios.get(
           `${ML_URL}/early-warning/summary/${encodeURIComponent(userId)}`,
-          { timeout: 8000 }
+          {
+            timeout: 8000,
+            headers: mlServiceHeaders(),
+          }
         );
         mlData = summaryRes.data;
       } catch (summaryErr: any) {
@@ -458,13 +465,19 @@ router.get('/early-warning', authMiddleware, async (req: AuthenticatedRequest, r
                   ecg_rhythm: ['regular', 'irregular', 'unknown'].includes(rb.ecgRhythm) ? rb.ecgRhythm : 'unknown',
                   temperature_trend: ['normal', 'elevated_single_day', 'elevated_over_3_days'].includes(rb.temperatureTrend) ? rb.temperatureTrend : 'normal',
                 },
-                { timeout: 3000 }
+                {
+                  timeout: 3000,
+                  headers: mlServiceHeaders(),
+                }
               ).catch(() => { /* ignore individual ingest failures */ });
             }
             const analyzeRes = await axios.post(
               `${ML_URL}/early-warning/analyze?user_id=${encodeURIComponent(userId)}`,
               { biometrics, context },
-              { timeout: 10000 }
+              {
+                timeout: 10000,
+                headers: mlServiceHeaders(),
+              }
             );
             mlData = analyzeRes.data;
           } catch (backfillErr: any) {
@@ -678,7 +691,14 @@ router.patch('/risk-profile', authMiddleware, async (req: AuthenticatedRequest, 
         cholesterol_mmol_per_L: (merged as any).cholesterolValue ?? null,
       };
       axios
-        .put(`${ML_URL}/early-warning/context/${encodeURIComponent(userId)}`, context, { timeout: 8000 })
+        .put(
+          `${ML_URL}/early-warning/context/${encodeURIComponent(userId)}`,
+          context,
+          {
+            timeout: 8000,
+            headers: mlServiceHeaders(),
+          }
+        )
         .catch(() => {});
     }
 

@@ -14,6 +14,7 @@ import prisma from '../lib/prisma';
 import axios from 'axios';
 import crypto from 'crypto';
 import { withResilientHttp } from '../services/resilientHttp';
+import { mlServiceHeaders } from '../services/mlServiceAuth';
 
 const router: Router = Router();
 
@@ -46,10 +47,11 @@ function resolveRookBaseUrl(): string {
   // If only host is supplied, add the expected API base path.
   try {
     const parsed = new URL(normalized);
+    const rookHostPattern = /api\.rook-connect\.(com|review)$/i;
 
     // Guardrail: webhook URLs are inbound to *our* backend and cannot be used as ROOK API base URLs.
     // A common misconfiguration is setting ROOK_BASE_URL to ".../webhooks/rook".
-    if (/\/webhooks\/rook\/?$/i.test(parsed.pathname)) {
+    if (/\/webhooks\/rook(\/|$)/i.test(parsed.pathname)) {
       const inferred = 'https://api.rook-connect.review/api/v1';
       console.error(
         `[rook] ROOK_BASE_URL appears to be a webhook endpoint (${normalized}). ` +
@@ -57,9 +59,19 @@ function resolveRookBaseUrl(): string {
       );
       return inferred;
     }
+    if (!rookHostPattern.test(parsed.hostname)) {
+      const inferred = /sandbox|review/i.test(raw)
+        ? 'https://api.rook-connect.review/api/v1'
+        : 'https://api.rook-connect.com/api/v1';
+      console.error(
+        `[rook] ROOK_BASE_URL host "${parsed.hostname}" is not a supported ROOK API host. ` +
+        `Using ${inferred}.`
+      );
+      return inferred;
+    }
 
     if (
-      /api\.rook-connect\.(com|review)$/i.test(parsed.hostname) &&
+      rookHostPattern.test(parsed.hostname) &&
       !/\/api\/v1$/i.test(parsed.pathname)
     ) {
       normalized = `${parsed.origin}/api/v1`;
@@ -76,7 +88,6 @@ function resolveRookBaseUrl(): string {
 // - Production: https://api.rook-connect.com/api/v1
 // - Sandbox:    https://api.rook-connect.review/api/v1
 // Keep override support via ROOK_BASE_URL and legacy compatibility fallbacks.
-const ROOK_BASE_URL = resolveRookBaseUrl();
 const ROOK_CLIENT_UUID = envFirstNonEmpty('ROOK_CLIENT_UUID');
 const ROOK_SECRET_KEY = envFirstNonEmpty('ROOK_SECRET_KEY', 'ROOK_API_KEY');
 const ROOK_DEFAULT_DATA_SOURCE = envFirstNonEmpty('ROOK_DEFAULT_DATA_SOURCE') || 'Fitbit';
@@ -127,6 +138,8 @@ function toRookErrorPayload(err: unknown): RookApiError | undefined {
 // ---------------------------------------------------------------------------
 router.post('/connect', authMiddleware, async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const rookBaseUrl = resolveRookBaseUrl();
+
     if (missingRookCredentials()) {
       return res.status(503).json({
         success: false,
@@ -144,7 +157,7 @@ router.post('/connect', authMiddleware, async (req: Request, res: Response, next
 
     // Preferred current flow: /authorizer endpoint per ROOK docs.
     try {
-      const url = `${ROOK_BASE_URL}/user_id/${encodeURIComponent(userId)}/data_source/${encodeURIComponent(dataSource)}/authorizer`;
+      const url = `${rookBaseUrl}/user_id/${encodeURIComponent(userId)}/data_source/${encodeURIComponent(dataSource)}/authorizer`;
       const rookRes = await withResilientHttp('rook-authorizer', (timeoutMs) =>
         axios.get(url, {
           headers: rookHeaders(),
@@ -190,7 +203,7 @@ router.post('/connect', authMiddleware, async (req: Request, res: Response, next
     } catch (authorizerError: any) {
       const rookError = toRookErrorPayload(authorizerError);
       if (isRookAuthFailure(authorizerError)) {
-        console.error(`[rook] Authorizer auth failed on ${ROOK_BASE_URL}:`, rookError || authorizerError.message);
+        console.error(`[rook] Authorizer auth failed on ${rookBaseUrl}:`, rookError || authorizerError.message);
         return res.status(502).json({
           success: false,
           error: 'ROOK credentials rejected by upstream API',
@@ -206,7 +219,7 @@ router.post('/connect', authMiddleware, async (req: Request, res: Response, next
 
       // Optional legacy fallback for older integrations only.
       if (!ROOK_ENABLE_LEGACY_SESSION_FALLBACK) {
-        console.error(`[rook] /authorizer failed on ${ROOK_BASE_URL}:`, rookError || authorizerError.message);
+        console.error(`[rook] /authorizer failed on ${rookBaseUrl}:`, rookError || authorizerError.message);
         return res.status(502).json({
           success: false,
           error: 'Failed to create ROOK authorizer URL',
@@ -220,13 +233,13 @@ router.post('/connect', authMiddleware, async (req: Request, res: Response, next
         });
       }
 
-      console.warn(`[rook] /authorizer failed on ${ROOK_BASE_URL}; attempting legacy /auth/session fallback`);
+      console.warn(`[rook] /authorizer failed on ${rookBaseUrl}; attempting legacy /auth/session fallback`);
     }
 
     // Legacy fallback flow (older ROOK integrations). Disabled by default.
     const legacyBody = { user_id: userId };
     const legacyRes = await withResilientHttp('rook-legacy-session', (timeoutMs) =>
-      axios.post(`${ROOK_BASE_URL}/auth/session`, legacyBody, {
+      axios.post(`${rookBaseUrl}/auth/session`, legacyBody, {
         headers: rookHeaders(),
         timeout: timeoutMs,
       })
@@ -302,9 +315,22 @@ export async function handleRookWebhook(
   next: NextFunction
 ): Promise<void> {
   try {
+    const enforceSignedWebhooks =
+      process.env.NODE_ENV === 'production' ||
+      process.env.WEBHOOK_SIGNATURE_REQUIRED === 'true';
     const secret = process.env.ROOK_WEBHOOK_SECRET;
     const signature = req.headers['rook-signature'] as string | undefined;
     const rawBody = (req as any).rawBody as Buffer | undefined;
+
+    if (enforceSignedWebhooks && !secret) {
+      console.error('[rook] ROOK_WEBHOOK_SECRET is missing while signature enforcement is enabled');
+      res.status(503).json({ error: 'Webhook signature verification not configured' });
+      return;
+    }
+    if (enforceSignedWebhooks && (!signature || !rawBody)) {
+      res.status(401).json({ error: 'Missing webhook signature' });
+      return;
+    }
 
     // HMAC verification (Compliance-first)
     if (secret && signature && rawBody) {
@@ -370,19 +396,28 @@ async function processRookData(payload: any): Promise<void> {
   if (!userId) return;
 
   let biometricData: Record<string, any> | null = null;
-  const category = payload?.category || payload?.data_structure;
+  const category = String(payload?.category || payload?.data_structure || '').toLowerCase();
 
   // 1. Handle Production Structure (payload.data)
   if (payload.data) {
     const data = payload.data;
-    if (category === 'body' || category === 'physical') {
+    if (
+      category === 'body' ||
+      category === 'physical' ||
+      category === 'body_summary' ||
+      category === 'physical_summary' ||
+      category === 'activity' ||
+      category === 'activity_event' ||
+      category === 'steps_event'
+    ) {
       biometricData = {
         timestamp:            new Date().toISOString(),
         heart_rate_resting:   data?.heart_rate?.resting_hr || data?.heart_rate?.avg_hr || 70,
         hrv_rmssd:            data?.heart_rate?.hrv_rmssd || 40,
         spo2:                 data?.oxygen_saturation?.avg || 97,
         respiratory_rate:     data?.respiration?.rate || 16,
-        step_count:           data?.activity?.steps || 0,
+        step_count:           data?.activity?.steps || data?.steps || data?.step_count || 0,
+        active_calories:      data?.activity?.active_calories || data?.active_calories || 0,
       };
     } else if (category === 'sleep') {
       biometricData = {
@@ -401,7 +436,8 @@ async function processRookData(payload: any): Promise<void> {
       hrv_rmssd:            summary.heart_rate?.hrv_avg_rmssd_float || 40,
       spo2:                 summary.oxygenation?.saturation_avg_percentage_int || 97,
       respiratory_rate:     16, // Simulator might not provide this in the snippet
-      step_count:           summary.body_metrics?.steps_int || 0,
+      step_count:           summary.body_metrics?.steps_int || summary.activity?.steps_int || 0,
+      active_calories:      summary.nutrition?.calories_intake_kcal_float || 0,
     };
   }
 
@@ -409,7 +445,8 @@ async function processRookData(payload: any): Promise<void> {
     try {
       console.log(`[rook] Forwarding data to ML for user ${userId}`);
       await withResilientHttp('rook-ml-ingest', (timeoutMs) =>
-        axios.post(`${mlUrl}/early-warning/ingest/${userId}`, biometricData, {
+        axios.post(`${mlUrl}/ingest?user_id=${encodeURIComponent(userId)}`, biometricData, {
+          headers: mlServiceHeaders(),
           timeout: timeoutMs,
         }),
         {

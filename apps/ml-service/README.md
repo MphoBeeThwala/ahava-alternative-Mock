@@ -29,3 +29,12 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 Service listens on **http://localhost:8000**. Backend uses `ML_SERVICE_URL=http://localhost:8000` by default.
+
+## Security env vars
+
+Set these in production/staging:
+
+- `ML_SERVICE_SHARED_SECRET` : shared secret value that backend sends as `x-ahava-service-key`
+- `ML_SERVICE_REQUIRE_AUTH` : `true` (default) to enforce header verification on non-public ML endpoints
+
+Backend and ML service must use the exact same `ML_SERVICE_SHARED_SECRET`.

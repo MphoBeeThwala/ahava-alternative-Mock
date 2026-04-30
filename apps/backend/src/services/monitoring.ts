@@ -15,6 +15,7 @@
 
 import axios from 'axios';
 import prisma from '../lib/prisma';
+import { mlServiceHeaders } from './mlServiceAuth';
 
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://localhost:8000';
 
@@ -52,7 +53,10 @@ export async function processBiometricReading(
     const mlResponse = await axios.post(
       `${ML_SERVICE_URL}/ingest?user_id=${userId}`,
       mlPayload,
-      { timeout: 5000 }
+      {
+        timeout: 5000,
+        headers: mlServiceHeaders(),
+      }
     );
 
     const alertLevel = mlResponse.data.alert_level as 'GREEN' | 'YELLOW' | 'RED';
@@ -61,7 +65,10 @@ export async function processBiometricReading(
     // Get readiness score
     const scoreResponse = await axios.get(
       `${ML_SERVICE_URL}/readiness-score/${userId}`,
-      { timeout: 5000 }
+      {
+        timeout: 5000,
+        headers: mlServiceHeaders(),
+      }
     );
 
     const readinessScore = scoreResponse.data.score || 100;
@@ -326,7 +333,10 @@ export async function getMonitoringSummary(userId: string): Promise<{
   try {
     const scoreResponse = await axios.get(
       `${ML_SERVICE_URL}/readiness-score/${userId}`,
-      { timeout: 5000 }
+      {
+        timeout: 5000,
+        headers: mlServiceHeaders(),
+      }
     );
     currentReadinessScore = scoreResponse.data.score;
   } catch (error) {

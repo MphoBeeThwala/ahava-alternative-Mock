@@ -16,6 +16,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth';
 import prisma from '../lib/prisma';
+import { mlServiceHeaders } from '../services/mlServiceAuth';
 
 const router: Router = Router();
 
@@ -77,7 +78,7 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res: Response
         `${ML_SERVICE_URL}/ingest?user_id=${encodeURIComponent(userId)}`,
         {
           method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...mlServiceHeaders() },
           body:    JSON.stringify({ timestamp, ...aggregated }),
           signal:  AbortSignal.timeout(10000),
         }
