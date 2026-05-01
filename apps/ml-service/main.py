@@ -32,6 +32,12 @@ app = FastAPI(
     description="Analyzes wearable data for pre-symptomatic physiological shifts."
 )
 
+print(
+    f"[ml-auth] require_auth={ML_SERVICE_REQUIRE_AUTH} "
+    f"secret_configured={bool(ML_SERVICE_SHARED_SECRET)} "
+    f"secret_length={len(ML_SERVICE_SHARED_SECRET)}"
+)
+
 # Initialize Engine
 engine = EarlyWarningEngine()
 
