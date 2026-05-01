@@ -13,8 +13,11 @@ export default function SignupPage() {
         lastName: '',
         email: '',
         password: '',
-        role: 'PATIENT' as 'PATIENT' | 'NURSE' | 'DOCTOR' | 'ADMIN'
+        role: 'PATIENT' as 'PATIENT' | 'NURSE' | 'DOCTOR' | 'ADMIN',
+        adminSecret: ''
     });
+
+    const isStaffOrAdmin = formData.role !== 'PATIENT';
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
 
@@ -165,6 +168,22 @@ export default function SignupPage() {
                                 <option value="ADMIN">Admin</option>
                             </select>
                         </div>
+
+                        {isStaffOrAdmin && (
+                            <div>
+                                <label htmlFor="signup-secret" style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#0d9488', marginBottom: 6 }}>
+                                    {formData.role === 'ADMIN' ? 'Admin Registration Secret' : 'Staff Registration Secret'}
+                                </label>
+                                <input id="signup-secret" type="password" required placeholder="Enter the secret key provided by your administrator"
+                                    value={formData.adminSecret} onChange={(e) => setFormData({ ...formData, adminSecret: e.target.value })}
+                                    style={{ ...inp, border: '1.5px solid #0d9488', background: '#f0fdfa' }}
+                                    onFocus={(e) => (e.currentTarget.style.borderColor = '#059669')}
+                                    onBlur={(e) => (e.currentTarget.style.borderColor = '#0d9488')} />
+                                <p style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>
+                                    Required for {formData.role.toLowerCase()} registration.
+                                </p>
+                            </div>
+                        )}
 
                         <button
                             type="submit"

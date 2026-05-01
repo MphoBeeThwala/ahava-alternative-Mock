@@ -736,6 +736,16 @@ export const adminApi = {
     const res = await apiClient.post('/admin/reset-trial-data', { keepUsers });
     return res.data;
   },
+  createUser: async (data: {
+    email: string;
+    password: string;
+    firstName: string;
+    lastName: string;
+    role: 'PATIENT' | 'NURSE' | 'DOCTOR' | 'ADMIN';
+  }) => {
+    const res = await apiClient.post('/admin/users', data);
+    return res.data;
+  },
   setDoctorHpcsa: async (userId: string, hcpsaNumber: string, verify = false) => {
     const res = await apiClient.patch(`/admin/users/${userId}/hpcsa`, { hcpsaNumber, verify });
     return res.data;

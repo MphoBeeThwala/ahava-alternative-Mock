@@ -108,7 +108,8 @@ router.post('/register', authRateLimiter, async (req, res, next) => {
       return res.status(400).json({ error: error.details[0].message });
     }
 
-    const { email, password, firstName, lastName, role, phone, dateOfBirth, gender, preferredLanguage, sancRegistrationNumber, adminSecret } = value;
+    const { email: rawEmail, password, firstName, lastName, role, phone, dateOfBirth, gender, preferredLanguage, sancRegistrationNumber, adminSecret } = value;
+    const email = rawEmail.toLowerCase();
 
     // Security: Restrict ADMIN and DOCTOR/NURSE registration
     if (role === 'ADMIN') {
