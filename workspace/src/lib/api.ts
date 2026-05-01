@@ -713,7 +713,7 @@ export interface User {
   email: string;
   firstName: string;
   lastName: string;
-  role: string;
+  role: 'PATIENT' | 'NURSE' | 'DOCTOR' | 'ADMIN';
   isActive: boolean;
   isVerified: boolean;
   createdAt: string;
