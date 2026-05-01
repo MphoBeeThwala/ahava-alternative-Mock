@@ -306,7 +306,7 @@ export default function AdminDashboard() {
 
                                 <div style={{ marginBottom: 24 }}>
                                     <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 6, textTransform: 'uppercase' }}>Assigned Role</label>
-                                    <select value={newUser.role} onChange={e => setNewUser({...newUser, role: e.target.value as any})} style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1.5px solid #e2e8f0', outline: 'none', background: 'white' }}>
+                                    <select value={newUser.role} onChange={e => setNewUser({...newUser, role: e.target.value as User['role']})} style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1.5px solid #e2e8f0', outline: 'none', background: 'white' }}>
                                         <option value="PATIENT">Patient</option>
                                         <option value="NURSE">Nurse</option>
                                         <option value="DOCTOR">Doctor</option>
