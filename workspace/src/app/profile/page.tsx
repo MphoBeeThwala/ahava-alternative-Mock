@@ -98,22 +98,24 @@ export default function ProfilePage() {
   const nextPassportQuestion = completionChecks.find((c) => !c.done)?.prompt ?? null;
 
   useEffect(() => {
-    if (refreshUser) {
+    // Only fetch on mount, and not if we already have user data from initializeAuth
+    if (refreshUser && !user) {
       void refreshUser();
     }
-  }, [refreshUser]);
+  }, [refreshUser, user]);
 
   useEffect(() => {
     if (user) {
-      setForm({
-        firstName: user.firstName ?? "",
-        lastName: user.lastName ?? "",
-        phone: user.phone ?? "",
-        email: user.email ?? "",
-        dateOfBirth: user.dateOfBirth ? user.dateOfBirth.split("T")[0] : "",
-        gender: user.gender ?? "",
-        preferredLanguage: user.preferredLanguage ?? "",
-      });
+      // Only set initial form values if they are empty to avoid overwriting user typing
+      setForm(prev => ({
+        firstName: prev.firstName || user.firstName || "",
+        lastName: prev.lastName || user.lastName || "",
+        phone: prev.phone || user.phone || "",
+        email: prev.email || user.email || "",
+        dateOfBirth: prev.dateOfBirth || (user.dateOfBirth ? user.dateOfBirth.split("T")[0] : ""),
+        gender: prev.gender || user.gender || "",
+        preferredLanguage: prev.preferredLanguage || user.preferredLanguage || "",
+      }));
 
       const coerceBoolean = (v: unknown): boolean | undefined => (typeof v === "boolean" ? v : undefined);
       const coerceNumber = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) ? v : undefined);

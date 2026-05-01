@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { authApi, AuthResponse, RegisterData } from '../lib/api';
 
@@ -134,7 +134,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const refreshUser = async () => {
+  const refreshUser = useCallback(async () => {
     try {
       const storedToken = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
       if (!storedToken) return;
@@ -148,7 +148,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
     } catch { /* non-fatal */ }
-  };
+  }, []);
 
   const logout = async () => {
     try {
