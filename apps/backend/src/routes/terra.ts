@@ -171,7 +171,7 @@ export async function handleTerraWebhook(
       return;
     }
 
-    // HMAC verification
+    // HMAC verification (strict when enforced)
     if (secret && signature && rawBody) {
       const expected = crypto
         .createHmac('sha256', secret)
@@ -179,8 +179,10 @@ export async function handleTerraWebhook(
         .digest('hex');
       if (signature !== expected) {
         console.warn('[terra] Webhook HMAC verification failed');
-        res.status(401).json({ error: 'Invalid signature' });
-        return;
+        if (enforceSignedWebhooks) {
+          res.status(401).json({ error: 'Invalid signature' });
+          return;
+        }
       }
     }
 

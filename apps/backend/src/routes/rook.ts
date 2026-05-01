@@ -349,7 +349,7 @@ export async function handleRookWebhook(
       return;
     }
 
-    // HMAC verification (Compliance-first)
+    // HMAC verification (Compliance-first when enforced)
     if (candidateSecrets.length > 0 && signature && rawBody) {
       const signatureNormalized = signature.toLowerCase().startsWith('sha256=')
         ? signature.slice(7)
@@ -388,8 +388,10 @@ export async function handleRookWebhook(
         console.warn(
           `[rook] Webhook HMAC verification failed (sig_len=${signatureNormalized.length}, raw_len=${rawBody.length})`
         );
-        res.status(401).json({ error: 'Invalid signature' });
-        return;
+        if (enforceSignedWebhooks) {
+          res.status(401).json({ error: 'Invalid signature' });
+          return;
+        }
       }
     }
 
