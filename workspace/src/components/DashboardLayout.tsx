@@ -20,6 +20,7 @@ export default function DashboardLayout({
   const [verifyBannerDismissed, setVerifyBannerDismissed] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
   const [resendSent, setResendSent] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const handleResendVerification = async () => {
     if (!user?.email) return;
@@ -130,35 +131,80 @@ export default function DashboardLayout({
 
   return (
     <div className="flex min-h-screen bg-[var(--background)]">
+      {/* Mobile Sidebar Overlay */}
+      {isSidebarOpen && (
+        <div 
+          className="fixed inset-0 z-40 bg-black/50 lg:hidden" 
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
+      {/* Sidebar */}
       <aside
-        className="flex w-64 flex-col"
+        className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col transition-transform lg:static lg:translate-x-0 ${
+          isSidebarOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
         style={{ background: 'white', borderRight: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}
       >
         {/* Brand header */}
-        <div className="flex items-center gap-3 px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
-          <div style={{ width: 32, height: 32, borderRadius: 9, background: `linear-gradient(135deg,${accent},#059669)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, flexShrink: 0 }}>⚕️</div>
-          <Link href={dashboardPath} className="font-bold text-[var(--foreground)] tracking-tight text-sm leading-tight" aria-label="Ahava Healthcare home">
-            Ahava<br /><span style={{ color: accent, fontWeight: 600 }}>Healthcare</span>
-          </Link>
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
+          <div className="flex items-center gap-3">
+            <div style={{ width: 32, height: 32, borderRadius: 9, background: `linear-gradient(135deg,${accent},#059669)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, flexShrink: 0 }}>⚕️</div>
+            <Link href={dashboardPath} className="font-bold text-[var(--foreground)] tracking-tight text-sm leading-tight" aria-label="Ahava Healthcare home">
+              Ahava<br /><span style={{ color: accent, fontWeight: 600 }}>Healthcare</span>
+            </Link>
+          </div>
+          {/* Close button for mobile */}
+          <button 
+            className="p-1 lg:hidden text-[var(--muted)]"
+            onClick={() => setIsSidebarOpen(false)}
+          >
+            ✕
+          </button>
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 p-3 space-y-1" aria-label="Dashboard navigation">
-          <Link href={dashboardPath} className={linkClass(pathname === dashboardPath)} aria-current={pathname === dashboardPath ? "page" : undefined}>
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto" aria-label="Dashboard navigation">
+          <Link 
+            href={dashboardPath} 
+            className={linkClass(pathname === dashboardPath)} 
+            aria-current={pathname === dashboardPath ? "page" : undefined}
+            onClick={() => setIsSidebarOpen(false)}
+          >
             <span aria-hidden>🏠</span>{getDashboardLabel()}
           </Link>
           {user.role === "PATIENT" && (
             <>
-              <Link href="/patient/book-visit" className={linkClass(pathname.startsWith("/patient/book-visit") || pathname.startsWith("/patient/visit-tracker"))} aria-current={pathname.startsWith("/patient/book-visit") ? "page" : undefined}>
+              <Link 
+                href="/patient/book-visit" 
+                className={linkClass(pathname.startsWith("/patient/book-visit") || pathname.startsWith("/patient/visit-tracker"))} 
+                aria-current={pathname.startsWith("/patient/book-visit") ? "page" : undefined}
+                onClick={() => setIsSidebarOpen(false)}
+              >
                 <span aria-hidden>📅</span>Book a Visit
               </Link>
-              <Link href="/patient/early-warning" className={linkClass(pathname === "/patient/early-warning")} aria-current={pathname === "/patient/early-warning" ? "page" : undefined}>
+              <Link 
+                href="/patient/early-warning" 
+                className={linkClass(pathname === "/patient/early-warning")} 
+                aria-current={pathname === "/patient/early-warning" ? "page" : undefined}
+                onClick={() => setIsSidebarOpen(false)}
+              >
                 <span aria-hidden>⚠️</span>Early Warning
               </Link>
-              <Link href="/patient/ai-doctor" className={linkClass(pathname === "/patient/ai-doctor")} aria-current={pathname === "/patient/ai-doctor" ? "page" : undefined}>
+              <Link 
+                href="/patient/ai-doctor" 
+                className={linkClass(pathname === "/patient/ai-doctor")} 
+                aria-current={pathname === "/patient/ai-doctor" ? "page" : undefined}
+                onClick={() => setIsSidebarOpen(false)}
+              >
                 <span aria-hidden>🩺</span>AI Doctor
               </Link>
-              <Link href="/patient/wearable" className={linkClass(pathname.startsWith("/patient/wearable"))} aria-current={pathname.startsWith("/patient/wearable") ? "page" : undefined}>
+              <Link 
+                href="/patient/wearable" 
+                className={linkClass(pathname.startsWith("/patient/wearable"))} 
+                aria-current={pathname.startsWith("/patient/wearable") ? "page" : undefined}
+                onClick={() => setIsSidebarOpen(false)}
+              >
                 <span aria-hidden>⌚</span>Smartwatch
               </Link>
             </>
@@ -174,7 +220,12 @@ export default function DashboardLayout({
             </div>
           )}
           {/* Profile — all roles */}
-          <Link href="/profile" className={linkClass(pathname === "/profile")} aria-current={pathname === "/profile" ? "page" : undefined}>
+          <Link 
+            href="/profile" 
+            className={linkClass(pathname === "/profile")} 
+            aria-current={pathname === "/profile" ? "page" : undefined}
+            onClick={() => setIsSidebarOpen(false)}
+          >
             <span aria-hidden>👤</span>My Profile
           </Link>
         </nav>
@@ -210,7 +261,22 @@ export default function DashboardLayout({
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto" id="main-content" aria-label="Main content">
+      <main className="flex-1 overflow-x-hidden" id="main-content" aria-label="Main content">
+        {/* Mobile Header */}
+        <header className="sticky top-0 z-30 flex items-center justify-between border-b bg-white px-4 py-3 lg:hidden" style={{ borderColor: 'var(--border)' }}>
+          <button 
+            className="p-2 text-[var(--muted)]"
+            onClick={() => setIsSidebarOpen(true)}
+            aria-label="Open sidebar"
+          >
+            ☰
+          </button>
+          <div className="flex items-center gap-2">
+            <div style={{ width: 24, height: 24, borderRadius: 6, background: `linear-gradient(135deg,${accent},#059669)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12 }}>⚕️</div>
+            <span className="text-xs font-bold text-[var(--foreground)]">Ahava</span>
+          </div>
+          <div style={{ width: 32 }}></div> {/* Spacer for alignment */}
+        </header>
         {showOnboardingReminder && !pathname.startsWith("/profile") && (
           <div
             role="status"
