@@ -139,7 +139,7 @@ export default function ProfilePage() {
       });
 
       // Populate Passport values
-      const mp = rp?.medicalPassport || {};
+      const mp = rpData?.medicalPassport || {};
       setPassport({
         emergencyContactName: mp.emergencyContactName || "",
         emergencyContactPhone: mp.emergencyContactPhone || "",
@@ -154,19 +154,19 @@ export default function ProfilePage() {
 
       // Populate Health values
       setRiskProfile({
-        smoker: rp?.smoker,
-        hypertension: rp?.hypertension,
-        diabetes: rp?.diabetes,
-        asthmaOrCopd: rp?.asthmaOrCopd,
-        pregnancy: rp?.pregnancy,
-        familyHistoryCvd: rp?.familyHistoryCvd,
-        activityLevel: rp?.activityLevel,
-        alcoholUse: rp?.alcoholUse,
-        cholesterolKnown: rp?.cholesterolKnown,
-        cholesterolValue: rp?.cholesterolValue,
-        consentAcknowledged: rp?.consentAcknowledged,
-        onboardingCompleted: rp?.onboardingCompleted,
-        surveyVersion: rp?.surveyVersion || 1,
+        smoker: rpData?.smoker,
+        hypertension: rpData?.hypertension,
+        diabetes: rpData?.diabetes,
+        asthmaOrCopd: rpData?.asthmaOrCopd,
+        pregnancy: rpData?.pregnancy,
+        familyHistoryCvd: rpData?.familyHistoryCvd,
+        activityLevel: rpData?.activityLevel,
+        alcoholUse: rpData?.alcoholUse,
+        cholesterolKnown: rpData?.cholesterolKnown,
+        cholesterolValue: rpData?.cholesterolValue,
+        consentAcknowledged: rpData?.consentAcknowledged,
+        onboardingCompleted: rpData?.onboardingCompleted,
+        surveyVersion: rpData?.surveyVersion || 1,
       });
     }
   }, [user]);
@@ -462,6 +462,7 @@ export default function ProfilePage() {
                             <label style={label}>Current medications (comma separated)</label>
                             <input value={passportMedsInput} onChange={(e) => setPassportMedsInput(e.target.value)} placeholder="Metformin, Amlodipine" style={inp} />
                           </div>
+                        </div>
                         <div style={{ display: "flex", gap: 12, marginTop: 24 }}>
                           <button
                             type="button"
