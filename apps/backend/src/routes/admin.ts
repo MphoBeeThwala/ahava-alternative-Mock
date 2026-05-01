@@ -166,6 +166,37 @@ router.delete('/users/:id', async (req: Request, res: Response, next: NextFuncti
 });
 
 // -----------------------------------------------------------------------
+// POST /api/admin/reset-trial-data
+// Wipes all transactional data (bookings, readings, messages) 
+// but keeps users (or wipes everyone except the current admin).
+// -----------------------------------------------------------------------
+router.post('/reset-trial-data', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { keepUsers } = req.body as { keepUsers?: boolean };
+    const currentAdminId = (req as any).user.id;
+
+    // Sequential deletion to respect foreign keys
+    await prisma.message.deleteMany({});
+    await prisma.biometricReading.deleteMany({});
+    await prisma.userBaseline.deleteMany({});
+    await prisma.visit.deleteMany({});
+    await prisma.booking.deleteMany({});
+    await prisma.consent.deleteMany({});
+    
+    if (!keepUsers) {
+      // Delete all users except the current logged-in admin
+      await prisma.user.deleteMany({
+        where: { id: { not: currentAdminId } }
+      });
+    }
+
+    res.json({ success: true, message: 'Trial data has been reset successfully.' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// -----------------------------------------------------------------------
 // PATCH /api/admin/users/:id/hpcsa
 // Admin sets or verifies a doctor's HPCSA practice number.
 // Body: { hcpsaNumber: string, verify?: boolean }

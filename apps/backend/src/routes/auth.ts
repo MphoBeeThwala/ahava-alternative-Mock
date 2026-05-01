@@ -84,6 +84,7 @@ const registerSchema = Joi.object({
   gender: Joi.string().optional(),
   preferredLanguage: Joi.string().default('en-ZA'),
   sancRegistrationNumber: Joi.string().when('role', { is: 'NURSE', then: Joi.optional(), otherwise: Joi.forbidden() }),
+  adminSecret: Joi.string().optional(),
 });
 
 const loginSchema = Joi.object({
@@ -107,7 +108,22 @@ router.post('/register', authRateLimiter, async (req, res, next) => {
       return res.status(400).json({ error: error.details[0].message });
     }
 
-    const { email, password, firstName, lastName, role, phone, dateOfBirth, gender, preferredLanguage, sancRegistrationNumber } = value;
+    const { email, password, firstName, lastName, role, phone, dateOfBirth, gender, preferredLanguage, sancRegistrationNumber, adminSecret } = value;
+
+    // Security: Restrict ADMIN and DOCTOR/NURSE registration
+    if (role === 'ADMIN') {
+      if (!adminSecret || adminSecret !== process.env.ADMIN_REGISTRATION_SECRET) {
+        return res.status(403).json({ error: 'Unauthorized role registration' });
+      }
+    }
+    
+    // For trial, we'll allow anyone to sign up as DOCTOR/NURSE 
+    // unless you want to restrict those too. Let's restrict them slightly.
+    if ((role === 'DOCTOR' || role === 'NURSE') && process.env.NODE_ENV === 'production') {
+      if (!adminSecret || adminSecret !== process.env.STAFF_REGISTRATION_SECRET) {
+        return res.status(403).json({ error: 'Staff registration requires a secret token' });
+      }
+    }
 
     // Check if user already exists
     const existingUser = await prisma.user.findUnique({

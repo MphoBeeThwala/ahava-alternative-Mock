@@ -42,6 +42,28 @@ export default function AdminDashboard() {
         }
     }, []);
 
+    const handleResetData = async () => {
+        const confirmMsg = "NUCLEAR OPTION: This will delete ALL bookings, readings, visits, and users (except you). This cannot be undone. Are you absolutely sure?";
+        if (!confirm(confirmMsg)) return;
+        
+        const doubleConfirm = "Final warning: Type 'RESET' to confirm.";
+        const input = prompt(doubleConfirm);
+        if (input !== 'RESET') return;
+
+        try {
+            setLoading(true);
+            await adminApi.resetTrialData(false);
+            toast.success('Platform data reset successfully. You are now the only user.');
+            loadUsers();
+            loadStats();
+        } catch (error: unknown) {
+            const err = error as { response?: { data?: { error?: string } } };
+            toast.error(err.response?.data?.error || 'Failed to reset data.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
     useEffect(() => {
         if (user?.role !== 'ADMIN') return;
         loadUsers();
@@ -82,6 +104,14 @@ export default function AdminDashboard() {
                                     Welcome, {user?.firstName} {user?.lastName} 🛡️
                                 </h1>
                                 <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginTop: 4 }}>Manage users, monitor platform health, and oversee all activity.</p>
+                                <button
+                                    onClick={handleResetData}
+                                    style={{ marginTop: 12, padding: '8px 16px', background: 'rgba(239,68,68,0.2)', color: '#f87171', border: '1.5px solid rgba(239,68,68,0.4)', borderRadius: 10, fontSize: 12, fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
+                                    onMouseOver={(e) => e.currentTarget.style.background = 'rgba(239,68,68,0.3)'}
+                                    onMouseOut={(e) => e.currentTarget.style.background = 'rgba(239,68,68,0.2)'}
+                                >
+                                    ⚠️ Reset Platform Data
+                                </button>
                             </div>
                             <div style={{ display: 'flex', gap: 12 }}>
                                 {[

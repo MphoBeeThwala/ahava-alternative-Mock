@@ -21,9 +21,27 @@ apiClient.interceptors.request.use(
   (config) => {
     config.baseURL = getApiBaseUrl();
     const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+    const userJson = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
+    
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+
+    // Defensive check: Prevent Patients from calling Staff/Admin endpoints in the frontend
+    if (userJson) {
+      try {
+        const user = JSON.parse(userJson);
+        const path = config.url || '';
+        if (user.role === 'PATIENT') {
+          const restrictedPaths = ['/admin', '/doctor', '/nurse', '/triage-cases', '/visits?status='];
+          if (restrictedPaths.some(p => path.includes(p))) {
+            console.error(`[API] Blocking restricted path for PATIENT: ${path}`);
+            return Promise.reject(new Error('Restricted access'));
+          }
+        }
+      } catch {}
+    }
+
     return config;
   },
   (error) => Promise.reject(error)
@@ -59,6 +77,11 @@ apiClient.interceptors.response.use(
       
       // Don't attempt refresh if already on auth pages
       if (path.startsWith('/auth/')) {
+        return Promise.reject(error);
+      }
+
+      // If the request was for a restricted path that we just blocked, don't refresh
+      if (error.message === 'Restricted access') {
         return Promise.reject(error);
       }
 
@@ -707,6 +730,10 @@ export const adminApi = {
   },
   getStats: async () => {
     const res = await apiClient.get('/admin/stats');
+    return res.data;
+  },
+  resetTrialData: async (keepUsers: boolean = true) => {
+    const res = await apiClient.post('/admin/reset-trial-data', { keepUsers });
     return res.data;
   },
   setDoctorHpcsa: async (userId: string, hcpsaNumber: string, verify = false) => {
