@@ -194,10 +194,13 @@ export default function ProfilePage() {
           preferredLanguage: res.user.preferredLanguage ?? "",
         }));
       }
+      if (user?.role === "PATIENT") {
+        await patientApi.updateRiskProfile(buildMedicalPassportPayload());
+      }
       if (res.emailChanged) {
         setSuccess("Profile saved. A verification email has been sent to your new address — please check your inbox.");
       } else {
-        setSuccess("Profile updated successfully.");
+        setSuccess(user?.role === "PATIENT" ? "Profile and medical passport updated successfully." : "Profile updated successfully.");
       }
       if (refreshUser) await refreshUser();
     } catch (err: unknown) {
@@ -220,6 +223,19 @@ export default function ProfilePage() {
       .map((s) => s.trim())
       .filter(Boolean);
 
+  const buildMedicalPassportPayload = (): RiskProfile => ({
+    medicalPassport: {
+      emergencyContactName: passport.emergencyContactName?.trim() || undefined,
+      emergencyContactPhone: passport.emergencyContactPhone?.trim() || undefined,
+      bloodType: passport.bloodType?.trim() || undefined,
+      allergies: normalizeCsv(passportAllergiesInput),
+      chronicConditions: normalizeCsv(passportConditionsInput),
+      currentMedications: normalizeCsv(passportMedsInput),
+    },
+    passportCompletionPercent,
+    nextPassportQuestion: nextPassportQuestion ?? undefined,
+  });
+
   const handleRiskSubmit = async () => {
     setRiskSaving(true);
     setRiskError("");
@@ -231,16 +247,7 @@ export default function ProfilePage() {
       }
       const payload: RiskProfile = {
         ...riskProfile,
-        medicalPassport: {
-          emergencyContactName: passport.emergencyContactName?.trim() || undefined,
-          emergencyContactPhone: passport.emergencyContactPhone?.trim() || undefined,
-          bloodType: passport.bloodType?.trim() || undefined,
-          allergies: normalizeCsv(passportAllergiesInput),
-          chronicConditions: normalizeCsv(passportConditionsInput),
-          currentMedications: normalizeCsv(passportMedsInput),
-        },
-        passportCompletionPercent,
-        nextPassportQuestion: nextPassportQuestion ?? undefined,
+        ...buildMedicalPassportPayload(),
         onboardingCompleted: true,
         surveyVersion: riskProfile.surveyVersion ?? 1,
       };
