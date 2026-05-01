@@ -315,9 +315,16 @@ export async function handleRookWebhook(
   next: NextFunction
 ): Promise<void> {
   try {
+    const signatureRequirementRaw = (process.env.WEBHOOK_SIGNATURE_REQUIRED ?? '')
+      .trim()
+      .toLowerCase();
+    // Secure-by-default in production, but allow explicit temporary override with WEBHOOK_SIGNATURE_REQUIRED=false.
     const enforceSignedWebhooks =
-      process.env.NODE_ENV === 'production' ||
-      process.env.WEBHOOK_SIGNATURE_REQUIRED === 'true';
+      signatureRequirementRaw === 'true' ||
+      (signatureRequirementRaw !== 'false' && process.env.NODE_ENV === 'production');
+    if (!enforceSignedWebhooks && process.env.NODE_ENV === 'production') {
+      console.warn('[rook] Webhook signature verification is DISABLED in production');
+    }
     // ROOK sends HMAC in X-ROOK-HASH header. Keep legacy support for rook-signature.
     const signatureRaw =
       (req.headers['x-rook-hash'] as string | undefined) ||

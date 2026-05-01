@@ -147,9 +147,16 @@ export async function handleTerraWebhook(
   next: NextFunction
 ): Promise<void> {
   try {
+    const signatureRequirementRaw = (process.env.WEBHOOK_SIGNATURE_REQUIRED ?? '')
+      .trim()
+      .toLowerCase();
+    // Secure-by-default in production, but allow explicit temporary override with WEBHOOK_SIGNATURE_REQUIRED=false.
     const enforceSignedWebhooks =
-      process.env.NODE_ENV === 'production' ||
-      process.env.WEBHOOK_SIGNATURE_REQUIRED === 'true';
+      signatureRequirementRaw === 'true' ||
+      (signatureRequirementRaw !== 'false' && process.env.NODE_ENV === 'production');
+    if (!enforceSignedWebhooks && process.env.NODE_ENV === 'production') {
+      console.warn('[terra] Webhook signature verification is DISABLED in production');
+    }
     const secret    = process.env.TERRA_WEBHOOK_SECRET ?? '';
     const signature = req.headers['terra-signature'] as string | undefined;
     const rawBody   = (req as any).rawBody as Buffer | undefined;
