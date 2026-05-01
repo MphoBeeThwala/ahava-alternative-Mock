@@ -148,12 +148,17 @@ export default function OnboardingPage() {
       <div className="max-w-2xl w-full">
         <div className="bg-white rounded-2xl shadow-2xl p-8 md:p-12">
           <div className="text-center mb-8">
-            <h2 className="text-3xl font-bold text-gray-900 mb-2">Complete Your Profile</h2>
+            <h2 className="text-3xl font-bold text-gray-900 mb-2">Set Up Your Profile</h2>
             <p className="text-gray-600">
               {role === "PATIENT" && "Set up your patient account"}
               {role === "NURSE" && "Set up your nurse account"}
               {role === "DOCTOR" && "Set up your doctor account"}
             </p>
+            {role === "PATIENT" && (
+              <p className="text-sm text-gray-500 mt-2">
+                Only the essentials are needed now. You can continue using Ahava and complete your medical passport later.
+              </p>
+            )}
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
@@ -173,11 +178,11 @@ export default function OnboardingPage() {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Phone Number *
+                Phone Number {role === "NURSE" || role === "DOCTOR" ? "*" : "(Optional for now)"}
               </label>
               <input
                 type="tel"
-                required
+                required={role === "NURSE" || role === "DOCTOR"}
                 value={formData.phone_number}
                 onChange={(e) => setFormData({ ...formData, phone_number: e.target.value })}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#004aad] focus:border-transparent"
@@ -187,11 +192,11 @@ export default function OnboardingPage() {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Address *
+                Address {role === "NURSE" || role === "DOCTOR" ? "*" : "(Can add later)"}
               </label>
               <input
                 type="text"
-                required
+                required={role === "NURSE" || role === "DOCTOR"}
                 value={formData.address}
                 onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#004aad] focus:border-transparent"

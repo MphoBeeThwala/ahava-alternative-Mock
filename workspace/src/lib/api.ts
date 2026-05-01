@@ -321,6 +321,16 @@ export interface RiskProfile {
   consentAcknowledged?: boolean;
   onboardingCompleted?: boolean;
   surveyVersion?: number;
+  medicalPassport?: {
+    emergencyContactName?: string;
+    emergencyContactPhone?: string;
+    bloodType?: string;
+    allergies?: string[];
+    chronicConditions?: string[];
+    currentMedications?: string[];
+  };
+  passportCompletionPercent?: number;
+  nextPassportQuestion?: string;
 }
 
 export interface TriageRequest {

@@ -653,6 +653,16 @@ const riskProfileSchema = Joi.object({
   consentAcknowledged: Joi.boolean().optional(),
   onboardingCompleted: Joi.boolean().optional(),
   surveyVersion: Joi.number().integer().min(1).max(10).optional(),
+  passportCompletionPercent: Joi.number().integer().min(0).max(100).optional(),
+  nextPassportQuestion: Joi.string().max(300).optional(),
+  medicalPassport: Joi.object({
+    emergencyContactName: Joi.string().trim().allow('', null).optional(),
+    emergencyContactPhone: Joi.string().trim().allow('', null).optional(),
+    bloodType: Joi.string().trim().allow('', null).optional(),
+    allergies: Joi.array().items(Joi.string().trim().max(120)).optional(),
+    chronicConditions: Joi.array().items(Joi.string().trim().max(120)).optional(),
+    currentMedications: Joi.array().items(Joi.string().trim().max(120)).optional(),
+  }).optional(),
 }).min(1);
 router.patch('/risk-profile', authMiddleware, async (req: AuthenticatedRequest, res, next) => {
   try {

@@ -22,6 +22,15 @@ const GENDERS = [
   { value: "PREFER_NOT_TO_SAY", label: "Prefer not to say" },
 ];
 
+type MedicalPassport = {
+  emergencyContactName?: string;
+  emergencyContactPhone?: string;
+  bloodType?: string;
+  allergies?: string[];
+  chronicConditions?: string[];
+  currentMedications?: string[];
+};
+
 export default function ProfilePage() {
   const { user, refreshUser } = useAuth();
   const [form, setForm] = useState({
@@ -54,6 +63,45 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState("");
   const [error, setError] = useState("");
+  const [passport, setPassport] = useState<MedicalPassport>({
+    emergencyContactName: "",
+    emergencyContactPhone: "",
+    bloodType: "",
+    allergies: [],
+    chronicConditions: [],
+    currentMedications: [],
+  });
+  const [passportAllergiesInput, setPassportAllergiesInput] = useState("");
+  const [passportConditionsInput, setPassportConditionsInput] = useState("");
+  const [passportMedsInput, setPassportMedsInput] = useState("");
+
+  const hasCsvValues = (text: string): boolean =>
+    text
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean).length > 0;
+
+  const completionChecks = [
+    { done: Boolean(form.firstName && form.lastName), prompt: "What is your full name?" },
+    { done: Boolean(form.phone), prompt: "What is your best contact number?" },
+    { done: Boolean(form.dateOfBirth), prompt: "What is your date of birth?" },
+    { done: Boolean(form.gender), prompt: "What gender should we record for clinical care?" },
+    { done: Boolean(passport.emergencyContactName), prompt: "Who should we contact in an emergency?" },
+    { done: Boolean(passport.emergencyContactPhone), prompt: "What is your emergency contact's phone number?" },
+    { done: Boolean(passport.bloodType), prompt: "Do you know your blood type?" },
+    { done: hasCsvValues(passportAllergiesInput), prompt: "Do you have any known allergies? (type None if none)" },
+    { done: hasCsvValues(passportConditionsInput), prompt: "Any chronic conditions we should record? (type None if none)" },
+    { done: hasCsvValues(passportMedsInput), prompt: "Are you taking any regular medications? (type None if none)" },
+  ];
+  const completionCount = completionChecks.filter((c) => c.done).length;
+  const passportCompletionPercent = Math.round((completionCount / completionChecks.length) * 100);
+  const nextPassportQuestion = completionChecks.find((c) => !c.done)?.prompt ?? null;
+
+  useEffect(() => {
+    if (refreshUser) {
+      void refreshUser();
+    }
+  }, [refreshUser]);
 
   useEffect(() => {
     if (user) {
@@ -91,6 +139,21 @@ export default function ProfilePage() {
           onboardingCompleted: coerceBoolean(rpo["onboardingCompleted"]) ?? prev.onboardingCompleted,
           surveyVersion: coerceNumber(rpo["surveyVersion"]) ?? prev.surveyVersion,
         }));
+
+        const mpRaw = (rpo["medicalPassport"] as Record<string, unknown> | undefined) ?? {};
+        const toList = (v: unknown): string[] | undefined =>
+          Array.isArray(v) ? v.filter((i): i is string => typeof i === "string").map((s) => s.trim()).filter(Boolean) : undefined;
+        setPassport({
+          emergencyContactName: typeof mpRaw["emergencyContactName"] === "string" ? mpRaw["emergencyContactName"] : "",
+          emergencyContactPhone: typeof mpRaw["emergencyContactPhone"] === "string" ? mpRaw["emergencyContactPhone"] : "",
+          bloodType: typeof mpRaw["bloodType"] === "string" ? mpRaw["bloodType"] : "",
+          allergies: toList(mpRaw["allergies"]) ?? [],
+          chronicConditions: toList(mpRaw["chronicConditions"]) ?? [],
+          currentMedications: toList(mpRaw["currentMedications"]) ?? [],
+        });
+        setPassportAllergiesInput((toList(mpRaw["allergies"]) ?? []).join(", "));
+        setPassportConditionsInput((toList(mpRaw["chronicConditions"]) ?? []).join(", "));
+        setPassportMedsInput((toList(mpRaw["currentMedications"]) ?? []).join(", "));
       }
     }
   }, [user]);
@@ -119,6 +182,18 @@ export default function ProfilePage() {
         payload.email = form.email;
       }
       const res = await authApi.updateProfile(payload as Parameters<typeof authApi.updateProfile>[0]);
+      if (res?.user) {
+        setForm((prev) => ({
+          ...prev,
+          firstName: res.user.firstName ?? prev.firstName,
+          lastName: res.user.lastName ?? prev.lastName,
+          phone: res.user.phone ?? "",
+          email: res.user.email ?? prev.email,
+          dateOfBirth: res.user.dateOfBirth ? String(res.user.dateOfBirth).split("T")[0] : "",
+          gender: res.user.gender ?? "",
+          preferredLanguage: res.user.preferredLanguage ?? "",
+        }));
+      }
       if (res.emailChanged) {
         setSuccess("Profile saved. A verification email has been sent to your new address — please check your inbox.");
       } else {
@@ -139,6 +214,12 @@ export default function ProfilePage() {
     setRiskError("");
   };
 
+  const normalizeCsv = (text: string): string[] =>
+    text
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
   const handleRiskSubmit = async () => {
     setRiskSaving(true);
     setRiskError("");
@@ -150,6 +231,16 @@ export default function ProfilePage() {
       }
       const payload: RiskProfile = {
         ...riskProfile,
+        medicalPassport: {
+          emergencyContactName: passport.emergencyContactName?.trim() || undefined,
+          emergencyContactPhone: passport.emergencyContactPhone?.trim() || undefined,
+          bloodType: passport.bloodType?.trim() || undefined,
+          allergies: normalizeCsv(passportAllergiesInput),
+          chronicConditions: normalizeCsv(passportConditionsInput),
+          currentMedications: normalizeCsv(passportMedsInput),
+        },
+        passportCompletionPercent,
+        nextPassportQuestion: nextPassportQuestion ?? undefined,
         onboardingCompleted: true,
         surveyVersion: riskProfile.surveyVersion ?? 1,
       };
@@ -242,7 +333,49 @@ export default function ProfilePage() {
               </div>
 
               {user?.role === "PATIENT" && (
-                <div style={{ background: "white", borderRadius: 16, padding: "28px 28px", boxShadow: "0 2px 16px rgba(0,0,0,0.06)", marginBottom: 20 }}>
+                <>
+                  <div style={{ background: "white", borderRadius: 16, padding: "28px 28px", boxShadow: "0 2px 16px rgba(0,0,0,0.06)", marginBottom: 20 }}>
+                    <h2 style={{ fontSize: 16, fontWeight: 800, color: "#0f172a", marginTop: 0, marginBottom: 8 }}>Medical Passport Progress</h2>
+                    <p style={{ fontSize: 13, color: "#64748b", marginBottom: 14 }}>
+                      We keep signup short. You can keep using Ahava while we gradually complete your passport with short prompts.
+                    </p>
+                    <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 12, padding: "12px 14px", marginBottom: 16 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#1e3a8a", marginBottom: 6 }}>
+                        Completion: {passportCompletionPercent}%
+                      </div>
+                      <div style={{ fontSize: 13, color: "#1e3a8a" }}>
+                        {nextPassportQuestion ? `Next short question: ${nextPassportQuestion}` : "Passport baseline complete. You can still update anytime."}
+                      </div>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                      <div>
+                        <label style={label}>Emergency contact name</label>
+                        <input value={passport.emergencyContactName ?? ""} onChange={(e) => setPassport((p) => ({ ...p, emergencyContactName: e.target.value }))} style={inp} />
+                      </div>
+                      <div>
+                        <label style={label}>Emergency contact phone</label>
+                        <input value={passport.emergencyContactPhone ?? ""} onChange={(e) => setPassport((p) => ({ ...p, emergencyContactPhone: e.target.value }))} style={inp} />
+                      </div>
+                      <div>
+                        <label style={label}>Blood type</label>
+                        <input value={passport.bloodType ?? ""} onChange={(e) => setPassport((p) => ({ ...p, bloodType: e.target.value }))} placeholder="A+, O-, Unknown" style={inp} />
+                      </div>
+                      <div>
+                        <label style={label}>Allergies (comma separated)</label>
+                        <input value={passportAllergiesInput} onChange={(e) => setPassportAllergiesInput(e.target.value)} placeholder="Penicillin, peanuts" style={inp} />
+                      </div>
+                      <div>
+                        <label style={label}>Chronic conditions (comma separated)</label>
+                        <input value={passportConditionsInput} onChange={(e) => setPassportConditionsInput(e.target.value)} placeholder="Hypertension, diabetes" style={inp} />
+                      </div>
+                      <div>
+                        <label style={label}>Current medications (comma separated)</label>
+                        <input value={passportMedsInput} onChange={(e) => setPassportMedsInput(e.target.value)} placeholder="Metformin, Amlodipine" style={inp} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ background: "white", borderRadius: 16, padding: "28px 28px", boxShadow: "0 2px 16px rgba(0,0,0,0.06)", marginBottom: 20 }}>
                   <h2 style={{ fontSize: 16, fontWeight: 800, color: "#0f172a", marginTop: 0, marginBottom: 8 }}>Health & Lifestyle</h2>
                   <p style={{ fontSize: 13, color: "#64748b", marginBottom: 18 }}>
                     This helps personalise risk signals and trend monitoring. It is not a diagnosis. You control whether to consult a clinician.
@@ -394,7 +527,8 @@ export default function ProfilePage() {
                         </button>
                       )}
                     </div>
-                </div>
+                  </div>
+                </>
               )}
 
               <div style={{ background: "white", borderRadius: 16, padding: "28px 28px", boxShadow: "0 2px 16px rgba(0,0,0,0.06)", marginBottom: 24 }}>

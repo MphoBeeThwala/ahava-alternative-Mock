@@ -23,6 +23,7 @@ import triageCasesRoutes from './routes/triageCases';
 import triageCaseReviewRoutes from './routes/triageCaseReview';
 import nurseRoutes from './routes/nurse';
 import patientRoutes from './routes/patient';
+import profileRoutes from './routes/profile';
 import terraRoutes from './routes/terra';
 import rookRoutes from './routes/rook';
 import consentRoutes from './routes/consent';
@@ -139,6 +140,7 @@ app.use('/api/triage-cases', authMiddleware, triageCasesRoutes);
 app.use('/api/triage-review', triageCaseReviewRoutes);
 app.use('/api/nurse', authMiddleware, nurseRoutes);
 app.use('/api/patient', authMiddleware, patientRoutes);
+app.use('/api/profile', profileRoutes);
 app.use('/api/terra', terraRoutes);
 app.use('/api/rook', rookRoutes);
 app.use('/api/consent', authMiddleware, consentRoutes);  // moved from /api/patient/consent to avoid prefix conflict

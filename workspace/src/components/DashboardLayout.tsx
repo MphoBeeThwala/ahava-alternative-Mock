@@ -51,12 +51,25 @@ export default function DashboardLayout({
 
   const showVerifyBanner = isAuthenticated && user && !(user as { isVerified?: boolean }).isVerified && !verifyBannerDismissed;
   const riskProfile = user?.riskProfile;
-  const onboardingCompleted = Boolean(
-    riskProfile &&
-      typeof riskProfile === "object" &&
-      (riskProfile as Record<string, unknown>)["onboardingCompleted"] === true
-  );
-  const showOnboardingReminder = isAuthenticated && user?.role === "PATIENT" && !onboardingCompleted;
+  const profileObject = (riskProfile && typeof riskProfile === "object") ? (riskProfile as Record<string, unknown>) : {};
+  const medicalPassport = (profileObject["medicalPassport"] && typeof profileObject["medicalPassport"] === "object")
+    ? (profileObject["medicalPassport"] as Record<string, unknown>)
+    : {};
+  const csvHasValue = (v: unknown): boolean => Array.isArray(v) && v.some((i) => typeof i === "string" && i.trim().length > 0);
+  const passportChecks = [
+    Boolean(user?.firstName && user?.lastName),
+    Boolean(user?.phone),
+    Boolean(user?.dateOfBirth),
+    Boolean(user?.gender),
+    typeof medicalPassport["emergencyContactName"] === "string" && medicalPassport["emergencyContactName"].trim().length > 0,
+    typeof medicalPassport["emergencyContactPhone"] === "string" && medicalPassport["emergencyContactPhone"].trim().length > 0,
+    typeof medicalPassport["bloodType"] === "string" && medicalPassport["bloodType"].trim().length > 0,
+    csvHasValue(medicalPassport["allergies"]),
+    csvHasValue(medicalPassport["chronicConditions"]),
+    csvHasValue(medicalPassport["currentMedications"]),
+  ];
+  const passportCompletionPercent = Math.round((passportChecks.filter(Boolean).length / passportChecks.length) * 100);
+  const showOnboardingReminder = isAuthenticated && user?.role === "PATIENT" && passportCompletionPercent < 80;
 
   const getDashboardPath = () => {
     if (!user) return "/";
@@ -213,9 +226,9 @@ export default function DashboardLayout({
               fontSize: 13,
             }}
           >
-            <span style={{ color: "#1e3a8a", display: "flex", alignItems: "center", gap: 8 }}>
-              <span>🩺</span>
-              <span><strong>Finish your health survey</strong> to personalise Early Warning risk signals.</span>
+              <span style={{ color: "#1e3a8a", display: "flex", alignItems: "center", gap: 8 }}>
+                <span>🩺</span>
+              <span><strong>Finish your medical passport</strong> ({passportCompletionPercent}% complete) to improve personalised risk surveillance.</span>
             </span>
             <Link
               href="/profile"
@@ -229,7 +242,7 @@ export default function DashboardLayout({
                 textDecoration: "none",
               }}
             >
-              Complete Survey
+              Complete Passport
             </Link>
           </div>
         )}
