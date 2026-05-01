@@ -181,7 +181,7 @@ router.post('/reset-trial-data', async (req: Request, res: Response, next: NextF
     await prisma.userBaseline.deleteMany({});
     await prisma.visit.deleteMany({});
     await prisma.booking.deleteMany({});
-    await prisma.consent.deleteMany({});
+    await prisma.patientConsent.deleteMany({});
     
     if (!keepUsers) {
       // Delete all users except the current logged-in admin
