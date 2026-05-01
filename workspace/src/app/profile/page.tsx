@@ -127,57 +127,47 @@ export default function ProfilePage() {
         health: isPersonalComplete && isPassportComplete && !isHealthComplete,
       });
 
-      // Only set initial form values if they are empty to avoid overwriting user typing
-      setForm(prev => ({
-        firstName: prev.firstName || user.firstName || "",
-        lastName: prev.lastName || user.lastName || "",
-        phone: prev.phone || user.phone || "",
-        email: prev.email || user.email || "",
-        dateOfBirth: prev.dateOfBirth || (user.dateOfBirth ? user.dateOfBirth.split("T")[0] : ""),
-        gender: prev.gender || user.gender || "",
-        preferredLanguage: prev.preferredLanguage || user.preferredLanguage || "",
-      }));
+      // Populate form values from user object
+      setForm({
+        firstName: user.firstName || "",
+        lastName: user.lastName || "",
+        phone: user.phone || "",
+        email: user.email || "",
+        dateOfBirth: user.dateOfBirth ? user.dateOfBirth.split("T")[0] : "",
+        gender: user.gender || "",
+        preferredLanguage: user.preferredLanguage || "",
+      });
 
-      const coerceBoolean = (v: unknown): boolean | undefined => (typeof v === "boolean" ? v : undefined);
-      const coerceNumber = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
-      const coerceEnum = <T extends string>(v: unknown, allowed: readonly T[]): T | undefined =>
-        typeof v === "string" && allowed.includes(v as T) ? (v as T) : undefined;
+      // Populate Passport values
+      const mp = rp?.medicalPassport || {};
+      setPassport({
+        emergencyContactName: mp.emergencyContactName || "",
+        emergencyContactPhone: mp.emergencyContactPhone || "",
+        bloodType: mp.bloodType || "",
+        allergies: mp.allergies || [],
+        chronicConditions: mp.chronicConditions || [],
+        currentMedications: mp.currentMedications || [],
+      });
+      setPassportAllergiesInput(Array.isArray(mp.allergies) ? mp.allergies.join(", ") : "");
+      setPassportConditionsInput(Array.isArray(mp.chronicConditions) ? mp.chronicConditions.join(", ") : "");
+      setPassportMedsInput(Array.isArray(mp.currentMedications) ? mp.currentMedications.join(", ") : "");
 
-      const rp = user.riskProfile;
-      if (rp && typeof rp === "object") {
-        const rpo = rp as Record<string, unknown>;
-        setRiskProfile((prev) => ({
-          ...prev,
-          smoker: coerceBoolean(rpo["smoker"]) ?? prev.smoker,
-          hypertension: coerceBoolean(rpo["hypertension"]) ?? prev.hypertension,
-          diabetes: coerceBoolean(rpo["diabetes"]) ?? prev.diabetes,
-          asthmaOrCopd: coerceBoolean(rpo["asthmaOrCopd"]) ?? prev.asthmaOrCopd,
-          pregnancy: coerceBoolean(rpo["pregnancy"]) ?? prev.pregnancy,
-          familyHistoryCvd: coerceBoolean(rpo["familyHistoryCvd"]) ?? prev.familyHistoryCvd,
-          activityLevel: coerceEnum(rpo["activityLevel"], ["LOW", "MODERATE", "HIGH"] as const) ?? prev.activityLevel,
-          alcoholUse: coerceEnum(rpo["alcoholUse"], ["NONE", "LOW", "MODERATE", "HIGH"] as const) ?? prev.alcoholUse,
-          cholesterolKnown: coerceBoolean(rpo["cholesterolKnown"]) ?? prev.cholesterolKnown,
-          cholesterolValue: coerceNumber(rpo["cholesterolValue"]) ?? prev.cholesterolValue,
-          consentAcknowledged: coerceBoolean(rpo["consentAcknowledged"]) ?? prev.consentAcknowledged,
-          onboardingCompleted: coerceBoolean(rpo["onboardingCompleted"]) ?? prev.onboardingCompleted,
-          surveyVersion: coerceNumber(rpo["surveyVersion"]) ?? prev.surveyVersion,
-        }));
-
-        const mpRaw = (rpo["medicalPassport"] as Record<string, unknown> | undefined) ?? {};
-        const toList = (v: unknown): string[] | undefined =>
-          Array.isArray(v) ? v.filter((i): i is string => typeof i === "string").map((s) => s.trim()).filter(Boolean) : undefined;
-        setPassport({
-          emergencyContactName: typeof mpRaw["emergencyContactName"] === "string" ? mpRaw["emergencyContactName"] : "",
-          emergencyContactPhone: typeof mpRaw["emergencyContactPhone"] === "string" ? mpRaw["emergencyContactPhone"] : "",
-          bloodType: typeof mpRaw["bloodType"] === "string" ? mpRaw["bloodType"] : "",
-          allergies: toList(mpRaw["allergies"]) ?? [],
-          chronicConditions: toList(mpRaw["chronicConditions"]) ?? [],
-          currentMedications: toList(mpRaw["currentMedications"]) ?? [],
-        });
-        setPassportAllergiesInput((toList(mpRaw["allergies"]) ?? []).join(", "));
-        setPassportConditionsInput((toList(mpRaw["chronicConditions"]) ?? []).join(", "));
-        setPassportMedsInput((toList(mpRaw["currentMedications"]) ?? []).join(", "));
-      }
+      // Populate Health values
+      setRiskProfile({
+        smoker: rp?.smoker,
+        hypertension: rp?.hypertension,
+        diabetes: rp?.diabetes,
+        asthmaOrCopd: rp?.asthmaOrCopd,
+        pregnancy: rp?.pregnancy,
+        familyHistoryCvd: rp?.familyHistoryCvd,
+        activityLevel: rp?.activityLevel,
+        alcoholUse: rp?.alcoholUse,
+        cholesterolKnown: rp?.cholesterolKnown,
+        cholesterolValue: rp?.cholesterolValue,
+        consentAcknowledged: rp?.consentAcknowledged,
+        onboardingCompleted: rp?.onboardingCompleted,
+        surveyVersion: rp?.surveyVersion || 1,
+      });
     }
   }, [user]);
 
@@ -259,6 +249,23 @@ export default function ProfilePage() {
     passportCompletionPercent,
     nextPassportQuestion: nextPassportQuestion ?? undefined,
   });
+
+  const handlePassportSubmit = async () => {
+    setRiskSaving(true);
+    setRiskSuccess("");
+    setRiskError("");
+    try {
+      await patientApi.updateRiskProfile(buildMedicalPassportPayload());
+      setRiskSuccess("Medical passport updated successfully.");
+      setExpandedSections(prev => ({ ...prev, passport: false }));
+      if (refreshUser) await refreshUser();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setRiskError(e.response?.data?.error || "Failed to update medical passport.");
+    } finally {
+      setRiskSaving(false);
+    }
+  };
 
   const handleRiskSubmit = async () => {
     setRiskSaving(true);
@@ -455,6 +462,15 @@ export default function ProfilePage() {
                             <label style={label}>Current medications (comma separated)</label>
                             <input value={passportMedsInput} onChange={(e) => setPassportMedsInput(e.target.value)} placeholder="Metformin, Amlodipine" style={inp} />
                           </div>
+                        <div style={{ display: "flex", gap: 12, marginTop: 24 }}>
+                          <button
+                            type="button"
+                            onClick={() => handlePassportSubmit()}
+                            disabled={riskSaving}
+                            style={{ flex: 1, padding: "14px", background: riskSaving ? "#94a3b8" : "linear-gradient(135deg,#0d9488,#059669)", color: "white", border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: riskSaving ? "not-allowed" : "pointer" }}
+                          >
+                            {riskSaving ? "Saving…" : "Save Medical Passport"}
+                          </button>
                         </div>
                       </div>
                     )}
