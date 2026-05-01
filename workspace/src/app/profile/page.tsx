@@ -115,10 +115,10 @@ export default function ProfilePage() {
 
   useEffect(() => {
     if (user) {
-      const rpAny = user.riskProfile as any;
+      const rpData = user.riskProfile as RiskProfile | undefined;
       const isPersonalComplete = Boolean(user.firstName && user.lastName && user.phone);
-      const isPassportComplete = rpAny?.passportCompletionPercent >= 100;
-      const isHealthComplete = Boolean(rpAny?.onboardingCompleted);
+      const isPassportComplete = (rpData?.passportCompletionPercent ?? 0) >= 100;
+      const isHealthComplete = Boolean(rpData?.onboardingCompleted);
 
       // Set initial expansion based on completion - only expand incomplete sections
       setExpandedSections({
