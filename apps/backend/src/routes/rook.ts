@@ -26,6 +26,15 @@ function envFirstNonEmpty(...keys: string[]): string {
   return '';
 }
 
+function parseBooleanEnv(value: string | undefined): boolean | undefined {
+  if (value == null) return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (['1', 'true', 'yes', 'on', 'enabled'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off', 'disabled'].includes(normalized)) return false;
+  return undefined;
+}
+
 function resolveRookBaseUrl(): string {
   const fallback = 'https://api.rook-connect.com/api/v1';
   const raw = (process.env.ROOK_BASE_URL || '').trim();
@@ -315,42 +324,45 @@ export async function handleRookWebhook(
   next: NextFunction
 ): Promise<void> {
   try {
-    const signatureRequirementRaw = (process.env.WEBHOOK_SIGNATURE_REQUIRED ?? '')
-      .trim()
-      .toLowerCase();
-    // Secure-by-default in production, but allow explicit temporary override with WEBHOOK_SIGNATURE_REQUIRED=false.
+    const routeSpecificSignatureSetting = parseBooleanEnv(process.env.ROOK_WEBHOOK_SIGNATURE_REQUIRED);
+    const globalSignatureSetting = parseBooleanEnv(process.env.WEBHOOK_SIGNATURE_REQUIRED);
+    // Precedence:
+    // 1) ROOK_WEBHOOK_SIGNATURE_REQUIRED
+    // 2) WEBHOOK_SIGNATURE_REQUIRED
+    // 3) secure-by-default in production
     const enforceSignedWebhooks =
-      signatureRequirementRaw === 'true' ||
-      (signatureRequirementRaw !== 'false' && process.env.NODE_ENV === 'production');
+      routeSpecificSignatureSetting ??
+      globalSignatureSetting ??
+      (process.env.NODE_ENV === 'production');
+
     if (!enforceSignedWebhooks && process.env.NODE_ENV === 'production') {
       console.warn('[rook] Webhook signature verification is DISABLED in production');
     }
-    // ROOK sends HMAC in X-ROOK-HASH header. Keep legacy support for rook-signature.
-    const signatureRaw =
-      (req.headers['x-rook-hash'] as string | undefined) ||
-      (req.headers['rook-signature'] as string | undefined);
-    const signature = (signatureRaw || '').trim();
+    if (enforceSignedWebhooks) {
+      // ROOK sends HMAC in X-ROOK-HASH header. Keep legacy support for rook-signature.
+      const signatureRaw =
+        (req.headers['x-rook-hash'] as string | undefined) ||
+        (req.headers['rook-signature'] as string | undefined);
+      const signature = (signatureRaw || '').trim();
 
-    // Prefer explicit webhook secret, but also keep ROOK API secret as fallback.
-    // Some ROOK setups sign with API secret; others with explicit webhook secret.
-    const candidateSecrets = [
-      (process.env.ROOK_WEBHOOK_SECRET || '').trim(),
-      (ROOK_SECRET_KEY || '').trim(),
-    ].filter(Boolean);
-    const rawBody = (req as any).rawBody as Buffer | undefined;
+      // Prefer explicit webhook secret, but also keep ROOK API secret as fallback.
+      // Some ROOK setups sign with API secret; others with explicit webhook secret.
+      const candidateSecrets = [
+        (process.env.ROOK_WEBHOOK_SECRET || '').trim(),
+        (ROOK_SECRET_KEY || '').trim(),
+      ].filter(Boolean);
+      const rawBody = (req as any).rawBody as Buffer | undefined;
 
-    if (enforceSignedWebhooks && candidateSecrets.length === 0) {
-      console.error('[rook] Missing ROOK secret for webhook signature verification');
-      res.status(503).json({ error: 'ROOK webhook signature verification is not configured' });
-      return;
-    }
-    if (enforceSignedWebhooks && (!signature || !rawBody)) {
-      res.status(401).json({ error: 'Missing webhook signature' });
-      return;
-    }
+      if (candidateSecrets.length === 0) {
+        console.error('[rook] Missing ROOK secret for webhook signature verification');
+        res.status(503).json({ error: 'ROOK webhook signature verification is not configured' });
+        return;
+      }
+      if (!signature || !rawBody) {
+        res.status(401).json({ error: 'Missing webhook signature' });
+        return;
+      }
 
-    // HMAC verification (Compliance-first when enforced)
-    if (candidateSecrets.length > 0 && signature && rawBody) {
       const signatureNormalized = signature.toLowerCase().startsWith('sha256=')
         ? signature.slice(7)
         : signature;
@@ -388,10 +400,8 @@ export async function handleRookWebhook(
         console.warn(
           `[rook] Webhook HMAC verification failed (sig_len=${signatureNormalized.length}, raw_len=${rawBody.length})`
         );
-        if (enforceSignedWebhooks) {
-          res.status(401).json({ error: 'Invalid signature' });
-          return;
-        }
+        res.status(401).json({ error: 'Invalid signature' });
+        return;
       }
     }
 

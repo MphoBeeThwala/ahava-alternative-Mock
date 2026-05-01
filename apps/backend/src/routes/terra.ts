@@ -25,6 +25,15 @@ const TERRA_BASE_URL    = 'https://api.tryterra.co/v2';
 const TERRA_DEV_ID      = process.env.TERRA_DEV_ID ?? '';
 const TERRA_API_KEY     = process.env.TERRA_API_KEY ?? '';
 
+function parseBooleanEnv(value: string | undefined): boolean | undefined {
+  if (value == null) return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (['1', 'true', 'yes', 'on', 'enabled'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off', 'disabled'].includes(normalized)) return false;
+  return undefined;
+}
+
 function terraHeaders() {
   return {
     'Content-Type': 'application/json',
@@ -147,42 +156,43 @@ export async function handleTerraWebhook(
   next: NextFunction
 ): Promise<void> {
   try {
-    const signatureRequirementRaw = (process.env.WEBHOOK_SIGNATURE_REQUIRED ?? '')
-      .trim()
-      .toLowerCase();
-    // Secure-by-default in production, but allow explicit temporary override with WEBHOOK_SIGNATURE_REQUIRED=false.
+    const routeSpecificSignatureSetting = parseBooleanEnv(process.env.TERRA_WEBHOOK_SIGNATURE_REQUIRED);
+    const globalSignatureSetting = parseBooleanEnv(process.env.WEBHOOK_SIGNATURE_REQUIRED);
+    // Precedence:
+    // 1) TERRA_WEBHOOK_SIGNATURE_REQUIRED
+    // 2) WEBHOOK_SIGNATURE_REQUIRED
+    // 3) secure-by-default in production
     const enforceSignedWebhooks =
-      signatureRequirementRaw === 'true' ||
-      (signatureRequirementRaw !== 'false' && process.env.NODE_ENV === 'production');
+      routeSpecificSignatureSetting ??
+      globalSignatureSetting ??
+      (process.env.NODE_ENV === 'production');
+
     if (!enforceSignedWebhooks && process.env.NODE_ENV === 'production') {
       console.warn('[terra] Webhook signature verification is DISABLED in production');
     }
-    const secret    = process.env.TERRA_WEBHOOK_SECRET ?? '';
-    const signature = req.headers['terra-signature'] as string | undefined;
-    const rawBody   = (req as any).rawBody as Buffer | undefined;
+    if (enforceSignedWebhooks) {
+      const secret    = process.env.TERRA_WEBHOOK_SECRET ?? '';
+      const signature = req.headers['terra-signature'] as string | undefined;
+      const rawBody   = (req as any).rawBody as Buffer | undefined;
 
-    if (enforceSignedWebhooks && !secret) {
-      console.error('[terra] TERRA_WEBHOOK_SECRET is missing while signature enforcement is enabled');
-      res.status(503).json({ error: 'Webhook signature verification not configured' });
-      return;
-    }
-    if (enforceSignedWebhooks && (!signature || !rawBody)) {
-      res.status(401).json({ error: 'Missing webhook signature' });
-      return;
-    }
+      if (!secret) {
+        console.error('[terra] TERRA_WEBHOOK_SECRET is missing while signature enforcement is enabled');
+        res.status(503).json({ error: 'Webhook signature verification not configured' });
+        return;
+      }
+      if (!signature || !rawBody) {
+        res.status(401).json({ error: 'Missing webhook signature' });
+        return;
+      }
 
-    // HMAC verification (strict when enforced)
-    if (secret && signature && rawBody) {
       const expected = crypto
         .createHmac('sha256', secret)
         .update(rawBody)
         .digest('hex');
       if (signature !== expected) {
         console.warn('[terra] Webhook HMAC verification failed');
-        if (enforceSignedWebhooks) {
-          res.status(401).json({ error: 'Invalid signature' });
-          return;
-        }
+        res.status(401).json({ error: 'Invalid signature' });
+        return;
       }
     }
 
