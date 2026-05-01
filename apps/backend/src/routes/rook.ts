@@ -319,14 +319,20 @@ export async function handleRookWebhook(
       process.env.NODE_ENV === 'production' ||
       process.env.WEBHOOK_SIGNATURE_REQUIRED === 'true';
     // ROOK sends HMAC in X-ROOK-HASH header. Keep legacy support for rook-signature.
-    const signature =
+    const signatureRaw =
       (req.headers['x-rook-hash'] as string | undefined) ||
       (req.headers['rook-signature'] as string | undefined);
-    // Prefer explicit webhook secret if provided; otherwise use ROOK API secret.
-    const secret = process.env.ROOK_WEBHOOK_SECRET || ROOK_SECRET_KEY;
+    const signature = (signatureRaw || '').trim();
+
+    // Prefer explicit webhook secret, but also keep ROOK API secret as fallback.
+    // Some ROOK setups sign with API secret; others with explicit webhook secret.
+    const candidateSecrets = [
+      (process.env.ROOK_WEBHOOK_SECRET || '').trim(),
+      (ROOK_SECRET_KEY || '').trim(),
+    ].filter(Boolean);
     const rawBody = (req as any).rawBody as Buffer | undefined;
 
-    if (enforceSignedWebhooks && !secret) {
+    if (enforceSignedWebhooks && candidateSecrets.length === 0) {
       console.error('[rook] Missing ROOK secret for webhook signature verification');
       res.status(503).json({ error: 'ROOK webhook signature verification is not configured' });
       return;
@@ -337,18 +343,44 @@ export async function handleRookWebhook(
     }
 
     // HMAC verification (Compliance-first)
-    if (secret && signature && rawBody) {
-      const expected = crypto
-        .createHmac('sha256', secret)
-        .update(rawBody)
-        .digest('hex');
-      const signatureBuffer = Buffer.from(signature);
-      const expectedBuffer = Buffer.from(expected);
-      const signaturesMatch =
-        signatureBuffer.length === expectedBuffer.length &&
-        crypto.timingSafeEqual(signatureBuffer, expectedBuffer);
+    if (candidateSecrets.length > 0 && signature && rawBody) {
+      const signatureNormalized = signature.toLowerCase().startsWith('sha256=')
+        ? signature.slice(7)
+        : signature;
+
+      let signaturesMatch = false;
+
+      for (const secret of candidateSecrets) {
+        const expectedHex = crypto
+          .createHmac('sha256', secret)
+          .update(rawBody)
+          .digest('hex');
+
+        const expectedB64 = crypto
+          .createHmac('sha256', secret)
+          .update(rawBody)
+          .digest('base64');
+
+        const candidates = [expectedHex, expectedB64];
+        for (const candidate of candidates) {
+          const signatureBuffer = Buffer.from(signatureNormalized);
+          const expectedBuffer = Buffer.from(candidate);
+          if (
+            signatureBuffer.length === expectedBuffer.length &&
+            crypto.timingSafeEqual(signatureBuffer, expectedBuffer)
+          ) {
+            signaturesMatch = true;
+            break;
+          }
+        }
+
+        if (signaturesMatch) break;
+      }
+
       if (!signaturesMatch) {
-        console.warn('[rook] Webhook HMAC verification failed');
+        console.warn(
+          `[rook] Webhook HMAC verification failed (sig_len=${signatureNormalized.length}, raw_len=${rawBody.length})`
+        );
         res.status(401).json({ error: 'Invalid signature' });
         return;
       }
