@@ -1,9 +1,9 @@
-import axios, { AxiosInstance, AxiosError } from 'axios';
+import axios, { AxiosInstance, AxiosError } from "axios";
 
 // Always use same-origin /api - Next.js rewrites handle the proxy to backend
 // This avoids CORS issues entirely and works in both dev and production
 function getApiBaseUrl(): string {
-  return '/api';
+  return "/api";
 }
 
 // Create axios instance with default config
@@ -12,7 +12,7 @@ const apiClient: AxiosInstance = axios.create({
   timeout: 30000,
   withCredentials: true,
   headers: {
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
   },
 });
 
@@ -20,13 +20,14 @@ const apiClient: AxiosInstance = axios.create({
 apiClient.interceptors.request.use(
   (config) => {
     config.baseURL = getApiBaseUrl();
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+    const token =
+      typeof window !== "undefined" ? localStorage.getItem("token") : null;
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
   },
-  (error) => Promise.reject(error)
+  (error) => Promise.reject(error),
 );
 
 // Track if we're already attempting refresh to avoid infinite loops
@@ -36,7 +37,10 @@ let failedQueue: Array<{
   onFailure: (error: AxiosError) => void;
 }> = [];
 
-const processQueue = (error: AxiosError | null, token: string | null = null) => {
+const processQueue = (
+  error: AxiosError | null,
+  token: string | null = null,
+) => {
   failedQueue.forEach((prom) => {
     if (error) {
       prom.onFailure(error);
@@ -53,67 +57,70 @@ apiClient.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
-    if (error.response?.status === 401 && typeof window !== 'undefined') {
-      const path = window.location.pathname || '';
-      
+    if (error.response?.status === 401 && typeof window !== "undefined") {
+      const path = window.location.pathname || "";
+
       // Don't attempt refresh if already on auth pages
-      if (path.startsWith('/auth/')) {
+      if (path.startsWith("/auth/")) {
         return Promise.reject(error);
       }
 
       // Prevent multiple simultaneous refresh attempts
       if (!isRefreshing) {
         isRefreshing = true;
-        const refreshToken = localStorage.getItem('refreshToken');
+        const refreshToken = localStorage.getItem("refreshToken");
 
         if (refreshToken) {
           try {
-            console.log('[API] Attempting to refresh token...');
-            
+            console.log("[API] Attempting to refresh token...");
+
             // Attempt to refresh token
-            const response = await apiClient.post('/auth/refresh', { refreshToken });
-            const { accessToken, refreshToken: newRefreshToken } = response.data;
-            
-            console.log('[API] Token refreshed successfully');
-            
+            const response = await apiClient.post("/auth/refresh", {
+              refreshToken,
+            });
+            const { accessToken, refreshToken: newRefreshToken } =
+              response.data;
+
+            console.log("[API] Token refreshed successfully");
+
             // Update stored tokens
-            localStorage.setItem('token', accessToken);
-            localStorage.setItem('refreshToken', newRefreshToken);
-            
+            localStorage.setItem("token", accessToken);
+            localStorage.setItem("refreshToken", newRefreshToken);
+
             // Update the original request with new token
             if (originalRequest.headers) {
               originalRequest.headers.Authorization = `Bearer ${accessToken}`;
             }
-            
+
             // Process queued requests with new token
             processQueue(null, accessToken);
-            
+
             // Retry original request with new token
             return apiClient(originalRequest);
           } catch (refreshError) {
-            console.error('[API] Token refresh failed:', refreshError);
-            
+            console.error("[API] Token refresh failed:", refreshError);
+
             // Refresh failed, log out
-            localStorage.removeItem('token');
-            localStorage.removeItem('user');
-            localStorage.removeItem('refreshToken');
-            
+            localStorage.removeItem("token");
+            localStorage.removeItem("user");
+            localStorage.removeItem("refreshToken");
+
             processQueue(refreshError, null);
-            
+
             // Redirect to login
-            window.location.href = '/auth/login';
+            window.location.href = "/auth/login";
             return Promise.reject(refreshError);
           } finally {
             isRefreshing = false;
           }
         } else {
-          console.warn('[API] No refresh token available, logging out');
-          
+          console.warn("[API] No refresh token available, logging out");
+
           // No refresh token available, log out
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
-          window.location.href = '/auth/login';
-          
+          localStorage.removeItem("token");
+          localStorage.removeItem("user");
+          window.location.href = "/auth/login";
+
           return Promise.reject(error);
         }
       }
@@ -125,7 +132,7 @@ apiClient.interceptors.response.use(
     }
 
     return Promise.reject(error);
-  }
+  },
 );
 
 // ==================== AUTH ====================
@@ -134,11 +141,12 @@ export interface RegisterData {
   password: string;
   firstName: string;
   lastName: string;
-  role: 'PATIENT' | 'NURSE' | 'DOCTOR' | 'ADMIN';
+  role: "PATIENT" | "NURSE" | "DOCTOR" | "ADMIN";
   phone?: string;
   dateOfBirth?: string;
   gender?: string;
   preferredLanguage?: string;
+  adminSecret?: string; // Required for DOCTOR, NURSE, ADMIN — not for PATIENT
 }
 
 export interface LoginData {
@@ -164,31 +172,36 @@ export interface AuthResponse {
 
 export const authApi = {
   register: async (data: RegisterData): Promise<AuthResponse> => {
-    const res = await apiClient.post('/auth/register', data);
+    const res = await apiClient.post("/auth/register", data);
     return res.data;
   },
   login: async (data: LoginData): Promise<AuthResponse> => {
-    const res = await apiClient.post('/auth/login', data);
+    const res = await apiClient.post("/auth/login", data);
     return res.data;
   },
   refreshToken: async (refreshToken: string): Promise<AuthResponse> => {
-    const res = await apiClient.post('/auth/refresh', { refreshToken });
+    const res = await apiClient.post("/auth/refresh", { refreshToken });
     return res.data;
   },
   forgotPassword: async (email: string) => {
-    const res = await apiClient.post('/auth/forgot-password', { email });
+    const res = await apiClient.post("/auth/forgot-password", { email });
     return res.data;
   },
   resetPassword: async (token: string, password: string) => {
-    const res = await apiClient.post('/auth/reset-password', { token, password });
+    const res = await apiClient.post("/auth/reset-password", {
+      token,
+      password,
+    });
     return res.data;
   },
   verifyEmail: async (token: string) => {
-    const res = await apiClient.get(`/auth/verify-email?token=${encodeURIComponent(token)}`);
+    const res = await apiClient.get(
+      `/auth/verify-email?token=${encodeURIComponent(token)}`,
+    );
     return res.data;
   },
   resendVerification: async (email: string) => {
-    const res = await apiClient.post('/auth/resend-verification', { email });
+    const res = await apiClient.post("/auth/resend-verification", { email });
     return res.data;
   },
   updateProfile: async (data: {
@@ -200,7 +213,7 @@ export const authApi = {
     preferredLanguage?: string | null;
     email?: string;
   }) => {
-    const res = await apiClient.put('/auth/profile', data);
+    const res = await apiClient.put("/auth/profile", data);
     return res.data;
   },
 };
@@ -224,25 +237,25 @@ export interface BiometricReading {
   activeCalories?: number;
   skinTempOffset?: number;
   sleepDurationHours?: number;
-  ecgRhythm?: 'regular' | 'irregular' | 'unknown';
-  temperatureTrend?: 'normal' | 'elevated_single_day' | 'elevated_over_3_days';
-  source?: 'wearable' | 'manual';
+  ecgRhythm?: "regular" | "irregular" | "unknown";
+  temperatureTrend?: "normal" | "elevated_single_day" | "elevated_over_3_days";
+  source?: "wearable" | "manual";
   deviceType?: string;
 }
 
 export interface EarlyWarningSummary {
   // Required fields from fallback or ML response
   riskLevel?: string;
-  alert_level?: 'GREEN' | 'YELLOW' | 'RED';
+  alert_level?: "GREEN" | "YELLOW" | "RED";
   recommendations?: string[];
-  
+
   // Trend analysis from fallback or ML response
   trendAnalysis?: {
     heartRate?: string;
     oxygenSaturation?: string;
     sleepQuality?: string;
   };
-  
+
   // Baseline metrics or current biometrics
   baselineMetrics?: {
     timestamp?: string;
@@ -257,7 +270,7 @@ export interface EarlyWarningSummary {
     ecg_rhythm?: string;
     temperature_trend?: string;
   };
-  
+
   // Optional ML-specific fields
   user_id?: string;
   processed_at?: string;
@@ -324,45 +337,67 @@ export interface ApiError {
 
 export const patientApi = {
   submitBiometrics: async (data: BiometricReading) => {
-    const res = await apiClient.post('/patient/biometrics', data);
+    const res = await apiClient.post("/patient/biometrics", data);
     return res.data;
   },
   getBiometricHistory: async (limit = 30) => {
-    const res = await apiClient.get(`/patient/biometrics/history?limit=${limit}`);
+    const res = await apiClient.get(
+      `/patient/biometrics/history?limit=${limit}`,
+    );
     return res.data;
   },
   getHealthAlerts: async () => {
-    const res = await apiClient.get('/patient/alerts');
+    const res = await apiClient.get("/patient/alerts");
     return res.data;
   },
   getMonitoringSummary: async (): Promise<MonitoringSummary> => {
-    const res = await apiClient.get('/patient/monitoring/summary');
+    const res = await apiClient.get("/patient/monitoring/summary");
     const raw = res.data?.data ?? res.data;
-    if (!raw || typeof raw !== 'object') return { status: 'offline', baselineEstablished: false, alertLevel: 'Unknown', recentReadings: [] };
+    if (!raw || typeof raw !== "object")
+      return {
+        status: "offline",
+        baselineEstablished: false,
+        alertLevel: "Unknown",
+        recentReadings: [],
+      };
     return {
-      status: raw.status ?? 'offline',
+      status: raw.status ?? "offline",
       baselineEstablished: Boolean(raw.baselineEstablished),
-      alertLevel: raw.alertLevel ?? (raw.recentAlerts > 0 ? 'YELLOW' : raw.baselineEstablished ? 'GREEN' : 'Unknown'),
+      alertLevel:
+        raw.alertLevel ??
+        (raw.recentAlerts > 0
+          ? "YELLOW"
+          : raw.baselineEstablished
+            ? "GREEN"
+            : "Unknown"),
       readinessScore: raw.currentReadinessScore ?? raw.readinessScore,
-      recentReadings: Array.isArray(raw.recentReadings) ? raw.recentReadings : [],
+      recentReadings: Array.isArray(raw.recentReadings)
+        ? raw.recentReadings
+        : [],
     };
   },
   getEarlyWarningSummary: async (): Promise<EarlyWarningSummary> => {
-    const res = await apiClient.get('/patient/early-warning');
+    const res = await apiClient.get("/patient/early-warning");
     const data = res.data?.data ?? res.data;
-    if (!data || res.data?.success === false) throw new Error(res.data?.error ?? 'Failed to load');
+    if (!data || res.data?.success === false)
+      throw new Error(res.data?.error ?? "Failed to load");
     return data;
   },
-  startDemoStream: async (durationSeconds: number = 300, intervalSeconds: number = 30) => {
-    const res = await apiClient.post(`/patient/demo/start-stream?durationSeconds=${durationSeconds}&intervalSeconds=${intervalSeconds}`);
+  startDemoStream: async (
+    durationSeconds: number = 300,
+    intervalSeconds: number = 30,
+  ) => {
+    const res = await apiClient.post(
+      `/patient/demo/start-stream?durationSeconds=${durationSeconds}&intervalSeconds=${intervalSeconds}`,
+    );
     return res.data;
   },
   updateRiskProfile: async (profile: RiskProfile) => {
-    const res = await apiClient.patch('/patient/risk-profile', profile);
+    const res = await apiClient.patch("/patient/risk-profile", profile);
     return res.data;
   },
   submitTriage: async (data: TriageRequest): Promise<TriageResponse> => {
-    const res = await apiClient.post('/triage', data);
+    const res = await apiClient.post("/triage", data);
     return res.data;
   },
 };
@@ -394,12 +429,12 @@ export interface Booking {
 
 export const bookingsApi = {
   create: async (data: CreateBookingData) => {
-    const res = await apiClient.post('/bookings', data);
+    const res = await apiClient.post("/bookings", data);
     return res.data;
   },
   getMyBookings: async () => {
     // Use /bookings endpoint which automatically filters by role (patient)
-    const res = await apiClient.get('/bookings');
+    const res = await apiClient.get("/bookings");
     return res.data;
   },
   getById: async (id: string) => {
@@ -428,7 +463,10 @@ export interface Visit {
     temperature?: number;
     oxygenSaturation?: number;
   };
-  treatment?: { medications?: { name: string; dosage: string }[]; notes?: string };
+  treatment?: {
+    medications?: { name: string; dosage: string }[];
+    notes?: string;
+  };
   nurseReport?: string;
   booking?: {
     address?: string;
@@ -441,7 +479,7 @@ export interface Visit {
 export const visitsApi = {
   getMyVisits: async () => {
     // Use /visits endpoint which automatically filters by role
-    const res = await apiClient.get('/visits');
+    const res = await apiClient.get("/visits");
     return res.data;
   },
   getById: async (id: string) => {
@@ -463,17 +501,17 @@ export interface NurseAvailability {
 
 export const nurseApi = {
   updateAvailability: async (data: NurseAvailability) => {
-    const res = await apiClient.post('/nurse/availability', data);
+    const res = await apiClient.post("/nurse/availability", data);
     return res.data;
   },
   getMyVisits: async () => {
     // Use /visits endpoint which automatically filters by role (nurse)
-    const res = await apiClient.get('/visits');
+    const res = await apiClient.get("/visits");
     return res.data;
   },
   getProfile: async () => {
     // Use /auth/me to get current user profile
-    const res = await apiClient.get('/auth/me');
+    const res = await apiClient.get("/auth/me");
     // Return user data with location info
     return {
       user: res.data.user,
@@ -504,33 +542,59 @@ export interface TriageCase {
   aiModel: string | null;
   aiContextUsed: boolean;
   createdAt: string;
-  patient?: { id: string; firstName: string; lastName: string; email?: string; phone?: string | null };
+  patient?: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    email?: string;
+    phone?: string | null;
+  };
 }
 
 export const doctorApi = {
   getPendingVisits: async () => {
-    const res = await apiClient.get('/visits?status=PENDING_REVIEW');
+    const res = await apiClient.get("/visits?status=PENDING_REVIEW");
     return res.data;
   },
   approveVisit: async (visitId: string, review?: string) => {
-    const res = await apiClient.post(`/visits/${visitId}/approve`, review != null ? { review } : {});
+    const res = await apiClient.post(
+      `/visits/${visitId}/approve`,
+      review != null ? { review } : {},
+    );
     return res.data;
   },
-  getTriageCases: async (status?: 'PENDING_REVIEW' | 'mine') => {
-    const q = status ? `?status=${status}` : '?status=PENDING_REVIEW';
+  getTriageCases: async (status?: "PENDING_REVIEW" | "mine") => {
+    const q = status ? `?status=${status}` : "?status=PENDING_REVIEW";
     const res = await apiClient.get(`/triage-cases${q}`);
     return res.data;
   },
   approveTriageCase: async (caseId: string, finalDiagnosis?: string) => {
-    const res = await apiClient.post(`/triage-cases/${caseId}/approve`, finalDiagnosis != null ? { finalDiagnosis } : {});
+    const res = await apiClient.post(
+      `/triage-cases/${caseId}/approve`,
+      finalDiagnosis != null ? { finalDiagnosis } : {},
+    );
     return res.data;
   },
-  overrideTriageCase: async (caseId: string, doctorNotes?: string, finalDiagnosis?: string) => {
-    const res = await apiClient.post(`/triage-cases/${caseId}/override`, { doctorNotes, finalDiagnosis });
+  overrideTriageCase: async (
+    caseId: string,
+    doctorNotes?: string,
+    finalDiagnosis?: string,
+  ) => {
+    const res = await apiClient.post(`/triage-cases/${caseId}/override`, {
+      doctorNotes,
+      finalDiagnosis,
+    });
     return res.data;
   },
-  referTriageCase: async (caseId: string, referredTo: string, doctorNotes?: string) => {
-    const res = await apiClient.post(`/triage-cases/${caseId}/refer`, { referredTo, doctorNotes });
+  referTriageCase: async (
+    caseId: string,
+    referredTo: string,
+    doctorNotes?: string,
+  ) => {
+    const res = await apiClient.post(`/triage-cases/${caseId}/refer`, {
+      referredTo,
+      doctorNotes,
+    });
     return res.data;
   },
   // New review-flow endpoints
@@ -538,43 +602,69 @@ export const doctorApi = {
     const res = await apiClient.post(`/triage-review/${caseId}/claim`);
     return res.data;
   },
-  reviewTriageCase: async (caseId: string, payload: {
-    doctorNotes: string;
-    doctorDiagnosis: string;
-    doctorRecommendations?: string;
-    finalTriageLevel?: number;
-    overrideReason?: string;
-  }) => {
-    const res = await apiClient.post(`/triage-review/${caseId}/review`, payload);
+  reviewTriageCase: async (
+    caseId: string,
+    payload: {
+      doctorNotes: string;
+      doctorDiagnosis: string;
+      doctorRecommendations?: string;
+      finalTriageLevel?: number;
+      overrideReason?: string;
+    },
+  ) => {
+    const res = await apiClient.post(
+      `/triage-review/${caseId}/review`,
+      payload,
+    );
     return res.data;
   },
   releaseTriageCase: async (caseId: string) => {
     const res = await apiClient.post(`/triage-review/${caseId}/release`);
     return res.data;
   },
-  getTriageReviewQueue: async (status = 'PENDING_REVIEW') => {
+  getTriageReviewQueue: async (status = "PENDING_REVIEW") => {
     const res = await apiClient.get(`/triage-review?status=${status}`);
     return res.data;
   },
-  issuePrescription: async (caseId: string, payload: {
-    diagnosis: string;
-    medications: { name: string; dosage: string; frequency: string; duration: string; instructions?: string }[];
-    doctorNotes?: string;
-  }) => {
-    const res = await apiClient.post(`/triage-review/${caseId}/prescription`, payload);
+  issuePrescription: async (
+    caseId: string,
+    payload: {
+      diagnosis: string;
+      medications: {
+        name: string;
+        dosage: string;
+        frequency: string;
+        duration: string;
+        instructions?: string;
+      }[];
+      doctorNotes?: string;
+    },
+  ) => {
+    const res = await apiClient.post(
+      `/triage-review/${caseId}/prescription`,
+      payload,
+    );
     return res.data;
   },
-  issueEmergencyReferral: async (caseId: string, payload: {
-    referralType: string;
-    provisionalDiagnosis: string;
-    clinicalNotes: string;
-    recommendedFacility: string;
-  }) => {
-    const res = await apiClient.post(`/triage-review/${caseId}/emergency-referral`, payload);
+  issueEmergencyReferral: async (
+    caseId: string,
+    payload: {
+      referralType: string;
+      provisionalDiagnosis: string;
+      clinicalNotes: string;
+      recommendedFacility: string;
+    },
+  ) => {
+    const res = await apiClient.post(
+      `/triage-review/${caseId}/emergency-referral`,
+      payload,
+    );
     return res.data;
   },
-  getPrescriptionPdfUrl: (caseId: string) => `/api/triage-review/${caseId}/prescription/pdf`,
-  getReferralPdfUrl: (caseId: string) => `/api/triage-review/${caseId}/referral/pdf`,
+  getPrescriptionPdfUrl: (caseId: string) =>
+    `/api/triage-review/${caseId}/prescription/pdf`,
+  getReferralPdfUrl: (caseId: string) =>
+    `/api/triage-review/${caseId}/referral/pdf`,
 };
 
 // ==================== TERRA (WEARABLE) ====================
@@ -585,15 +675,15 @@ export interface TerraStatus {
 
 export const terraApi = {
   connect: async (): Promise<{ url: string }> => {
-    const res = await apiClient.post('/terra/connect');
+    const res = await apiClient.post("/terra/connect");
     return res.data;
   },
   disconnect: async () => {
-    const res = await apiClient.post('/terra/disconnect');
+    const res = await apiClient.post("/terra/disconnect");
     return res.data;
   },
   getStatus: async (): Promise<{ connected: boolean; devices?: string[] }> => {
-    const res = await apiClient.get('/terra/status');
+    const res = await apiClient.get("/terra/status");
     return res.data;
   },
 };
@@ -601,11 +691,11 @@ export const terraApi = {
 // ==================== CONSENT ====================
 export const consentApi = {
   give: async (consentType: string) => {
-    const res = await apiClient.post('/consent', { consentType });
+    const res = await apiClient.post("/consent", { consentType });
     return res.data;
   },
   getAll: async () => {
-    const res = await apiClient.get('/consent');
+    const res = await apiClient.get("/consent");
     return res.data;
   },
 };
@@ -624,7 +714,7 @@ export interface User {
 
 export const adminApi = {
   getAllUsers: async (): Promise<User[]> => {
-    const res = await apiClient.get('/admin/users');
+    const res = await apiClient.get("/admin/users");
     return res.data.users || [];
   },
   updateUserStatus: async (userId: string, isActive: boolean) => {
@@ -632,11 +722,18 @@ export const adminApi = {
     return res.data;
   },
   getStats: async () => {
-    const res = await apiClient.get('/admin/stats');
+    const res = await apiClient.get("/admin/stats");
     return res.data;
   },
-  setDoctorHpcsa: async (userId: string, hcpsaNumber: string, verify = false) => {
-    const res = await apiClient.patch(`/admin/users/${userId}/hpcsa`, { hcpsaNumber, verify });
+  setDoctorHpcsa: async (
+    userId: string,
+    hcpsaNumber: string,
+    verify = false,
+  ) => {
+    const res = await apiClient.patch(`/admin/users/${userId}/hpcsa`, {
+      hcpsaNumber,
+      verify,
+    });
     return res.data;
   },
   getDoctorHpcsa: async (userId: string) => {
@@ -648,14 +745,15 @@ export const adminApi = {
 // ==================== DOCTOR PROFILE ====================
 export const doctorProfileApi = {
   getHpcsa: async () => {
-    const res = await apiClient.get('/triage-review/profile/hpcsa');
+    const res = await apiClient.get("/triage-review/profile/hpcsa");
     return res.data;
   },
   submitHpcsa: async (hcpsaNumber: string) => {
-    const res = await apiClient.patch('/triage-review/profile/hpcsa', { hcpsaNumber });
+    const res = await apiClient.patch("/triage-review/profile/hpcsa", {
+      hcpsaNumber,
+    });
     return res.data;
   },
 };
 
 export default apiClient;
-
