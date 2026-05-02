@@ -1,0 +1,37 @@
+# Dockerfile.fly — built from the REPO ROOT by Fly.io (deploy/fly/api.fly.toml)
+# The backend lives in apps/backend/ so we explicitly copy from that path.
+
+# ── Stage 1: base ────────────────────────────────────────────────────────────
+FROM node:20-alpine AS base
+WORKDIR /app
+
+# ── Stage 2: install all dependencies (dev + prod for build) ─────────────────
+FROM base AS deps
+COPY apps/backend/package.json apps/backend/package-lock.json ./
+RUN npm ci
+
+# ── Stage 3: build (Prisma generate + TypeScript compile) ────────────────────
+FROM base AS builder
+COPY --from=deps /app/node_modules ./node_modules
+# Copy the full backend source (includes prisma/, src/, tsconfig.json, etc.)
+COPY apps/backend/ .
+RUN npx prisma generate --schema=prisma/schema.prisma
+RUN npm run build
+
+# ── Stage 4: production image (only compiled output + runtime deps) ──────────
+FROM node:20-alpine AS runner
+RUN addgroup --system --gid 1001 nodejs \
+ && adduser  --system --uid 1001 apiuser
+WORKDIR /app
+
+COPY --from=builder --chown=apiuser:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=apiuser:nodejs /app/dist        ./dist
+COPY --from=builder --chown=apiuser:nodejs /app/package.json ./
+COPY --from=builder --chown=apiuser:nodejs /app/prisma      ./prisma
+
+USER apiuser
+EXPOSE 4000
+ENV NODE_ENV=production
+
+# Run migrations then start the server
+CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && node dist/index.js"]
