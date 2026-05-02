@@ -177,8 +177,9 @@ router.post("/register", authRateLimiter, async (req, res, next) => {
       return res.status(400).json({ error: "User already exists" });
     }
 
-    // Hash password
-    const saltRounds = 12;
+    // Hash password — 10 rounds balances security with CPU cost under concurrent load.
+    // 12 rounds doubles the time and causes timeouts when many users register simultaneously.
+    const saltRounds = parseInt(process.env.BCRYPT_ROUNDS || "10", 10);
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
     // Create user
@@ -681,7 +682,8 @@ router.post("/reset-password", authRateLimiter, async (req, res, next) => {
         error: "Invalid or expired reset link. Please request a new one.",
       });
 
-    const passwordHash = await bcrypt.hash(value.password, 12);
+    const saltRounds = parseInt(process.env.BCRYPT_ROUNDS || "10", 10);
+    const passwordHash = await bcrypt.hash(value.password, saltRounds);
     await (prisma.user.update as Function)({
       where: { id: user.id },
       data: {
