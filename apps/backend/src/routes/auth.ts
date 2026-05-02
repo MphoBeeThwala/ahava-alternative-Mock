@@ -118,13 +118,15 @@ router.post('/register', authRateLimiter, async (req, res, next) => {
       }
     }
     
-    // For trial, we'll allow anyone to sign up as DOCTOR/NURSE 
-    // unless you want to restrict those too. Let's restrict them slightly.
+    // For staff, we restrict signup in production mode
     if ((role === 'DOCTOR' || role === 'NURSE') && process.env.NODE_ENV === 'production') {
       if (!adminSecret || adminSecret !== process.env.STAFF_REGISTRATION_SECRET) {
         return res.status(403).json({ error: 'Staff registration requires a secret token' });
       }
     }
+
+    // NOTE: PATIENT role registration is always allowed without a secret.
+
 
     // Check if user already exists
     const existingUser = await prisma.user.findUnique({
