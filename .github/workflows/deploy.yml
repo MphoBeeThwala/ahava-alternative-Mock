@@ -1,101 +1,175 @@
-name: Deploy (Multi-Provider)
+name: Deploy to Railway
 
 on:
   push:
     branches: ["main"]
+  workflow_dispatch: # allow manual trigger from GitHub UI
 
 jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # 1. Build & push Docker images to GitHub Container Registry
+  # ─────────────────────────────────────────────────────────────────────────
   build-and-publish:
+    name: Build & Push Docker Images
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+
     steps:
-      - uses: actions/checkout@v4.3.1
-      - uses: actions/setup-node@v4.4.0
-        with:
-          node-version: 20
-      - name: Install Yarn
-        run: corepack enable && corepack prepare yarn@4.3.1 --activate
-      - name: Install dependencies
-        run: yarn install --immutable
-      - name: Build packages
-        run: yarn workspaces foreach -A -pt run build || true
+      - name: Checkout code
+        uses: actions/checkout@v4.3.1
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3.12.0
-      - name: Login to GHCR
+
+      - name: Login to GitHub Container Registry
         uses: docker/login-action@v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build & push API image
+
+      # Backend API image
+      - name: Build & push Backend API image
         uses: docker/build-push-action@v6.19.2
         with:
           context: .
           file: apps/backend/Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/kykthuto-api:latest
-      - name: Build & push Worker image
+          tags: ghcr.io/${{ github.repository_owner }}/ahava-api:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ML service image (only if Dockerfile exists)
+      - name: Check for ML Dockerfile
+        id: ml-check
+        run: |
+          if [ -f "apps/ml-service/Dockerfile" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build & push ML Service image
+        if: steps.ml-check.outputs.exists == 'true'
         uses: docker/build-push-action@v6.19.2
         with:
-          context: .
-          file: apps/worker/Dockerfile
+          context: apps/ml-service
+          file: apps/ml-service/Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/kykthuto-worker:latest
+          tags: ghcr.io/${{ github.repository_owner }}/ahava-ml:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
+  # ─────────────────────────────────────────────────────────────────────────
+  # 2. Deploy to Railway
+  #    Requires RAILWAY_TOKEN secret to be set in GitHub repository secrets.
+  #    Go to: Settings → Secrets and variables → Actions → New repository secret
+  # ─────────────────────────────────────────────────────────────────────────
   deploy-railway:
+    name: Deploy to Railway
     needs: build-and-publish
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4.3.1
-      - name: Install Railway
+      - name: Checkout code
+        uses: actions/checkout@v4.3.1
+
+      - name: Install Railway CLI
         run: curl -fsSL https://railway.app/install.sh | sh
-      - name: Railway Deploy (Default)
-        if: ${{ secrets.RAILWAY_TOKEN }}
+
+      - name: Deploy all services to Railway
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
-          echo "Deploying to Railway (Default Provider)..."
-          ~/.railway/bin/railway up --service api || echo "API deployment skipped - no Railway token"
-          ~/.railway/bin/railway up --service admin || echo "Admin deployment skipped - no Railway token"
-          ~/.railway/bin/railway up --service doctor || echo "Doctor deployment skipped - no Railway token"
-          ~/.railway/bin/railway up --service worker || echo "Worker deployment skipped - no Railway token"
-      - name: Railway Setup Instructions
-        if: ${{ !secrets.RAILWAY_TOKEN }}
-        run: |
-          echo "::warning::Railway token not found. Add RAILWAY_TOKEN secret to enable automatic deployment."
-          echo "To set up Railway deployment:"
-          echo "1. Get Railway token from https://railway.app/account/tokens"
-          echo "2. Add RAILWAY_TOKEN secret to GitHub repository"
-          echo "3. Push to main branch to trigger deployment"
+          # ── Guard: skip if RAILWAY_TOKEN is not configured ──────────────
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "::warning title=Railway Token Missing::RAILWAY_TOKEN secret is not set."
+            echo ""
+            echo "  To enable automatic Railway deployment:"
+            echo "  1. Get your token → https://railway.app/account/tokens"
+            echo "  2. GitHub repo → Settings → Secrets and variables → Actions"
+            echo "  3. Add secret:  Name = RAILWAY_TOKEN,  Value = <your token>"
+            echo "  4. Push to main again."
+            echo ""
+            echo "  Skipping deployment for this run."
+            exit 0
+          fi
 
+          echo "✅ RAILWAY_TOKEN found. Deploying to Railway..."
+
+          # Deploy backend API
+          ~/.railway/bin/railway up --service api \
+            && echo "✅ API deployed" \
+            || echo "⚠️  API deployment failed (check Railway dashboard)"
+
+          # Deploy frontend workspace (Next.js)
+          ~/.railway/bin/railway up --service frontend \
+            && echo "✅ Frontend deployed" \
+            || echo "⚠️  Frontend deployment failed"
+
+          # Deploy ML service if present
+          if [ -f "apps/ml-service/Dockerfile" ]; then
+            ~/.railway/bin/railway up --service ml-service \
+              && echo "✅ ML service deployed" \
+              || echo "⚠️  ML service deployment failed"
+          fi
+
+          echo "🚀 Railway deployment complete."
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # 3. (Optional) Deploy to Render
+  #    Only runs when RENDER_API_KEY secret is configured.
+  # ─────────────────────────────────────────────────────────────────────────
   deploy-render:
+    name: Deploy to Render (optional)
     needs: build-and-publish
-    if: ${{ secrets.RENDER_API_KEY }}
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4.3.1
-      - name: Render Deploy (Alternative)
+      - name: Checkout code
+        uses: actions/checkout@v4.3.1
+
+      - name: Deploy to Render
         env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
         run: |
-          echo "Deploying to Render (Alternative Provider)..."
-          echo "Import render.yaml in Render dashboard to create services"
+          if [ -z "$RENDER_API_KEY" ]; then
+            echo "::notice::RENDER_API_KEY not configured — skipping Render deployment."
+            exit 0
+          fi
+          echo "Deploying to Render..."
+          echo "Import render.yaml in Render dashboard to create services."
+          # Add Render deploy hook calls here when ready.
 
+  # ─────────────────────────────────────────────────────────────────────────
+  # 4. (Optional) Deploy to Fly.io
+  #    Only runs when FLY_API_TOKEN secret is configured.
+  # ─────────────────────────────────────────────────────────────────────────
   deploy-fly:
+    name: Deploy to Fly.io (optional)
     needs: build-and-publish
-    if: ${{ secrets.FLY_API_TOKEN }}
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4.3.1
+      - name: Checkout code
+        uses: actions/checkout@v4.3.1
+
       - name: Setup Flyctl
         uses: superfly/flyctl-actions/setup-flyctl@1.5
-      - name: Deploy to Fly.io (Alternative)
+
+      - name: Deploy to Fly.io
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
-          echo "Deploying to Fly.io (Alternative Provider)..."
-          flyctl deploy -c deploy/fly/api.fly.toml --image ghcr.io/${{ github.repository_owner }}/kykthuto-api:latest --remote-only || echo "API deployment failed"
-          flyctl deploy -c deploy/fly/worker.fly.toml --image ghcr.io/${{ github.repository_owner }}/kykthuto-worker:latest --remote-only || echo "Worker deployment failed"
-
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "::notice::FLY_API_TOKEN not configured — skipping Fly.io deployment."
+            exit 0
+          fi
+          echo "Deploying to Fly.io..."
+          flyctl deploy \
+            -c deploy/fly/api.fly.toml \
+            --image ghcr.io/${{ github.repository_owner }}/ahava-api:latest \
+            --remote-only \
+            || echo "⚠️ Fly.io API deployment failed"
