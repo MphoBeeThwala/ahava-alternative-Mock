@@ -99,6 +99,9 @@ model User {
   terraUserId       String?  @unique
   connectedDevices  String[] @default([])
 
+  // ROOK API wearable integration
+  rookUserId        String?  @unique
+
   // SANC verification (nurses)
   sancId                  String?
   sancVerificationStatus  String?  // NOT_FOUND | NAME_MISMATCH | EXPIRED | SUSPENDED | Active

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate } from "react-router-dom";
 import { useAuth, getAuthHeaders } from "@/react-app/lib/auth-context";
 import { getApiBase } from "@/react-app/lib/native";
 import { CreditCard, Shield, CheckCircle2 } from "lucide-react";

@@ -117,7 +117,7 @@ export default function DoctorDashboard() {
         try {
             setLoading(true);
             const data = await doctorApi.getPendingVisits();
-            setTriageQueue(data.visits || []);
+            setTriageQueue(data?.visits || []);
         } catch (error) {
             console.error('Failed to load pending visits:', error);
         } finally {
@@ -128,17 +128,18 @@ export default function DoctorDashboard() {
     const loadTriageCases = useCallback(async () => {
         try {
             const data = await doctorApi.getTriageReviewQueue('all');
-            setTriageCases(data.cases || []);
+            setTriageCases(data?.cases || []);
         } catch (error) {
             console.error('Failed to load triage cases:', error);
         }
     }, []);
 
     useEffect(() => {
+        if (user?.role !== 'DOCTOR') return;
         loadPendingVisits();
         loadTriageCases();
         loadHcpsaStatus();
-    }, [loadPendingVisits, loadTriageCases, loadHcpsaStatus]);
+    }, [user, loadPendingVisits, loadTriageCases, loadHcpsaStatus]);
 
     const handleApprove = async (visitId: string) => {
         try {

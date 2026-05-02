@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useAuth, getAuthHeaders } from "@/react-app/lib/auth-context";
-import { useNavigate } from "react-router";
+import { useNavigate } from "react-router-dom";
 import { Chart, registerables } from "chart.js";
 import DashboardLayout from "@/react-app/components/DashboardLayout";
 import RequestNurseModal from "@/react-app/components/RequestNurseModal";
@@ -16,6 +16,9 @@ interface Profile {
   role: string;
   phone_number: string;
   address: string;
+  passport_completion_percent?: number;
+  next_profile_question?: string | null;
+  should_remind_profile_completion?: boolean;
 }
 
 interface Biometric {
@@ -239,6 +242,20 @@ export default function PatientDashboard() {
           Diagnostic Vault {reportCount > 0 && <span style={{ fontSize: 12, background: "#eff6ff", color: "var(--primary)", borderRadius: 20, padding: "2px 8px", marginLeft: 6 }}>{reportCount}</span>}
         </button>
       </div>
+
+      {profile?.should_remind_profile_completion && (
+        <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "var(--radius)", padding: "14px 16px", marginBottom: 18 }}>
+          <div style={{ fontWeight: 700, color: "#1e40af", fontSize: 14 }}>
+            Complete your medical passport ({profile.passport_completion_percent ?? 0}%)
+          </div>
+          <div style={{ color: "#1d4ed8", fontSize: 13, marginTop: 4 }}>
+            {profile.next_profile_question || "Add a bit more profile info for better future triage and care continuity."}
+          </div>
+          <div style={{ color: "#1d4ed8", fontSize: 12, marginTop: 6 }}>
+            You can keep using Ahava normally while completing this over time.
+          </div>
+        </div>
+      )}
 
       {/* ── BIOMETRIC CARDS ── */}
       <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>

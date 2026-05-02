@@ -1,7 +1,7 @@
 import { useAuth } from "@/react-app/lib/auth-context";
 import { getApiBase, isNative } from "@/react-app/lib/native";
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate } from "react-router-dom";
 
 export default function HomePage() {
   const { user, loading } = useAuth();

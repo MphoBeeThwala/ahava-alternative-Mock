@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useAuth, getAuthHeaders } from "@/react-app/lib/auth-context";
-import { useNavigate } from "react-router";
+import { useNavigate } from "react-router-dom";
 import { getApiBase } from "@/react-app/lib/native";
 import { Users, Shield, AlertTriangle, Activity, FileText, CheckCircle } from "lucide-react";
 

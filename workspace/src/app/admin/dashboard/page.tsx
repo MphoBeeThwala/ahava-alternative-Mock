@@ -20,6 +20,35 @@ export default function AdminDashboard() {
     const [stats, setStats] = useState<{ totalUsers?: number } | null>(null);
     const [roleFilter, setRoleFilter] = useState<RoleFilter>('ALL');
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
+    
+    // Add User Modal State
+    const [showAddModal, setShowAddModal] = useState(false);
+    const [newUser, setNewUser] = useState({
+        email: '',
+        password: '',
+        firstName: '',
+        lastName: '',
+        role: 'PATIENT' as User['role'],
+    });
+    const [adding, setAdding] = useState(false);
+
+    const handleAddUser = async (e: React.FormEvent) => {
+        e.preventDefault();
+        try {
+            setAdding(true);
+            await adminApi.createUser(newUser);
+            toast.success(`User ${newUser.email} created successfully!`);
+            setShowAddModal(false);
+            setNewUser({ email: '', password: '', firstName: '', lastName: '', role: 'PATIENT' });
+            loadUsers();
+            loadStats();
+        } catch (error: unknown) {
+            const err = error as { response?: { data?: { error?: string } } };
+            toast.error(err.response?.data?.error || 'Failed to create user.');
+        } finally {
+            setAdding(false);
+        }
+    };
 
     const loadUsers = useCallback(async () => {
         try {
@@ -42,10 +71,33 @@ export default function AdminDashboard() {
         }
     }, []);
 
+    const handleResetData = async () => {
+        const confirmMsg = "NUCLEAR OPTION: This will delete ALL bookings, readings, visits, and users (except you). This cannot be undone. Are you absolutely sure?";
+        if (!confirm(confirmMsg)) return;
+        
+        const doubleConfirm = "Final warning: Type 'RESET' to confirm.";
+        const input = prompt(doubleConfirm);
+        if (input !== 'RESET') return;
+
+        try {
+            setLoading(true);
+            await adminApi.resetTrialData(false);
+            toast.success('Platform data reset successfully. You are now the only user.');
+            loadUsers();
+            loadStats();
+        } catch (error: unknown) {
+            const err = error as { response?: { data?: { error?: string } } };
+            toast.error(err.response?.data?.error || 'Failed to reset data.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
     useEffect(() => {
+        if (user?.role !== 'ADMIN') return;
         loadUsers();
         loadStats();
-    }, [loadUsers, loadStats]);
+    }, [user, loadUsers, loadStats]);
 
     const toggleUserStatus = async (userId: string, currentStatus: boolean) => {
         try {
@@ -81,6 +133,14 @@ export default function AdminDashboard() {
                                     Welcome, {user?.firstName} {user?.lastName} 🛡️
                                 </h1>
                                 <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginTop: 4 }}>Manage users, monitor platform health, and oversee all activity.</p>
+                                <button
+                                    onClick={handleResetData}
+                                    style={{ marginTop: 12, padding: '8px 16px', background: 'rgba(239,68,68,0.2)', color: '#f87171', border: '1.5px solid rgba(239,68,68,0.4)', borderRadius: 10, fontSize: 12, fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
+                                    onMouseOver={(e) => e.currentTarget.style.background = 'rgba(239,68,68,0.3)'}
+                                    onMouseOut={(e) => e.currentTarget.style.background = 'rgba(239,68,68,0.2)'}
+                                >
+                                    ⚠️ Reset Platform Data
+                                </button>
                             </div>
                             <div style={{ display: 'flex', gap: 12 }}>
                                 {[
@@ -127,6 +187,13 @@ export default function AdminDashboard() {
                                 <option value="ACTIVE">Active</option>
                                 <option value="INACTIVE">Inactive</option>
                             </select>
+                            <button
+                                onClick={() => setShowAddModal(true)}
+                                className="rounded-lg px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
+                                style={{ backgroundColor: '#10b981' }}
+                            >
+                                + Add User
+                            </button>
                             <button
                                 onClick={loadUsers}
                                 disabled={loading}
@@ -198,6 +265,58 @@ export default function AdminDashboard() {
                 </Card>
                 </div>{/* p-6 */}
                 </div>{/* outer bg */}
+
+                {/* ADD USER MODAL */}
+                {showAddModal && (
+                    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}>
+                        <div style={{ background: 'white', borderRadius: 20, width: '100%', maxWidth: 500, overflow: 'hidden', boxShadow: '0 20px 50px rgba(0,0,0,0.2)' }}>
+                            <div style={{ background: 'linear-gradient(135deg,#0d9488,#059669)', padding: '24px 30px', color: 'white' }}>
+                                <h3 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>Add New User</h3>
+                                <p style={{ margin: '4px 0 0', opacity: 0.8, fontSize: 13 }}>Create a patient, doctor, nurse, or admin account.</p>
+                            </div>
+                            
+                            <form onSubmit={handleAddUser} style={{ padding: 30 }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 6, textTransform: 'uppercase' }}>First Name</label>
+                                        <input required value={newUser.firstName} onChange={e => setNewUser({...newUser, firstName: e.target.value})} style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1.5px solid #e2e8f0', outline: 'none' }} placeholder="Jane" />
+                                    </div>
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 6, textTransform: 'uppercase' }}>Last Name</label>
+                                        <input required value={newUser.lastName} onChange={e => setNewUser({...newUser, lastName: e.target.value})} style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1.5px solid #e2e8f0', outline: 'none' }} placeholder="Doe" />
+                                    </div>
+                                </div>
+
+                                <div style={{ marginBottom: 16 }}>
+                                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 6, textTransform: 'uppercase' }}>Email Address</label>
+                                    <input type="email" required value={newUser.email} onChange={e => setNewUser({...newUser, email: e.target.value})} style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1.5px solid #e2e8f0', outline: 'none' }} placeholder="jane.doe@example.com" />
+                                </div>
+
+                                <div style={{ marginBottom: 16 }}>
+                                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 6, textTransform: 'uppercase' }}>Temporary Password</label>
+                                    <input type="password" required value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value})} style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1.5px solid #e2e8f0', outline: 'none' }} placeholder="••••••••" minLength={8} />
+                                </div>
+
+                                <div style={{ marginBottom: 24 }}>
+                                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 6, textTransform: 'uppercase' }}>Assigned Role</label>
+                                    <select value={newUser.role} onChange={e => setNewUser({...newUser, role: e.target.value as User['role']})} style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1.5px solid #e2e8f0', outline: 'none', background: 'white' }}>
+                                        <option value="PATIENT">Patient</option>
+                                        <option value="NURSE">Nurse</option>
+                                        <option value="DOCTOR">Doctor</option>
+                                        <option value="ADMIN">Admin</option>
+                                    </select>
+                                </div>
+
+                                <div style={{ display: 'flex', gap: 12 }}>
+                                    <button type="button" onClick={() => setShowAddModal(false)} style={{ flex: 1, padding: '12px', borderRadius: 10, border: '1.5px solid #e2e8f0', background: 'white', color: '#64748b', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+                                    <button type="submit" disabled={adding} style={{ flex: 2, padding: '12px', borderRadius: 10, border: 'none', background: adding ? '#94a3b8' : 'linear-gradient(135deg,#0d9488,#059669)', color: 'white', fontWeight: 700, cursor: adding ? 'not-allowed' : 'pointer' }}>
+                                        {adding ? 'Creating...' : 'Create Account'}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
             </DashboardLayout>
         </RoleGuard>
     );

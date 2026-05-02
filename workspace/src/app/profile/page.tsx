@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import RoleGuard, { UserRole } from "../../components/RoleGuard";
 import DashboardLayout from "../../components/DashboardLayout";
-import { authApi } from "../../lib/api";
+import { authApi, patientApi, RiskProfile } from "../../lib/api";
 import { useAuth } from "../../contexts/AuthContext";
 
 const LANGUAGES = [
@@ -22,6 +22,15 @@ const GENDERS = [
   { value: "PREFER_NOT_TO_SAY", label: "Prefer not to say" },
 ];
 
+type MedicalPassport = {
+  emergencyContactName?: string;
+  emergencyContactPhone?: string;
+  bloodType?: string;
+  allergies?: string[];
+  chronicConditions?: string[];
+  currentMedications?: string[];
+};
+
 export default function ProfilePage() {
   const { user, refreshUser } = useAuth();
   const [form, setForm] = useState({
@@ -33,20 +42,131 @@ export default function ProfilePage() {
     gender: "",
     preferredLanguage: "",
   });
+  const [riskProfile, setRiskProfile] = useState<RiskProfile>({
+    smoker: undefined,
+    hypertension: undefined,
+    diabetes: undefined,
+    asthmaOrCopd: undefined,
+    pregnancy: undefined,
+    familyHistoryCvd: undefined,
+    activityLevel: undefined,
+    alcoholUse: undefined,
+    cholesterolKnown: undefined,
+    cholesterolValue: undefined,
+    consentAcknowledged: false,
+    onboardingCompleted: false,
+    surveyVersion: 1,
+  });
+  const [riskSaving, setRiskSaving] = useState(false);
+  const [riskSuccess, setRiskSuccess] = useState("");
+  const [riskError, setRiskError] = useState("");
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState("");
   const [error, setError] = useState("");
+  const [passport, setPassport] = useState<MedicalPassport>({
+    emergencyContactName: "",
+    emergencyContactPhone: "",
+    bloodType: "",
+    allergies: [],
+    chronicConditions: [],
+    currentMedications: [],
+  });
+  const [passportAllergiesInput, setPassportAllergiesInput] = useState("");
+  const [passportConditionsInput, setPassportConditionsInput] = useState("");
+  const [passportMedsInput, setPassportMedsInput] = useState("");
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
+    personal: true,
+    passport: true,
+    health: true,
+  });
+
+  const toggleSection = (id: string) => {
+    setExpandedSections(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const hasCsvValues = (text: string): boolean =>
+    text
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean).length > 0;
+
+  const completionChecks = [
+    { done: Boolean(form.firstName && form.lastName), prompt: "What is your full name?" },
+    { done: Boolean(form.phone), prompt: "What is your best contact number?" },
+    { done: Boolean(form.dateOfBirth), prompt: "What is your date of birth?" },
+    { done: Boolean(form.gender), prompt: "What gender should we record for clinical care?" },
+    { done: Boolean(passport.emergencyContactName), prompt: "Who should we contact in an emergency?" },
+    { done: Boolean(passport.emergencyContactPhone), prompt: "What is your emergency contact's phone number?" },
+    { done: Boolean(passport.bloodType), prompt: "Do you know your blood type?" },
+    { done: hasCsvValues(passportAllergiesInput), prompt: "Do you have any known allergies? (type None if none)" },
+    { done: hasCsvValues(passportConditionsInput), prompt: "Any chronic conditions we should record? (type None if none)" },
+    { done: hasCsvValues(passportMedsInput), prompt: "Are you taking any regular medications? (type None if none)" },
+  ];
+  const completionCount = completionChecks.filter((c) => c.done).length;
+  const passportCompletionPercent = Math.round((completionCount / completionChecks.length) * 100);
+  const nextPassportQuestion = completionChecks.find((c) => !c.done)?.prompt ?? null;
+
+  useEffect(() => {
+    // Only fetch on mount, and not if we already have user data from initializeAuth
+    if (refreshUser && !user) {
+      void refreshUser();
+    }
+  }, [refreshUser, user]);
 
   useEffect(() => {
     if (user) {
+      const rpData = user.riskProfile as RiskProfile | undefined;
+      const isPersonalComplete = Boolean(user.firstName && user.lastName && user.phone);
+      const isPassportComplete = (rpData?.passportCompletionPercent ?? 0) >= 100;
+      const isHealthComplete = Boolean(rpData?.onboardingCompleted);
+
+      // Set initial expansion based on completion - only expand incomplete sections
+      setExpandedSections({
+        personal: !isPersonalComplete,
+        passport: isPersonalComplete && !isPassportComplete,
+        health: isPersonalComplete && isPassportComplete && !isHealthComplete,
+      });
+
+      // Populate form values from user object
       setForm({
-        firstName: user.firstName ?? "",
-        lastName: user.lastName ?? "",
-        phone: user.phone ?? "",
-        email: user.email ?? "",
+        firstName: user.firstName || "",
+        lastName: user.lastName || "",
+        phone: user.phone || "",
+        email: user.email || "",
         dateOfBirth: user.dateOfBirth ? user.dateOfBirth.split("T")[0] : "",
-        gender: user.gender ?? "",
-        preferredLanguage: user.preferredLanguage ?? "",
+        gender: user.gender || "",
+        preferredLanguage: user.preferredLanguage || "",
+      });
+
+      // Populate Passport values
+      const mp = rpData?.medicalPassport || {};
+      setPassport({
+        emergencyContactName: mp.emergencyContactName || "",
+        emergencyContactPhone: mp.emergencyContactPhone || "",
+        bloodType: mp.bloodType || "",
+        allergies: mp.allergies || [],
+        chronicConditions: mp.chronicConditions || [],
+        currentMedications: mp.currentMedications || [],
+      });
+      setPassportAllergiesInput(Array.isArray(mp.allergies) ? mp.allergies.join(", ") : "");
+      setPassportConditionsInput(Array.isArray(mp.chronicConditions) ? mp.chronicConditions.join(", ") : "");
+      setPassportMedsInput(Array.isArray(mp.currentMedications) ? mp.currentMedications.join(", ") : "");
+
+      // Populate Health values
+      setRiskProfile({
+        smoker: rpData?.smoker,
+        hypertension: rpData?.hypertension,
+        diabetes: rpData?.diabetes,
+        asthmaOrCopd: rpData?.asthmaOrCopd,
+        pregnancy: rpData?.pregnancy,
+        familyHistoryCvd: rpData?.familyHistoryCvd,
+        activityLevel: rpData?.activityLevel,
+        alcoholUse: rpData?.alcoholUse,
+        cholesterolKnown: rpData?.cholesterolKnown,
+        cholesterolValue: rpData?.cholesterolValue,
+        consentAcknowledged: rpData?.consentAcknowledged,
+        onboardingCompleted: rpData?.onboardingCompleted,
+        surveyVersion: rpData?.surveyVersion || 1,
       });
     }
   }, [user]);
@@ -75,17 +195,111 @@ export default function ProfilePage() {
         payload.email = form.email;
       }
       const res = await authApi.updateProfile(payload as Parameters<typeof authApi.updateProfile>[0]);
+      if (res?.user) {
+        setForm((prev) => ({
+          ...prev,
+          firstName: res.user.firstName ?? prev.firstName,
+          lastName: res.user.lastName ?? prev.lastName,
+          phone: res.user.phone ?? "",
+          email: res.user.email ?? prev.email,
+          dateOfBirth: res.user.dateOfBirth ? String(res.user.dateOfBirth).split("T")[0] : "",
+          gender: res.user.gender ?? "",
+          preferredLanguage: res.user.preferredLanguage ?? "",
+        }));
+      }
+      if (user?.role === "PATIENT") {
+        await patientApi.updateRiskProfile(buildMedicalPassportPayload());
+      }
       if (res.emailChanged) {
         setSuccess("Profile saved. A verification email has been sent to your new address — please check your inbox.");
       } else {
-        setSuccess("Profile updated successfully.");
+        setSuccess(user?.role === "PATIENT" ? "Profile and medical passport updated successfully." : "Profile updated successfully.");
       }
+      setExpandedSections(prev => ({ ...prev, personal: false }));
       if (refreshUser) await refreshUser();
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
       setError(msg ?? "Failed to save changes. Please try again.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const setRisk = (patch: Partial<RiskProfile>) => {
+    setRiskProfile((rp) => ({ ...rp, ...patch }));
+    setRiskSuccess("");
+    setRiskError("");
+  };
+
+  const normalizeCsv = (text: string): string[] =>
+    text
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+  const buildMedicalPassportPayload = (): RiskProfile => ({
+    medicalPassport: {
+      emergencyContactName: passport.emergencyContactName?.trim() || undefined,
+      emergencyContactPhone: passport.emergencyContactPhone?.trim() || undefined,
+      bloodType: passport.bloodType?.trim() || undefined,
+      allergies: normalizeCsv(passportAllergiesInput),
+      chronicConditions: normalizeCsv(passportConditionsInput),
+      currentMedications: normalizeCsv(passportMedsInput),
+    },
+    passportCompletionPercent,
+    nextPassportQuestion: nextPassportQuestion ?? undefined,
+  });
+
+  const handlePassportSubmit = async () => {
+    setRiskSaving(true);
+    setRiskSuccess("");
+    setRiskError("");
+    try {
+      await patientApi.updateRiskProfile(buildMedicalPassportPayload());
+      setRiskSuccess("Medical passport updated successfully.");
+      setExpandedSections(prev => ({ ...prev, passport: false }));
+      if (refreshUser) await refreshUser();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setRiskError(e.response?.data?.error || "Failed to update medical passport.");
+    } finally {
+      setRiskSaving(false);
+    }
+  };
+
+  const handleRiskSubmit = async () => {
+    setRiskSaving(true);
+    setRiskError("");
+    setRiskSuccess("");
+    try {
+      if (!riskProfile.consentAcknowledged) {
+        setRiskError("Please confirm the consent statement to continue.");
+        return;
+      }
+      const payload: RiskProfile = {
+        ...riskProfile,
+        ...buildMedicalPassportPayload(),
+        onboardingCompleted: true,
+        surveyVersion: riskProfile.surveyVersion ?? 1,
+      };
+      const res = await patientApi.updateRiskProfile(payload);
+      setRiskSuccess("Health profile saved. You can now view Early Warning risk signals and choose whether to consult a clinician.");
+      setExpandedSections(prev => ({ ...prev, health: false, passport: false }));
+      if (refreshUser) await refreshUser();
+      if (res?.riskProfile && typeof window !== "undefined") {
+        const storedUser = localStorage.getItem("user");
+        if (storedUser) {
+          try {
+            const parsed = JSON.parse(storedUser);
+            localStorage.setItem("user", JSON.stringify({ ...parsed, riskProfile: res.riskProfile }));
+          } catch {}
+        }
+      }
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      setRiskError(msg ?? "Failed to save health profile. Please try again.");
+    } finally {
+      setRiskSaving(false);
     }
   };
 
@@ -121,66 +335,321 @@ export default function ProfilePage() {
             )}
 
             <form onSubmit={handleSubmit}>
-              <div style={{ background: "white", borderRadius: 16, padding: "28px 28px", boxShadow: "0 2px 16px rgba(0,0,0,0.06)", marginBottom: 20 }}>
-                <h2 style={{ fontSize: 16, fontWeight: 800, color: "#0f172a", marginTop: 0, marginBottom: 20 }}>Personal Information</h2>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                  <div>
-                    <label style={label}>First name</label>
-                    <input name="firstName" value={form.firstName} onChange={handleChange} required style={inp} />
+              <div style={{ background: "white", borderRadius: 16, boxShadow: "0 2px 16px rgba(0,0,0,0.06)", marginBottom: 20, overflow: "hidden" }}>
+                <div 
+                  onClick={() => toggleSection("personal")}
+                  style={{ padding: "20px 28px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", background: expandedSections.personal ? "#f8fafc" : "white" }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <h2 style={{ fontSize: 16, fontWeight: 800, color: "#0f172a", margin: 0 }}>Personal Information</h2>
+                    {Boolean(user?.firstName && user?.lastName && user?.phone) && (
+                      <span style={{ background: "#dcfce7", color: "#166534", fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 20 }}>SAVED</span>
+                    )}
                   </div>
-                  <div>
-                    <label style={label}>Last name</label>
-                    <input name="lastName" value={form.lastName} onChange={handleChange} required style={inp} />
-                  </div>
-                  <div>
-                    <label style={label}>Date of birth</label>
-                    <input name="dateOfBirth" type="date" value={form.dateOfBirth} onChange={handleChange} style={inp} />
-                  </div>
-                  <div>
-                    <label style={label}>Gender</label>
-                    <select name="gender" value={form.gender} onChange={handleChange} style={inp}>
-                      <option value="">Prefer not to say</option>
-                      {GENDERS.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label style={label}>Phone number</label>
-                    <input name="phone" type="tel" value={form.phone} onChange={handleChange} placeholder="+27 82 000 0000" style={inp} />
-                  </div>
-                  <div>
-                    <label style={label}>Preferred language</label>
-                    <select name="preferredLanguage" value={form.preferredLanguage} onChange={handleChange} style={inp}>
-                      <option value="">Select language</option>
-                      {LANGUAGES.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
-                    </select>
-                  </div>
+                  <span style={{ fontSize: 20, transform: expandedSections.personal ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}>▾</span>
                 </div>
-              </div>
+                
+                {expandedSections.personal && (
+                  <div style={{ padding: "0 28px 28px", borderTop: "1.5px solid #f1f5f9" }}>
+                    <div style={{ height: 20 }} />
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                      <div>
+                        <label style={label}>First name</label>
+                        <input name="firstName" value={form.firstName} onChange={handleChange} required style={inp} />
+                      </div>
+                      <div>
+                        <label style={label}>Last name</label>
+                        <input name="lastName" value={form.lastName} onChange={handleChange} required style={inp} />
+                      </div>
+                      <div>
+                        <label style={label}>Date of birth</label>
+                        <input name="dateOfBirth" type="date" value={form.dateOfBirth} onChange={handleChange} style={inp} />
+                      </div>
+                      <div>
+                        <label style={label}>Gender</label>
+                        <select name="gender" value={form.gender} onChange={handleChange} style={inp}>
+                          <option value="">Prefer not to say</option>
+                          {GENDERS.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label style={label}>Phone number</label>
+                        <input name="phone" type="tel" value={form.phone} onChange={handleChange} placeholder="+27 82 000 0000" style={inp} />
+                      </div>
+                      <div>
+                        <label style={label}>Preferred language</label>
+                        <select name="preferredLanguage" value={form.preferredLanguage} onChange={handleChange} style={inp}>
+                          <option value="">Select language</option>
+                          {LANGUAGES.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
+                        </select>
+                      </div>
+                    </div>
 
-              <div style={{ background: "white", borderRadius: 16, padding: "28px 28px", boxShadow: "0 2px 16px rgba(0,0,0,0.06)", marginBottom: 24 }}>
-                <h2 style={{ fontSize: 16, fontWeight: 800, color: "#0f172a", marginTop: 0, marginBottom: 8 }}>Email Address</h2>
-                <p style={{ fontSize: 13, color: "#64748b", marginBottom: 16 }}>Changing your email will require re-verification. A link will be sent to the new address.</p>
-                <label style={label}>Email</label>
-                <input name="email" type="email" value={form.email} onChange={handleChange} required style={inp} />
-                {user?.email && form.email !== user.email && (
-                  <p style={{ fontSize: 12, color: "#d97706", marginTop: 6, fontWeight: 600 }}>⚠ Saving will send a verification link to this new address.</p>
+                    <div style={{ height: 28 }} />
+                    <h2 style={{ fontSize: 16, fontWeight: 800, color: "#0f172a", marginTop: 0, marginBottom: 8 }}>Email Address</h2>
+                    <p style={{ fontSize: 13, color: "#64748b", marginBottom: 16 }}>Changing your email will require re-verification. A link will be sent to the new address.</p>
+                    <label style={label}>Email</label>
+                    <input name="email" type="email" value={form.email} onChange={handleChange} required style={inp} />
+                    {user?.email && form.email !== user.email && (
+                      <p style={{ fontSize: 12, color: "#d97706", marginTop: 6, fontWeight: 600 }}>⚠ Saving will send a verification link to this new address.</p>
+                    )}
+
+                    <button
+                      type="submit"
+                      disabled={saving}
+                      style={{ width: "100%", marginTop: 24, padding: "14px", background: saving ? "#94a3b8" : "linear-gradient(135deg,#0d9488,#059669)", color: "white", border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: saving ? "not-allowed" : "pointer" }}
+                    >
+                      {saving ? "Saving…" : "Update Personal Info"}
+                    </button>
+                    {success && <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, padding: "12px 16px", marginTop: 14, color: "#166534", fontSize: 14 }}>{success}</div>}
+                    {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "12px 16px", marginTop: 14, color: "#dc2626", fontSize: 14 }}>{error}</div>}
+                  </div>
                 )}
               </div>
 
-              {error && (
-                <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "12px 16px", marginBottom: 16, color: "#dc2626", fontSize: 14 }}>{error}</div>
-              )}
-              {success && (
-                <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, padding: "12px 16px", marginBottom: 16, color: "#166534", fontSize: 14 }}>{success}</div>
-              )}
+              {user?.role === "PATIENT" && (
+                <>
+                  <div style={{ background: "white", borderRadius: 16, boxShadow: "0 2px 16px rgba(0,0,0,0.06)", marginBottom: 20, overflow: "hidden" }}>
+                    <div 
+                      onClick={() => toggleSection("passport")}
+                      style={{ padding: "20px 28px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", background: expandedSections.passport ? "#f8fafc" : "white" }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <h2 style={{ fontSize: 16, fontWeight: 800, color: "#0f172a", margin: 0 }}>Medical Passport</h2>
+                        {passportCompletionPercent >= 100 && (
+                          <span style={{ background: "#dcfce7", color: "#166534", fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 20 }}>SAVED</span>
+                        )}
+                      </div>
+                      <span style={{ fontSize: 20, transform: expandedSections.passport ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}>▾</span>
+                    </div>
 
-              <button
-                type="submit"
-                disabled={saving}
-                style={{ width: "100%", padding: "14px", background: saving ? "#94a3b8" : "linear-gradient(135deg,#0d9488,#059669)", color: "white", border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: saving ? "not-allowed" : "pointer" }}
-              >
-                {saving ? "Saving…" : "Save Changes"}
-              </button>
+                    {expandedSections.passport && (
+                      <div style={{ padding: "0 28px 28px", borderTop: "1.5px solid #f1f5f9" }}>
+                        <div style={{ height: 20 }} />
+                        <p style={{ fontSize: 13, color: "#64748b", marginBottom: 14 }}>
+                          We keep signup short. You can keep using Ahava while we gradually complete your passport with short prompts.
+                        </p>
+                        <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 12, padding: "12px 14px", marginBottom: 16 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#1e3a8a", marginBottom: 6 }}>
+                            Completion: {passportCompletionPercent}%
+                          </div>
+                          <div style={{ fontSize: 13, color: "#1e3a8a" }}>
+                            {nextPassportQuestion ? `Next short question: ${nextPassportQuestion}` : "Passport baseline complete. You can still update anytime."}
+                          </div>
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                          <div>
+                            <label style={label}>Emergency contact name</label>
+                            <input value={passport.emergencyContactName ?? ""} onChange={(e) => setPassport((p) => ({ ...p, emergencyContactName: e.target.value }))} style={inp} />
+                          </div>
+                          <div>
+                            <label style={label}>Emergency contact phone</label>
+                            <input value={passport.emergencyContactPhone ?? ""} onChange={(e) => setPassport((p) => ({ ...p, emergencyContactPhone: e.target.value }))} style={inp} />
+                          </div>
+                          <div>
+                            <label style={label}>Blood type</label>
+                            <input value={passport.bloodType ?? ""} onChange={(e) => setPassport((p) => ({ ...p, bloodType: e.target.value }))} placeholder="A+, O-, Unknown" style={inp} />
+                          </div>
+                          <div>
+                            <label style={label}>Allergies (comma separated)</label>
+                            <input value={passportAllergiesInput} onChange={(e) => setPassportAllergiesInput(e.target.value)} placeholder="Penicillin, peanuts" style={inp} />
+                          </div>
+                          <div>
+                            <label style={label}>Chronic conditions (comma separated)</label>
+                            <input value={passportConditionsInput} onChange={(e) => setPassportConditionsInput(e.target.value)} placeholder="Hypertension, diabetes" style={inp} />
+                          </div>
+                          <div>
+                            <label style={label}>Current medications (comma separated)</label>
+                            <input value={passportMedsInput} onChange={(e) => setPassportMedsInput(e.target.value)} placeholder="Metformin, Amlodipine" style={inp} />
+                          </div>
+                        </div>
+
+                        <div style={{ display: "flex", gap: 12, marginTop: 24 }}>
+                          <button
+                            type="button"
+                            onClick={() => handlePassportSubmit()}
+                            disabled={riskSaving}
+                            style={{ flex: 1, padding: "14px", background: riskSaving ? "#94a3b8" : "linear-gradient(135deg,#0d9488,#059669)", color: "white", border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: riskSaving ? "not-allowed" : "pointer" }}
+                          >
+                            {riskSaving ? "Saving…" : "Save Medical Passport"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ background: "white", borderRadius: 16, boxShadow: "0 2px 16px rgba(0,0,0,0.06)", marginBottom: 20, overflow: "hidden" }}>
+                    <div 
+                      onClick={() => toggleSection("health")}
+                      style={{ padding: "20px 28px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", background: expandedSections.health ? "#f8fafc" : "white" }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <h2 style={{ fontSize: 16, fontWeight: 800, color: "#0f172a", margin: 0 }}>Health & Lifestyle</h2>
+                        {Boolean(riskProfile.onboardingCompleted) && (
+                          <span style={{ background: "#dcfce7", color: "#166534", fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 20 }}>SAVED</span>
+                        )}
+                      </div>
+                      <span style={{ fontSize: 20, transform: expandedSections.health ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}>▾</span>
+                    </div>
+
+                    {expandedSections.health && (
+                      <div style={{ padding: "0 28px 28px", borderTop: "1.5px solid #f1f5f9" }}>
+                        <div style={{ height: 20 }} />
+                        <p style={{ fontSize: 13, color: "#64748b", marginBottom: 18 }}>
+                          This helps personalise risk signals and trend monitoring. It is not a diagnosis. You control whether to consult a clinician.
+                        </p>
+
+                        {!riskProfile.onboardingCompleted && (
+                          <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 12, padding: "12px 14px", marginBottom: 16, color: "#1e3a8a", fontSize: 13, fontWeight: 600 }}>
+                            Complete this section once to enable personalised Early Warning risk signals.
+                          </div>
+                        )}
+
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                          <div>
+                            <label style={label}>Do you smoke?</label>
+                            <select value={riskProfile.smoker === undefined ? "" : riskProfile.smoker ? "yes" : "no"} onChange={(e) => setRisk({ smoker: e.target.value === "" ? undefined : e.target.value === "yes" })} style={inp}>
+                              <option value="">Prefer not to say</option>
+                              <option value="no">No</option>
+                              <option value="yes">Yes</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label style={label}>Known high blood pressure?</label>
+                            <select value={riskProfile.hypertension === undefined ? "" : riskProfile.hypertension ? "yes" : "no"} onChange={(e) => setRisk({ hypertension: e.target.value === "" ? undefined : e.target.value === "yes" })} style={inp}>
+                              <option value="">Prefer not to say</option>
+                              <option value="no">No</option>
+                              <option value="yes">Yes</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label style={label}>Diabetes?</label>
+                            <select value={riskProfile.diabetes === undefined ? "" : riskProfile.diabetes ? "yes" : "no"} onChange={(e) => setRisk({ diabetes: e.target.value === "" ? undefined : e.target.value === "yes" })} style={inp}>
+                              <option value="">Prefer not to say</option>
+                              <option value="no">No</option>
+                              <option value="yes">Yes</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label style={label}>Asthma or chronic lung disease?</label>
+                            <select value={riskProfile.asthmaOrCopd === undefined ? "" : riskProfile.asthmaOrCopd ? "yes" : "no"} onChange={(e) => setRisk({ asthmaOrCopd: e.target.value === "" ? undefined : e.target.value === "yes" })} style={inp}>
+                              <option value="">Prefer not to say</option>
+                              <option value="no">No</option>
+                              <option value="yes">Yes</option>
+                            </select>
+                          </div>
+                          {form.gender === "FEMALE" && (
+                            <div>
+                              <label style={label}>Pregnant (optional)?</label>
+                              <select value={riskProfile.pregnancy === undefined ? "" : riskProfile.pregnancy ? "yes" : "no"} onChange={(e) => setRisk({ pregnancy: e.target.value === "" ? undefined : e.target.value === "yes" })} style={inp}>
+                                <option value="">Prefer not to say</option>
+                                <option value="no">No</option>
+                                <option value="yes">Yes</option>
+                              </select>
+                            </div>
+                          )}
+                          <div>
+                            <label style={label}>Family history of heart disease or stroke?</label>
+                            <select value={riskProfile.familyHistoryCvd === undefined ? "" : riskProfile.familyHistoryCvd ? "yes" : "no"} onChange={(e) => setRisk({ familyHistoryCvd: e.target.value === "" ? undefined : e.target.value === "yes" })} style={inp}>
+                              <option value="">Prefer not to say</option>
+                              <option value="no">No</option>
+                              <option value="yes">Yes</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label style={label}>Activity level</label>
+                            <select value={riskProfile.activityLevel ?? ""} onChange={(e) => setRisk({ activityLevel: (e.target.value || undefined) as RiskProfile["activityLevel"] })} style={inp}>
+                              <option value="">Select</option>
+                              <option value="LOW">Low</option>
+                              <option value="MODERATE">Moderate</option>
+                              <option value="HIGH">High</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label style={label}>Alcohol use</label>
+                            <select value={riskProfile.alcoholUse ?? ""} onChange={(e) => setRisk({ alcoholUse: (e.target.value || undefined) as RiskProfile["alcoholUse"] })} style={inp}>
+                              <option value="">Select</option>
+                              <option value="NONE">None</option>
+                              <option value="LOW">Low</option>
+                              <option value="MODERATE">Moderate</option>
+                              <option value="HIGH">High</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label style={label}>Do you know your cholesterol?</label>
+                            <select value={riskProfile.cholesterolKnown === undefined ? "" : riskProfile.cholesterolKnown ? "yes" : "no"} onChange={(e) => setRisk({ cholesterolKnown: e.target.value === "" ? undefined : e.target.value === "yes", cholesterolValue: e.target.value === "yes" ? riskProfile.cholesterolValue : undefined })} style={inp}>
+                              <option value="">Select</option>
+                              <option value="no">No</option>
+                              <option value="yes">Yes</option>
+                            </select>
+                          </div>
+                          {riskProfile.cholesterolKnown && (
+                            <div>
+                              <label style={label}>Cholesterol (mmol/L)</label>
+                              <input
+                                type="number"
+                                min={2}
+                                max={15}
+                                step="0.1"
+                                value={riskProfile.cholesterolValue ?? ""}
+                                onChange={(e) => setRisk({ cholesterolValue: e.target.value ? Number(e.target.value) : undefined })}
+                                style={inp}
+                              />
+                            </div>
+                          )}
+                        </div>
+
+                        <div style={{ marginTop: 24 }}>
+                          <label style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 13, color: "#0f172a", fontWeight: 600 }}>
+                            <input
+                              type="checkbox"
+                              checked={Boolean(riskProfile.consentAcknowledged)}
+                              onChange={(e) => setRisk({ consentAcknowledged: e.target.checked })}
+                              style={{ marginTop: 3 }}
+                            />
+                            <span>
+                              I understand this feature provides health risk signals, not a diagnosis, and I can choose to consult a clinician for clarification.
+                            </span>
+                          </label>
+                        </div>
+
+                        {riskError && (
+                          <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "12px 16px", marginTop: 14, color: "#dc2626", fontSize: 14 }}>{riskError}</div>
+                        )}
+                        {riskSuccess && (
+                          <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, padding: "12px 16px", marginTop: 14, color: "#166534", fontSize: 14 }}>{riskSuccess}</div>
+                        )}
+
+                        <div style={{ display: "flex", gap: 12, marginTop: 24 }}>
+                          <button
+                            type="button"
+                            onClick={() => handleRiskSubmit()}
+                            disabled={riskSaving}
+                            style={{ flex: 2, padding: "14px", background: riskSaving ? "#94a3b8" : "linear-gradient(135deg,#2563eb,#0ea5e9)", color: "white", border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: riskSaving ? "not-allowed" : "pointer" }}
+                          >
+                            {riskSaving ? "Saving…" : "Save Health Profile"}
+                          </button>
+                          
+                          {!riskProfile.onboardingCompleted && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (confirm("Skip onboarding? You can complete this later in your profile to enable AI risk signals.")) {
+                                  setRiskProfile(prev => ({ ...prev, onboardingCompleted: true }));
+                                  handleRiskSubmit();
+                                }
+                              }}
+                              style={{ flex: 1, padding: "14px", background: "white", color: "#64748b", border: "1.5px solid #e2e8f0", borderRadius: 12, fontSize: 14, fontWeight: 600, cursor: "pointer" }}
+                            >
+                              Skip for now
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </form>
           </div>
         </div>

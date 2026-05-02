@@ -23,7 +23,9 @@ import triageCasesRoutes from './routes/triageCases';
 import triageCaseReviewRoutes from './routes/triageCaseReview';
 import nurseRoutes from './routes/nurse';
 import patientRoutes from './routes/patient';
+import profileRoutes from './routes/profile';
 import terraRoutes from './routes/terra';
+import rookRoutes from './routes/rook';
 import consentRoutes from './routes/consent';
 import healthConnectRoutes from './routes/healthConnect';
 
@@ -32,6 +34,7 @@ import { errorHandler } from './middleware/errorHandler';
 import { rateLimiter } from './middleware/rateLimiter';
 import { authMiddleware } from './middleware/auth';
 import { attachRateLimitUserKey } from './middleware/rateLimitUserKey';
+import { attachRequestId } from './middleware/requestId';
 
 // Import services
 import { initializeRedis } from './services/redis';
@@ -84,12 +87,13 @@ app.use(cors({
   origin: corsOrigins,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'X-Request-Id'],
 }));
 
 // Compression and logging
 app.use(compression());
-app.use(morgan(':method :url :status :res[content-length] - :response-time ms', {
+app.use(attachRequestId);
+app.use(morgan(':req[x-request-id] :method :url :status :res[content-length] - :response-time ms', {
   stream: {
     write: (message: string) => {
       console.log(message.replace(/\?[^\s]+/, '?[REDACTED]').trim());
@@ -97,8 +101,13 @@ app.use(morgan(':method :url :status :res[content-length] - :response-time ms', 
   },
 }));
 
-// Body parsing
-app.use(express.json({ limit: '10mb' }));
+// Body parsing with raw body capture for webhook verification
+app.use(express.json({
+  limit: '10mb',
+  verify: (req: any, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Rate limiting
@@ -131,7 +140,9 @@ app.use('/api/triage-cases', authMiddleware, triageCasesRoutes);
 app.use('/api/triage-review', triageCaseReviewRoutes);
 app.use('/api/nurse', authMiddleware, nurseRoutes);
 app.use('/api/patient', authMiddleware, patientRoutes);
+app.use('/api/profile', profileRoutes);
 app.use('/api/terra', terraRoutes);
+app.use('/api/rook', rookRoutes);
 app.use('/api/consent', authMiddleware, consentRoutes);  // moved from /api/patient/consent to avoid prefix conflict
 app.use('/api/biometrics/health-connect', healthConnectRoutes);
 app.use('/webhooks', webhookRoutes);

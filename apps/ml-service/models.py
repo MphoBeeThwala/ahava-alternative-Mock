@@ -56,6 +56,16 @@ class FusionOutput(BaseModel):
     alert_triggered: bool = False
     alert_message: Optional[str] = None
 
+class UncertaintyProfile(BaseModel):
+    score: float = Field(..., ge=0, le=1, description="Overall uncertainty score")
+    reasons: List[str] = Field(default_factory=list, description="Machine-readable uncertainty factors")
+
+class ClinicalProvenance(BaseModel):
+    evidence_sources: List[str] = Field(default_factory=list, description="Approved evidence sources used by this decision")
+    clinical_basis: List[str] = Field(default_factory=list, description="Deterministic/clinical rule families applied")
+    model_version: str = Field(..., description="ML engine version string")
+    decision_trace_id: str = Field(..., description="Deterministic trace id for auditability")
+
 class EarlyWarningSummary(BaseModel):
     user_id: str
     processed_at: datetime
@@ -82,3 +92,6 @@ class EarlyWarningSummary(BaseModel):
     alert_level: AlertLevel
     anomalies: List[str] = []
     recommendations: List[str] = []
+    uncertainty: UncertaintyProfile
+    provenance: ClinicalProvenance
+    requires_clinician_review: bool = False

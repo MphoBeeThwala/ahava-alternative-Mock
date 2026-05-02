@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { useNavigate } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { useAuth } from "@/react-app/lib/auth-context";
 
 export default function AuthCallbackPage() {

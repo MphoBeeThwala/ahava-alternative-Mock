@@ -15,11 +15,12 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { user, logout, isAuthenticated } = useAuth();
+  const { user, logout, isAuthenticated, refreshUser } = useAuth();
   const pathname = usePathname();
   const [verifyBannerDismissed, setVerifyBannerDismissed] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
   const [resendSent, setResendSent] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const handleResendVerification = async () => {
     if (!user?.email) return;
@@ -35,7 +36,41 @@ export default function DashboardLayout({
     }
   };
 
+  const handleManualVerify = async () => {
+     setResendLoading(true);
+     try {
+       await authApi.manualVerify();
+       setVerifyBannerDismissed(true);
+       if (refreshUser) await refreshUser();
+     } catch {
+       // fallback if API fails
+       setVerifyBannerDismissed(true);
+     } finally {
+       setResendLoading(false);
+     }
+   };
+
   const showVerifyBanner = isAuthenticated && user && !(user as { isVerified?: boolean }).isVerified && !verifyBannerDismissed;
+  const riskProfile = user?.riskProfile;
+  const profileObject = (riskProfile && typeof riskProfile === "object") ? (riskProfile as Record<string, unknown>) : {};
+  const medicalPassport = (profileObject["medicalPassport"] && typeof profileObject["medicalPassport"] === "object")
+    ? (profileObject["medicalPassport"] as Record<string, unknown>)
+    : {};
+  const csvHasValue = (v: unknown): boolean => Array.isArray(v) && v.some((i) => typeof i === "string" && i.trim().length > 0);
+  const passportChecks = [
+    Boolean(user?.firstName && user?.lastName),
+    Boolean(user?.phone),
+    Boolean(user?.dateOfBirth),
+    Boolean(user?.gender),
+    typeof medicalPassport["emergencyContactName"] === "string" && medicalPassport["emergencyContactName"].trim().length > 0,
+    typeof medicalPassport["emergencyContactPhone"] === "string" && medicalPassport["emergencyContactPhone"].trim().length > 0,
+    typeof medicalPassport["bloodType"] === "string" && medicalPassport["bloodType"].trim().length > 0,
+    csvHasValue(medicalPassport["allergies"]),
+    csvHasValue(medicalPassport["chronicConditions"]),
+    csvHasValue(medicalPassport["currentMedications"]),
+  ];
+  const passportCompletionPercent = Math.round((passportChecks.filter(Boolean).length / passportChecks.length) * 100);
+  const showOnboardingReminder = isAuthenticated && user?.role === "PATIENT" && passportCompletionPercent < 80;
 
   const getDashboardPath = () => {
     if (!user) return "/";
@@ -96,35 +131,80 @@ export default function DashboardLayout({
 
   return (
     <div className="flex min-h-screen bg-[var(--background)]">
+      {/* Mobile Sidebar Overlay */}
+      {isSidebarOpen && (
+        <div 
+          className="fixed inset-0 z-40 bg-black/50 lg:hidden" 
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
+      {/* Sidebar */}
       <aside
-        className="flex w-64 flex-col"
+        className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col transition-transform lg:static lg:translate-x-0 ${
+          isSidebarOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
         style={{ background: 'white', borderRight: '1px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}
       >
         {/* Brand header */}
-        <div className="flex items-center gap-3 px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
-          <div style={{ width: 32, height: 32, borderRadius: 9, background: `linear-gradient(135deg,${accent},#059669)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, flexShrink: 0 }}>⚕️</div>
-          <Link href={dashboardPath} className="font-bold text-[var(--foreground)] tracking-tight text-sm leading-tight" aria-label="Ahava Healthcare home">
-            Ahava<br /><span style={{ color: accent, fontWeight: 600 }}>Healthcare</span>
-          </Link>
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
+          <div className="flex items-center gap-3">
+            <div style={{ width: 32, height: 32, borderRadius: 9, background: `linear-gradient(135deg,${accent},#059669)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, flexShrink: 0 }}>⚕️</div>
+            <Link href={dashboardPath} className="font-bold text-[var(--foreground)] tracking-tight text-sm leading-tight" aria-label="Ahava Healthcare home">
+              Ahava<br /><span style={{ color: accent, fontWeight: 600 }}>Healthcare</span>
+            </Link>
+          </div>
+          {/* Close button for mobile */}
+          <button 
+            className="p-1 lg:hidden text-[var(--muted)]"
+            onClick={() => setIsSidebarOpen(false)}
+          >
+            ✕
+          </button>
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 p-3 space-y-1" aria-label="Dashboard navigation">
-          <Link href={dashboardPath} className={linkClass(pathname === dashboardPath)} aria-current={pathname === dashboardPath ? "page" : undefined}>
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto" aria-label="Dashboard navigation">
+          <Link 
+            href={dashboardPath} 
+            className={linkClass(pathname === dashboardPath)} 
+            aria-current={pathname === dashboardPath ? "page" : undefined}
+            onClick={() => setIsSidebarOpen(false)}
+          >
             <span aria-hidden>🏠</span>{getDashboardLabel()}
           </Link>
           {user.role === "PATIENT" && (
             <>
-              <Link href="/patient/book-visit" className={linkClass(pathname.startsWith("/patient/book-visit") || pathname.startsWith("/patient/visit-tracker"))} aria-current={pathname.startsWith("/patient/book-visit") ? "page" : undefined}>
+              <Link 
+                href="/patient/book-visit" 
+                className={linkClass(pathname.startsWith("/patient/book-visit") || pathname.startsWith("/patient/visit-tracker"))} 
+                aria-current={pathname.startsWith("/patient/book-visit") ? "page" : undefined}
+                onClick={() => setIsSidebarOpen(false)}
+              >
                 <span aria-hidden>📅</span>Book a Visit
               </Link>
-              <Link href="/patient/early-warning" className={linkClass(pathname === "/patient/early-warning")} aria-current={pathname === "/patient/early-warning" ? "page" : undefined}>
-                <span aria-hidden>⚠️</span>Early Warning (ML)
+              <Link 
+                href="/patient/early-warning" 
+                className={linkClass(pathname === "/patient/early-warning")} 
+                aria-current={pathname === "/patient/early-warning" ? "page" : undefined}
+                onClick={() => setIsSidebarOpen(false)}
+              >
+                <span aria-hidden>⚠️</span>Early Warning
               </Link>
-              <Link href="/patient/ai-doctor" className={linkClass(pathname === "/patient/ai-doctor")} aria-current={pathname === "/patient/ai-doctor" ? "page" : undefined}>
+              <Link 
+                href="/patient/ai-doctor" 
+                className={linkClass(pathname === "/patient/ai-doctor")} 
+                aria-current={pathname === "/patient/ai-doctor" ? "page" : undefined}
+                onClick={() => setIsSidebarOpen(false)}
+              >
                 <span aria-hidden>🩺</span>AI Doctor
               </Link>
-              <Link href="/patient/wearable" className={linkClass(pathname.startsWith("/patient/wearable"))} aria-current={pathname.startsWith("/patient/wearable") ? "page" : undefined}>
+              <Link 
+                href="/patient/wearable" 
+                className={linkClass(pathname.startsWith("/patient/wearable"))} 
+                aria-current={pathname.startsWith("/patient/wearable") ? "page" : undefined}
+                onClick={() => setIsSidebarOpen(false)}
+              >
                 <span aria-hidden>⌚</span>Smartwatch
               </Link>
             </>
@@ -140,7 +220,12 @@ export default function DashboardLayout({
             </div>
           )}
           {/* Profile — all roles */}
-          <Link href="/profile" className={linkClass(pathname === "/profile")} aria-current={pathname === "/profile" ? "page" : undefined}>
+          <Link 
+            href="/profile" 
+            className={linkClass(pathname === "/profile")} 
+            aria-current={pathname === "/profile" ? "page" : undefined}
+            onClick={() => setIsSidebarOpen(false)}
+          >
             <span aria-hidden>👤</span>My Profile
           </Link>
         </nav>
@@ -166,7 +251,7 @@ export default function DashboardLayout({
 
           <button
             type="button"
-            onClick={() => logout()}
+            onClick={() => { void logout(); }}
             className="nav-link w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-[var(--muted)] hover:bg-red-50 hover:text-red-600"
             aria-label="Log out"
           >
@@ -176,7 +261,57 @@ export default function DashboardLayout({
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto" id="main-content" aria-label="Main content">
+      <main className="flex-1 overflow-x-hidden" id="main-content" aria-label="Main content">
+        {/* Mobile Header */}
+        <header className="sticky top-0 z-30 flex items-center justify-between border-b bg-white px-4 py-3 lg:hidden" style={{ borderColor: 'var(--border)' }}>
+          <button 
+            className="p-2 text-[var(--muted)]"
+            onClick={() => setIsSidebarOpen(true)}
+            aria-label="Open sidebar"
+          >
+            ☰
+          </button>
+          <div className="flex items-center gap-2">
+            <div style={{ width: 24, height: 24, borderRadius: 6, background: `linear-gradient(135deg,${accent},#059669)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12 }}>⚕️</div>
+            <span className="text-xs font-bold text-[var(--foreground)]">Ahava</span>
+          </div>
+          <div style={{ width: 32 }}></div> {/* Spacer for alignment */}
+        </header>
+        {showOnboardingReminder && !pathname.startsWith("/profile") && (
+          <div
+            role="status"
+            style={{
+              background: "#eff6ff",
+              borderBottom: "1px solid #bfdbfe",
+              padding: "10px 20px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              flexWrap: "wrap",
+              fontSize: 13,
+            }}
+          >
+              <span style={{ color: "#1e3a8a", display: "flex", alignItems: "center", gap: 8 }}>
+                <span>🩺</span>
+              <span><strong>Finish your medical passport</strong> ({passportCompletionPercent}% complete) to improve personalised risk surveillance.</span>
+            </span>
+            <Link
+              href="/profile"
+              style={{
+                background: "#2563eb",
+                color: "white",
+                borderRadius: 7,
+                padding: "5px 12px",
+                fontSize: 12,
+                fontWeight: 700,
+                textDecoration: "none",
+              }}
+            >
+              Complete Passport
+            </Link>
+          </div>
+        )}
         {showVerifyBanner && (
           <div role="alert" style={{ background: '#fffbeb', borderBottom: '1px solid #fde68a', padding: '10px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', fontSize: 13 }}>
             <span style={{ color: '#92400e', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -187,14 +322,24 @@ export default function DashboardLayout({
               {resendSent ? (
                 <span style={{ color: '#059669', fontSize: 12, fontWeight: 600 }}>✓ Email sent!</span>
               ) : (
-                <button
-                  type="button"
-                  onClick={handleResendVerification}
-                  disabled={resendLoading}
-                  style={{ background: '#f59e0b', border: 'none', color: 'white', borderRadius: 7, padding: '5px 12px', fontSize: 12, fontWeight: 700, cursor: resendLoading ? 'not-allowed' : 'pointer', opacity: resendLoading ? 0.7 : 1 }}
-                >
-                  {resendLoading ? 'Sending…' : 'Resend email'}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={handleResendVerification}
+                    disabled={resendLoading}
+                    style={{ background: '#f59e0b', border: 'none', color: 'white', borderRadius: 7, padding: '5px 12px', fontSize: 12, fontWeight: 700, cursor: resendLoading ? 'not-allowed' : 'pointer', opacity: resendLoading ? 0.7 : 1 }}
+                  >
+                    {resendLoading ? 'Sending…' : 'Resend email'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleManualVerify}
+                    disabled={resendLoading}
+                    style={{ background: 'white', border: '1px solid #d97706', color: '#d97706', borderRadius: 7, padding: '4px 10px', fontSize: 11, fontWeight: 700, cursor: resendLoading ? 'not-allowed' : 'pointer' }}
+                  >
+                    Verify Now (Trial)
+                  </button>
+                </>
               )}
               <button
                 type="button"

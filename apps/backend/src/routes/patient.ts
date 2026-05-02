@@ -1,12 +1,17 @@
 import { Router } from 'express';
 import { AuthenticatedRequest, authMiddleware } from '../middleware/auth';
 import { rateLimiter } from '../middleware/rateLimiter';
+import { idempotencyMiddleware } from '../middleware/idempotency';
+import { aiTriageBudgetMiddleware } from '../middleware/aiTriageBudget';
 import axios from 'axios';
 import Joi from 'joi';
 import { processBiometricReading, getMonitoringSummary, detectEarlyWarningSigns } from '../services/monitoring';
 import { analyzeSymptoms } from '../services/aiTriage';
 import { startDemoStream } from '../services/demoStream';
+import { mlServiceHeaders } from '../services/mlServiceAuth';
 import prisma from '../lib/prisma';
+import { randomUUID } from 'crypto';
+import { hashValue, writeClinicalAudit } from '../services/clinicalAudit';
 
 const router: Router = Router();
 
@@ -50,7 +55,7 @@ const submitTriageWithBiometricsSchema = Joi.object({
 });
 
 // Submit biometrics (from wearable or manual entry)
-router.post('/biometrics', rateLimiter, authMiddleware, async (req: AuthenticatedRequest, res, next) => {
+router.post('/biometrics', rateLimiter, authMiddleware, idempotencyMiddleware({ scope: 'patient-biometrics' }), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { error, value } = submitBiometricsSchema.validate(req.body);
     if (error) {
@@ -224,7 +229,10 @@ router.get('/biometrics/history', authMiddleware, async (req: AuthenticatedReque
     try {
       const scoreResponse = await axios.get(
         `${ML_SERVICE_URL}/readiness-score/${userId}`,
-        { timeout: 5000 }
+        {
+          timeout: 5000,
+          headers: mlServiceHeaders(),
+        }
       );
       readinessScore = scoreResponse.data.score;
       baselineStatus = scoreResponse.data.baseline_status;
@@ -413,7 +421,10 @@ router.get('/early-warning', authMiddleware, async (req: AuthenticatedRequest, r
         // 1. Try the cached summary first
         const summaryRes = await axios.get(
           `${ML_URL}/early-warning/summary/${encodeURIComponent(userId)}`,
-          { timeout: 8000 }
+          {
+            timeout: 8000,
+            headers: mlServiceHeaders(),
+          }
         );
         mlData = summaryRes.data;
       } catch (summaryErr: any) {
@@ -454,13 +465,19 @@ router.get('/early-warning', authMiddleware, async (req: AuthenticatedRequest, r
                   ecg_rhythm: ['regular', 'irregular', 'unknown'].includes(rb.ecgRhythm) ? rb.ecgRhythm : 'unknown',
                   temperature_trend: ['normal', 'elevated_single_day', 'elevated_over_3_days'].includes(rb.temperatureTrend) ? rb.temperatureTrend : 'normal',
                 },
-                { timeout: 3000 }
+                {
+                  timeout: 3000,
+                  headers: mlServiceHeaders(),
+                }
               ).catch(() => { /* ignore individual ingest failures */ });
             }
             const analyzeRes = await axios.post(
               `${ML_URL}/early-warning/analyze?user_id=${encodeURIComponent(userId)}`,
               { biometrics, context },
-              { timeout: 10000 }
+              {
+                timeout: 10000,
+                headers: mlServiceHeaders(),
+              }
             );
             mlData = analyzeRes.data;
           } catch (backfillErr: any) {
@@ -555,6 +572,48 @@ router.get('/early-warning', authMiddleware, async (req: AuthenticatedRequest, r
       }
     }
 
+    // Safety envelope: enforce uncertainty/provenance contract even on legacy/fallback payloads.
+    if (!(mlData as any).uncertainty) {
+      (mlData as any).uncertainty = {
+        score: (mlData as any)._source === 'db_rules' ? 0.55 : 0.4,
+        reasons: (mlData as any)._source === 'db_rules' ? ['ML_SERVICE_UNAVAILABLE_FALLBACK'] : [],
+      };
+    }
+    if (!(mlData as any).provenance) {
+      (mlData as any).provenance = {
+        evidence_sources: ['Local rule-based fallback'],
+        clinical_basis: ['Deterministic threshold checks'],
+        model_version: (mlData as any)._source === 'db_rules' ? 'fallback-rules-v1' : 'unknown',
+        decision_trace_id: hashValue(`${userId}:${Date.now()}`).slice(0, 24),
+      };
+    }
+    const uncertaintyScore = Number((mlData as any)?.uncertainty?.score ?? 0.5);
+    (mlData as any).requires_clinician_review = Boolean(
+      (mlData as any)?.requires_clinician_review
+      || uncertaintyScore >= 0.45
+      || (mlData as any)?.alert_level === 'RED'
+      || (mlData as any)?.alert_level === 'YELLOW'
+    );
+
+    const responseSource = String((mlData as any)?._source ?? 'ml_service');
+    await writeClinicalAudit({
+      userId,
+      userRole: req.user?.role,
+      action: 'EARLY_WARNING_ASSESSMENT',
+      resource: 'early_warning_summary',
+      resourceId: userId,
+      metadata: {
+        source: responseSource,
+        alertLevel: (mlData as any)?.alert_level ?? 'UNKNOWN',
+        riskLevel: (mlData as any)?.riskLevel ?? 'UNKNOWN',
+        anomalyCount: Array.isArray((mlData as any)?.anomalies) ? (mlData as any).anomalies.length : 0,
+        alertTriggered: Boolean((mlData as any)?.fusion?.alert_triggered),
+        uncertaintyScore,
+        requiresClinicianReview: Boolean((mlData as any)?.requires_clinician_review),
+        decisionTraceId: (mlData as any)?.provenance?.decision_trace_id ?? null,
+      },
+    });
+
     res.json({
       success: true,
       data: mlData,
@@ -580,13 +639,31 @@ router.get('/early-warning', authMiddleware, async (req: AuthenticatedRequest, r
   }
 });
 
-// Update patient risk profile (smoker, hypertension) for CVD algorithms
 const riskProfileSchema = Joi.object({
   smoker: Joi.boolean().optional(),
   hypertension: Joi.boolean().optional(),
+  diabetes: Joi.boolean().optional(),
+  asthmaOrCopd: Joi.boolean().optional(),
+  pregnancy: Joi.boolean().optional(),
+  familyHistoryCvd: Joi.boolean().optional(),
+  activityLevel: Joi.string().valid('LOW', 'MODERATE', 'HIGH').optional(),
+  alcoholUse: Joi.string().valid('NONE', 'LOW', 'MODERATE', 'HIGH').optional(),
   cholesterolKnown: Joi.boolean().optional(),
   cholesterolValue: Joi.number().min(2).max(15).optional(),
-});
+  consentAcknowledged: Joi.boolean().optional(),
+  onboardingCompleted: Joi.boolean().optional(),
+  surveyVersion: Joi.number().integer().min(1).max(10).optional(),
+  passportCompletionPercent: Joi.number().integer().min(0).max(100).optional(),
+  nextPassportQuestion: Joi.string().max(300).optional(),
+  medicalPassport: Joi.object({
+    emergencyContactName: Joi.string().trim().allow('', null).optional(),
+    emergencyContactPhone: Joi.string().trim().allow('', null).optional(),
+    bloodType: Joi.string().trim().allow('', null).optional(),
+    allergies: Joi.array().items(Joi.string().trim().max(120)).optional(),
+    chronicConditions: Joi.array().items(Joi.string().trim().max(120)).optional(),
+    currentMedications: Joi.array().items(Joi.string().trim().max(120)).optional(),
+  }).optional(),
+}).min(1);
 router.patch('/risk-profile', authMiddleware, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { error, value } = riskProfileSchema.validate(req.body);
@@ -594,18 +671,55 @@ router.patch('/risk-profile', authMiddleware, async (req: AuthenticatedRequest, 
       return res.status(400).json({ error: error.details[0].message });
     }
     const userId = req.user!.id;
+    const current = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { dateOfBirth: true, gender: true, riskProfile: true },
+    });
+
+    const merged = {
+      ...((current?.riskProfile as Record<string, unknown> | null) ?? {}),
+      ...(value as Record<string, unknown>),
+      updatedAt: new Date().toISOString(),
+    };
+
     await prisma.user.update({
       where: { id: userId },
-      data: { riskProfile: value as object },
+      data: { riskProfile: merged as object },
     });
-    res.json({ success: true, riskProfile: value });
+
+    const ML_URL = (process.env.ML_SERVICE_URL ?? '').replace(/\/$/, '');
+    const mlServiceAvailable = !!ML_URL && !ML_URL.includes('localhost');
+    if (mlServiceAvailable) {
+      const age = current?.dateOfBirth
+        ? Math.floor((Date.now() - new Date(current.dateOfBirth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
+        : 50;
+      const context = {
+        age: Math.max(18, Math.min(120, age)),
+        smoker: Boolean((merged as any).smoker),
+        hypertension: Boolean((merged as any).hypertension),
+        cholesterol_known: Boolean((merged as any).cholesterolKnown),
+        cholesterol_mmol_per_L: (merged as any).cholesterolValue ?? null,
+      };
+      axios
+        .put(
+          `${ML_URL}/early-warning/context/${encodeURIComponent(userId)}`,
+          context,
+          {
+            timeout: 8000,
+            headers: mlServiceHeaders(),
+          }
+        )
+        .catch(() => {});
+    }
+
+    res.json({ success: true, riskProfile: merged });
   } catch (e) {
     next(e);
   }
 });
 
 // Enhanced triage with biometrics
-router.post('/triage', rateLimiter, authMiddleware, async (req: AuthenticatedRequest, res, next) => {
+router.post('/triage', rateLimiter, authMiddleware, aiTriageBudgetMiddleware, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { error, value } = submitTriageWithBiometricsSchema.validate(req.body);
     if (error) {
@@ -613,9 +727,26 @@ router.post('/triage', rateLimiter, authMiddleware, async (req: AuthenticatedReq
     }
 
     const { symptoms, imageBase64, biometrics } = value;
+    const patientId = req.user!.id;
+    const caseId = randomUUID();
+    const vitalsSnapshot = biometrics ? {
+      heartRateResting: biometrics.heartRateResting ?? biometrics.heartRate ?? null,
+      oxygenSaturation: biometrics.oxygenSaturation ?? null,
+      respiratoryRate: biometrics.respiratoryRate ?? null,
+      temperature: biometrics.temperature ?? null,
+      bloodPressureSystolic: biometrics.bloodPressure?.systolic ?? null,
+      bloodPressureDiastolic: biometrics.bloodPressure?.diastolic ?? null,
+      hrvRmssd: biometrics.hrvRmssd ?? null,
+    } : undefined;
 
     // Call AI triage service directly (avoids network self-call)
-    const triageResult = await analyzeSymptoms({ symptoms, imageBase64 });
+    const triageResult = await analyzeSymptoms({
+      symptoms,
+      imageBase64,
+      patientId,
+      caseId,
+      vitalsSnapshot,
+    });
 
     // If biometrics provided, enhance triage with biometric context
     let biometricContext = null;
@@ -651,12 +782,30 @@ router.post('/triage', rateLimiter, authMiddleware, async (req: AuthenticatedReq
 
       biometricContext = biometricAnalysis;
 
-      // Adjust triage level if biometrics indicate urgency
+      // Conservative override: never reduce urgency, only escalate if abnormalities exist.
       if (biometricAnalysis.abnormal.length > 0 && triageResult.triageLevel > 2) {
-        triageResult.triageLevel = Math.max(1, triageResult.triageLevel - 1) as any; // Increase urgency
-        triageResult.reasoning += ` Note: Biometric readings show ${biometricAnalysis.abnormal.join(', ')}.`;
+        triageResult.triageLevel = Math.max(1, triageResult.triageLevel - 1) as any;
+        triageResult.reasoning += ` Note: Additional biometric red flags: ${biometricAnalysis.abnormal.join(', ')}.`;
+        triageResult.requiresDoctorReview = true;
       }
     }
+
+    await writeClinicalAudit({
+      userId: patientId,
+      userRole: req.user?.role,
+      action: 'AI_TRIAGE_PREVIEW',
+      resource: 'patient_triage',
+      resourceId: caseId,
+      metadata: {
+        triageLevel: triageResult.triageLevel,
+        confidence: triageResult.confidence,
+        requiresDoctorReview: triageResult.requiresDoctorReview,
+        uncertaintyFlags: triageResult.uncertaintyFlags,
+        evidenceSources: triageResult.evidenceSources,
+        symptomsHash: hashValue(symptoms),
+        hasBiometrics: Boolean(biometrics),
+      },
+    });
 
     res.json({
       success: true,
@@ -806,4 +955,3 @@ router.post('/demo/start-stream', authMiddleware, async (req: AuthenticatedReque
 });
 
 export default router;
-

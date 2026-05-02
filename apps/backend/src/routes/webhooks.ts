@@ -3,12 +3,14 @@ import { PaymentStatus } from '@prisma/client';
 import { Request, Response, NextFunction } from 'express';
 import { notifyPaymentReceipt } from '../services/notifications';
 import { handleTerraWebhook } from './terra';
+import { handleRookWebhook } from './rook';
+import { webhookRateLimiter } from '../middleware/rateLimiter';
 import prisma from '../lib/prisma';
 
 const router: Router = Router();
 
 // Payment webhook (e.g. Paystack: event=charge.success, data.reference=paystack_reference)
-router.post('/payment', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/payment', webhookRateLimiter, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const event = req.body?.event as string | undefined;
     const reference = req.body?.data?.reference as string | undefined;
@@ -57,7 +59,10 @@ router.post('/payment', async (req: Request, res: Response, next: NextFunction) 
 });
 
 // Terra wearable data webhook
-router.post('/terra', handleTerraWebhook);
+router.post('/terra', webhookRateLimiter, handleTerraWebhook);
+
+// ROOK wearable data webhook
+router.post('/rook', webhookRateLimiter, handleRookWebhook);
 
 // List webhook events (for debugging; optional)
 router.get('/', async (req: Request, res: Response, next: NextFunction) => {

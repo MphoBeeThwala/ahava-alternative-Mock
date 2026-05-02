@@ -60,9 +60,10 @@ export default function NurseDashboard() {
     }, []);
 
     useEffect(() => {
+        if (user?.role !== 'NURSE') return;
         loadProfile();
         loadVisits();
-    }, [loadProfile, loadVisits]);
+    }, [user, loadProfile, loadVisits]);
 
     const toggleAvailability = async () => {
         setLoading(true);

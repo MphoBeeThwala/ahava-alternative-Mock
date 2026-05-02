@@ -4,35 +4,15 @@
  */
 
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate } from "react-router-dom";
 import { getApiBase } from "@/react-app/lib/native";
-
-const TOKEN_KEY = "ahava_access_token";
-const REFRESH_KEY = "ahava_refresh_token";
-
-/** Read the stored access token (may be null) */
-export function getAccessToken(): string | null {
-  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
-}
+import { getAccessToken, saveTokens, clearTokens } from "./tokenManager";
+import { apiCall } from "./apiInterceptor";
 
 /** Bearer Authorization header for use in any fetch call */
 export function getAuthHeaders(): Record<string, string> {
   const token = getAccessToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
-function saveTokens(access: string, refresh: string) {
-  try {
-    localStorage.setItem(TOKEN_KEY, access);
-    localStorage.setItem(REFRESH_KEY, refresh);
-  } catch {}
-}
-
-function clearTokens() {
-  try {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(REFRESH_KEY);
-  } catch {}
 }
 
 interface User {
@@ -48,6 +28,7 @@ interface User {
 interface AuthContextType {
   user: User | null;
   loading: boolean;
+  authReady: boolean;
   error: string | null;
   login: (email: string, password: string) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
@@ -61,40 +42,57 @@ const AuthContext = createContext<AuthContextType | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authReady, setAuthReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch current user on mount
+  // Validate auth state before rendering any routes
   useEffect(() => {
-    fetchUser();
+    validateAuthState();
   }, []);
+
+  const validateAuthState = async () => {
+    console.log("[Auth] Validating auth state before rendering...");
+    try {
+      const token = getAccessToken();
+      if (!token) {
+        console.log("[Auth] No token found, auth ready");
+        setAuthReady(true);
+        setLoading(false);
+        return;
+      }
+
+      // Try to validate current token by fetching user
+      await fetchUser();
+      console.log("[Auth] Auth validation completed");
+    } catch (error) {
+      console.error("[Auth] Auth validation failed:", error);
+      clearTokens();
+      setUser(null);
+    } finally {
+      setAuthReady(true);
+      setLoading(false);
+    }
+  };
 
   const fetchUser = async () => {
     try {
-      setLoading(true);
       const token = getAccessToken();
       if (!token) {
         setUser(null);
         return;
       }
-      const response = await fetch(`${getApiBase()}/api/auth/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (response.ok) {
-        const data = await response.json() as { user: any };
-        if (data.user) {
-          setUser({
-            id: data.user.id,
-            email: data.user.email,
-            firstName: data.user.firstName ?? "",
-            lastName: data.user.lastName ?? "",
-            name: `${data.user.firstName ?? ""} ${data.user.lastName ?? ""}`.trim(),
-            role: data.user.role ?? "PATIENT",
-            emailVerified: data.user.isVerified ?? false,
-          });
-        } else {
-          clearTokens();
-          setUser(null);
-        }
+      
+      const data = await apiCall<{ user: any }>(`${getApiBase()}/api/auth/me`);
+      if (data.user) {
+        setUser({
+          id: data.user.id,
+          email: data.user.email,
+          firstName: data.user.firstName ?? "",
+          lastName: data.user.lastName ?? "",
+          name: `${data.user.firstName ?? ""} ${data.user.lastName ?? ""}`.trim(),
+          role: data.user.role ?? "PATIENT",
+          emailVerified: data.user.isVerified ?? false,
+        });
       } else {
         clearTokens();
         setUser(null);
@@ -103,8 +101,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.error("Failed to fetch user:", err);
       clearTokens();
       setUser(null);
-    } finally {
-      setLoading(false);
+      throw err;
     }
   };
 
@@ -113,14 +110,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setError(null);
       setLoading(true);
 
-      const response = await fetch(`${getApiBase()}/api/auth/login`, {
+      const data = await apiCall<any>(`${getApiBase()}/api/auth/login`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
-
-      const data = await response.json() as any;
-      if (!response.ok) throw new Error(data.error || "Login failed");
 
       saveTokens(data.accessToken, data.refreshToken);
       setUser({
@@ -170,14 +163,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const firstName = parts[0] ?? name;
       const lastName = (parts.slice(1).join(" ") || parts[0]) ?? "";
 
-      const response = await fetch(`${getApiBase()}/api/auth/register`, {
+      const data = await apiCall<any>(`${getApiBase()}/api/auth/register`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password, firstName, lastName, role }),
       });
-
-      const data = await response.json() as any;
-      if (!response.ok) throw new Error(data.error || "Signup failed");
 
       saveTokens(data.accessToken, data.refreshToken);
       setUser({
@@ -201,12 +190,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = async () => {
     try {
       setError(null);
-      const token = getAccessToken();
-      await fetch(`${getApiBase()}/api/auth/logout`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...( token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ refreshToken: localStorage.getItem("ahava_refresh_token") }),
-      }).catch(() => {});
+      const refreshToken = localStorage.getItem("ahava_refresh_token");
+      if (refreshToken) {
+        await apiCall(`${getApiBase()}/api/auth/logout`, {
+          method: "POST",
+          body: JSON.stringify({ refreshToken }),
+        }).catch(() => {});
+      }
       clearTokens();
       setUser(null);
     } catch (err) {
@@ -224,6 +214,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       value={{
         user,
         loading,
+        authReady,
         error,
         login,
         loginWithGoogle,

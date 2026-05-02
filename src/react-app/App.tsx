@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/react-app/lib/auth-context";
 import ProtectedLayout from "@/react-app/components/ProtectedLayout";
 
@@ -36,48 +36,67 @@ function RoleGuard({ roles, children }: { roles: string[]; children: React.React
   return <>{children}</>;
 }
 
+function AuthGuard({ children }: { children: React.ReactNode }) {
+  const { authReady } = useAuth();
+
+  if (!authReady) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-[#004aad] to-[#0066cc] flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-white mx-auto mb-4"></div>
+          <p className="text-white text-lg">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+}
+
 function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          {/* Public Routes */}
-          <Route path="/" element={<Home />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
-          <Route path="/auth/callback" element={<AuthCallback />} />
+      <AuthGuard>
+        <BrowserRouter>
+          <Routes>
+            {/* Public Routes */}
+            <Route path="/" element={<Home />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
+            <Route path="/auth/callback" element={<AuthCallback />} />
 
-          {/* Protected Routes */}
-          <Route element={<ProtectedLayout />}>
-            <Route path="/onboarding" element={<Onboarding />} />
+            {/* Protected Routes */}
+            <Route element={<ProtectedLayout />}>
+              <Route path="/onboarding" element={<Onboarding />} />
 
-            {/* Role-gated dashboards */}
-            <Route path="/patient/dashboard" element={
-              <RoleGuard roles={["PATIENT", "ADMIN"]}><PatientDashboard /></RoleGuard>
-            } />
-            <Route path="/nurse/dashboard" element={
-              <RoleGuard roles={["NURSE", "ADMIN"]}><NurseDashboard /></RoleGuard>
-            } />
-            <Route path="/doctor/dashboard" element={
-              <RoleGuard roles={["DOCTOR", "ADMIN"]}><DoctorDashboard /></RoleGuard>
-            } />
-            <Route path="/admin/dashboard" element={
-              <RoleGuard roles={["ADMIN"]}><AdminDashboard /></RoleGuard>
-            } />
+              {/* Role-gated dashboards */}
+              <Route path="/patient/dashboard" element={
+                <RoleGuard roles={["PATIENT", "ADMIN"]}><PatientDashboard /></RoleGuard>
+              } />
+              <Route path="/nurse/dashboard" element={
+                <RoleGuard roles={["NURSE", "ADMIN"]}><NurseDashboard /></RoleGuard>
+              } />
+              <Route path="/doctor/dashboard" element={
+                <RoleGuard roles={["DOCTOR", "ADMIN"]}><DoctorDashboard /></RoleGuard>
+              } />
+              <Route path="/admin/dashboard" element={
+                <RoleGuard roles={["ADMIN"]}><AdminDashboard /></RoleGuard>
+              } />
 
-            {/* Patient: Diagnostic Vault */}
-            <Route path="/vault" element={
-              <RoleGuard roles={["PATIENT", "ADMIN"]}><DiagnosticVault /></RoleGuard>
-            } />
+              {/* Patient: Diagnostic Vault */}
+              <Route path="/vault" element={
+                <RoleGuard roles={["PATIENT", "ADMIN"]}><DiagnosticVault /></RoleGuard>
+              } />
 
-            {/* Features available to all authenticated roles */}
-            <Route path="/payment" element={<Payment />} />
-          </Route>
+              {/* Features available to all authenticated roles */}
+              <Route path="/payment" element={<Payment />} />
+            </Route>
 
-          {/* Catch-all - Redirect to Home */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
+            {/* Catch-all - Redirect to Home */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </AuthGuard>
     </AuthProvider>
   );
 }

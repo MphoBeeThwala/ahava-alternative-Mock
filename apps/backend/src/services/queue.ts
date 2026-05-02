@@ -1,5 +1,5 @@
 import type Redis from 'ioredis';
-import { Queue, QueueEvents, Worker } from 'bullmq';
+import { Queue, QueueEvents, UnrecoverableError, Worker } from 'bullmq';
 import { sendEmail } from './email';
 
 // Queue names
@@ -68,7 +68,12 @@ export const initializeQueue = async (connection: Redis) => {
       async (job) => {
         const { to, subject, html, text } = job.data as { to: string; subject: string; html: string; text?: string };
         const result = await sendEmail({ to, subject, html, text });
-        if (result.error) throw result.error;
+        if (result.error) {
+          if (result.error.message.startsWith('RESEND_DOMAIN_NOT_VERIFIED:')) {
+            throw new UnrecoverableError(result.error.message);
+          }
+          throw result.error;
+        }
       },
       { connection, concurrency }
     );

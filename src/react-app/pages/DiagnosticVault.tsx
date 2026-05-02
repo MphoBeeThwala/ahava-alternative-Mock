@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { getAuthHeaders } from "@/react-app/lib/auth-context";
-import { useNavigate } from "react-router";
+import { useNavigate } from "react-router-dom";
 import { getApiBase } from "@/react-app/lib/native";
 import DashboardLayout from "@/react-app/components/DashboardLayout";
 

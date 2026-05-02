@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { authApi, AuthResponse, RegisterData } from '../lib/api';
 
@@ -16,6 +16,7 @@ interface User {
   phone?: string;
   dateOfBirth?: string;
   gender?: string;
+  riskProfile?: Record<string, unknown> | null;
 }
 
 interface AuthContextType {
@@ -24,7 +25,7 @@ interface AuthContextType {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (data: RegisterData) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   isAuthenticated: boolean;
 }
@@ -38,28 +39,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
 
   useEffect(() => {
-    // Load user and token from localStorage on mount
-    const initializeAuth = () => {
-      if (typeof window !== 'undefined') {
-        const storedToken = localStorage.getItem('token');
-        const storedUser = localStorage.getItem('user');
-        
-        if (storedToken && storedUser) {
-          try {
-            const parsedUser = JSON.parse(storedUser);
-            setUser(parsedUser);
-            setToken(storedToken);
-          } catch (error) {
-            console.error('Error parsing stored user data:', error);
-            localStorage.removeItem('token');
-            localStorage.removeItem('user');
-          }
-        }
+    const initializeAuth = async () => {
+      if (typeof window === 'undefined') {
+        setLoading(false);
+        return;
       }
-      setLoading(false);
+
+      const storedToken = localStorage.getItem('token');
+      if (!storedToken) {
+        setUser(null);
+        setToken(null);
+        setLoading(false);
+        return;
+      }
+
+      try {
+        // Validate persisted session against backend. This prevents stale localStorage
+        // from granting temporary app access when the token/session is actually invalid.
+        const data = await authApi.me();
+        if (data?.user) {
+          setUser(data.user as User);
+          setToken(localStorage.getItem('token'));
+          localStorage.setItem('user', JSON.stringify(data.user));
+        } else {
+          throw new Error('Missing user in /auth/me response');
+        }
+      } catch {
+        localStorage.removeItem('token');
+        localStorage.removeItem('refreshToken');
+        localStorage.removeItem('user');
+        setUser(null);
+        setToken(null);
+      } finally {
+        setLoading(false);
+      }
     };
-    
-    initializeAuth();
+
+    void initializeAuth();
   }, []);
 
   const login = async (email: string, password: string) => {
@@ -73,6 +89,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     
     setToken(response.accessToken);
     setUser(response.user as User);
+
+    // Hydrate complete user shape (includes riskProfile/onboarding state).
+    try {
+      const me = await authApi.me();
+      if (me?.user) {
+        setUser(me.user as User);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('user', JSON.stringify(me.user));
+          const latestToken = localStorage.getItem('token');
+          setToken(latestToken);
+        }
+      }
+    } catch {
+      // Non-fatal: keep login response user
+    }
   };
 
   const register = async (data: RegisterData) => {
@@ -86,39 +117,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     
     setToken(response.accessToken);
     setUser(response.user as User);
+
+    // Fetch server profile so persisted user includes riskProfile + full fields.
+    try {
+      const me = await authApi.me();
+      if (me?.user) {
+        setUser(me.user as User);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('user', JSON.stringify(me.user));
+          const latestToken = localStorage.getItem('token');
+          setToken(latestToken);
+        }
+      }
+    } catch {
+      // Non-fatal: keep register response user
+    }
   };
 
-  const refreshUser = async () => {
+  const refreshUser = useCallback(async () => {
     try {
       const storedToken = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
       if (!storedToken) return;
-      const res = await fetch('/api/auth/me', {
-        headers: { Authorization: `Bearer ${storedToken}` },
-      });
-      if (!res.ok) return;
-      const data = await res.json();
+      const data = await authApi.me();
       if (data.user) {
         setUser(data.user as User);
         if (typeof window !== 'undefined') {
           localStorage.setItem('user', JSON.stringify(data.user));
+          const latestToken = localStorage.getItem('token');
+          setToken(latestToken);
         }
       }
     } catch { /* non-fatal */ }
-  };
+  }, []);
 
   const logout = async () => {
     try {
-      // Call backend logout to invalidate refresh token in database
-      // Use a direct API call without the interceptor to avoid redirect loop
-      const token = localStorage.getItem('token');
-      if (token) {
-        await fetch('/api/auth/logout', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        });
+      if (typeof window !== 'undefined') {
+        const refreshToken = localStorage.getItem('refreshToken');
+        if (refreshToken) {
+          await authApi.logout(refreshToken).catch(() => {});
+        }
       }
     } catch (error) {
       console.warn('Server logout failed, clearing local storage anyway');
@@ -160,4 +198,3 @@ export function useAuth() {
   }
   return context;
 }
-

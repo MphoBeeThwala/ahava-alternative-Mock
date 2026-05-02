@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 from models import (
@@ -9,6 +10,7 @@ from engine import EarlyWarningEngine, _dict_to_biometric
 import db
 from datetime import datetime
 import os
+import hmac
 from dotenv import load_dotenv
 
 
@@ -19,10 +21,21 @@ class EarlyWarningAnalyzeRequest(BaseModel):
 
 load_dotenv()
 
+ML_SERVICE_SHARED_SECRET = os.getenv("ML_SERVICE_SHARED_SECRET", "").strip()
+ML_SERVICE_REQUIRE_AUTH = os.getenv("ML_SERVICE_REQUIRE_AUTH", "true").strip().lower() == "true"
+ML_SERVICE_AUTH_HEADER = "x-ahava-service-key"
+ML_SERVICE_PUBLIC_PATHS = {"/", "/docs", "/openapi.json", "/redoc"}
+
 app = FastAPI(
     title="Ahava Healthcare - ML Early Warning Service",
     version="1.0.0",
     description="Analyzes wearable data for pre-symptomatic physiological shifts."
+)
+
+print(
+    f"[ml-auth] require_auth={ML_SERVICE_REQUIRE_AUTH} "
+    f"secret_configured={bool(ML_SERVICE_SHARED_SECRET)} "
+    f"secret_length={len(ML_SERVICE_SHARED_SECRET)}"
 )
 
 # Initialize Engine
@@ -31,6 +44,24 @@ engine = EarlyWarningEngine()
 @app.get("/")
 def health_check():
     return {"status": "ok", "service": "ML-Service-v1"}
+
+@app.middleware("http")
+async def verify_service_auth(request: Request, call_next):
+    """
+    Enforce service-to-service auth for all non-public endpoints.
+    """
+    if ML_SERVICE_REQUIRE_AUTH and request.url.path not in ML_SERVICE_PUBLIC_PATHS:
+        if not ML_SERVICE_SHARED_SECRET:
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "ML service auth is enabled but not configured"},
+            )
+
+        provided = request.headers.get(ML_SERVICE_AUTH_HEADER, "").strip()
+        if not provided or not hmac.compare_digest(provided, ML_SERVICE_SHARED_SECRET):
+            return JSONResponse(status_code=401, content={"detail": "Invalid service authentication"})
+
+    return await call_next(request)
 
 @app.post("/ingest", response_model=IngestResponse)
 def ingest_biometrics(data: BiometricData, user_id: str):

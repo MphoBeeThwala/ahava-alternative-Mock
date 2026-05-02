@@ -13,9 +13,11 @@ import numpy as np
 import pandas as pd
 from typing import List, Dict, Tuple, Optional
 from datetime import datetime, timedelta
+import hashlib
 from models import (
     BiometricData, AlertLevel, ContextualProfile,
     RiskScores, FusionOutput, EarlyWarningSummary,
+    UncertaintyProfile, ClinicalProvenance,
 )
 import db
 
@@ -104,11 +106,76 @@ BASELINE_METRICS = [
 
 class EarlyWarningEngine:
     def __init__(self):
+        self.MODEL_VERSION = "early-warning-v2.1.0"
         self.MIN_BASELINE_DAYS = 14
         self.ROLLING_WINDOW_DAYS = 7
         self.SIGMA_YELLOW = 1.5
         self.SIGMA_RED = 2.5
         self.HIGH_ACTIVITY_STEPS_PERCENTILE = 90
+
+    def _estimate_uncertainty(
+        self,
+        history: List[dict],
+        profile: Optional[ContextualProfile],
+        data: BiometricData,
+        alert_level: AlertLevel,
+    ) -> UncertaintyProfile:
+        reasons: List[str] = []
+        score = 0.0
+
+        data_points = len(history)
+        if data_points < 7:
+            score += 0.35
+            reasons.append("SPARSE_HISTORY")
+        elif data_points < 14:
+            score += 0.18
+            reasons.append("BASELINE_STILL_CALIBRATING")
+
+        if profile is None:
+            score += 0.12
+            reasons.append("MISSING_RISK_CONTEXT")
+
+        if data.hrv_rmssd <= 0:
+            score += 0.10
+            reasons.append("MISSING_HRV_SIGNAL")
+        if data.sleep_duration_hours <= 0:
+            score += 0.08
+            reasons.append("MISSING_SLEEP_SIGNAL")
+
+        if alert_level == AlertLevel.RED:
+            score += 0.08
+            reasons.append("HIGH_ACUITY_STATE")
+
+        score = max(0.0, min(1.0, round(score, 3)))
+        return UncertaintyProfile(score=score, reasons=reasons)
+
+    def _build_provenance(
+        self,
+        user_id: str,
+        data: BiometricData,
+        alert_level: AlertLevel,
+    ) -> ClinicalProvenance:
+        trace_seed = (
+            f"{user_id}|{data.timestamp.isoformat()}|{data.heart_rate_resting}|"
+            f"{data.hrv_rmssd}|{data.spo2}|{alert_level.value}|{self.MODEL_VERSION}"
+        )
+        trace_id = hashlib.sha256(trace_seed.encode("utf-8")).hexdigest()[:24]
+
+        return ClinicalProvenance(
+            evidence_sources=[
+                "Local biometric_time_series (patient-specific physiological data)",
+                "User risk profile context (explicitly provided clinical risk factors)",
+                "SA demographic seed baselines (for baseline warm-start only)",
+            ],
+            clinical_basis=[
+                "SATS-aligned deterministic physiological threshold checks",
+                "Population-to-personal baseline blending",
+                "Trend analysis over rolling historical window",
+                "Conservative fusion escalation rules",
+            ],
+            model_version=self.MODEL_VERSION,
+            decision_trace_id=trace_id,
+        )
 
     # ------------------------------------------------------------------
     # Ingest — persist then evaluate
@@ -399,6 +466,7 @@ class EarlyWarningEngine:
     ) -> EarlyWarningSummary:
         """Run full pipeline: anomaly detection + CVD risk + fusion."""
         profile = context or db.load_context(user_id)
+        profile_was_missing = profile is None
         if profile is None:
             profile = ContextualProfile(age=50, smoker=False, hypertension=False)
         if context:
@@ -452,6 +520,19 @@ class EarlyWarningEngine:
         if getattr(data, "ecg_rhythm", None) == "irregular":
             recommendations.append("Your heart rhythm shows irregularities. Please consult a doctor.")
 
+        uncertainty = self._estimate_uncertainty(history, None if profile_was_missing else profile, data, alert_level)
+        provenance = self._build_provenance(user_id, data, alert_level)
+        requires_clinician_review = (
+            alert_level != AlertLevel.GREEN
+            or uncertainty.score >= 0.45
+            or getattr(data, "ecg_rhythm", "unknown") == "irregular"
+        )
+
+        if uncertainty.score >= 0.45:
+            recommendations.append(
+                "Signal quality/context is limited for autonomous interpretation; clinician review is recommended before acting on this result."
+            )
+
         return EarlyWarningSummary(
             user_id=user_id,
             processed_at=datetime.utcnow(),
@@ -473,4 +554,7 @@ class EarlyWarningEngine:
             alert_level=alert_level,
             anomalies=anomalies,
             recommendations=recommendations,
+            uncertainty=uncertainty,
+            provenance=provenance,
+            requires_clinician_review=requires_clinician_review,
         )
