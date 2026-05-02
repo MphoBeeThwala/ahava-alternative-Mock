@@ -345,6 +345,11 @@ router.post("/login", authRateLimiter, async (req, res, next) => {
     // Successful login — clear any failure counter
     await clearFailedAttempts(email);
 
+    // Purge any existing refresh tokens for this user before issuing a new one.
+    // This prevents a unique-constraint collision when register + login both
+    // execute within the same second (identical JWT iat → identical token hash).
+    await prisma.refreshToken.deleteMany({ where: { userId: user.id } });
+
     // Generate tokens
     const { accessToken, refreshToken } = await generateTokens(
       user.id,
@@ -672,11 +677,9 @@ router.post("/reset-password", authRateLimiter, async (req, res, next) => {
     });
 
     if (!user)
-      return res
-        .status(400)
-        .json({
-          error: "Invalid or expired reset link. Please request a new one.",
-        });
+      return res.status(400).json({
+        error: "Invalid or expired reset link. Please request a new one.",
+      });
 
     const passwordHash = await bcrypt.hash(value.password, 12);
     await (prisma.user.update as Function)({
