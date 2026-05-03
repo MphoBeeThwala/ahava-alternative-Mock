@@ -1,12 +1,12 @@
-import type Redis from 'ioredis';
-import { Queue, QueueEvents, UnrecoverableError, Worker } from 'bullmq';
-import { sendEmail } from './email';
+import type Redis from "ioredis";
+import { Queue, QueueEvents, UnrecoverableError, Worker } from "bullmq";
+import { sendEmail } from "./email";
 
 // Queue names
 export const QUEUE_NAMES = {
-  PDF_EXPORT: 'pdf-export',
-  PUSH_NOTIFICATION: 'push-notification',
-  EMAIL: 'email',
+  PDF_EXPORT: "pdf-export",
+  PUSH_NOTIFICATION: "push-notification",
+  EMAIL: "email",
 } as const;
 
 // Lazy-initialized queues (only set after initializeQueue() when REDIS_URL is set)
@@ -20,69 +20,91 @@ function getDefaultJobOptions() {
     removeOnComplete: 10,
     removeOnFail: 5,
     attempts: 3,
-    backoff: { type: 'exponential' as const, delay: 2000 },
+    backoff: { type: "exponential" as const, delay: 2000 },
   };
 }
 
 export const initializeQueue = async (connection: Redis) => {
   pdfExportQueue = new Queue(QUEUE_NAMES.PDF_EXPORT, {
     connection,
-    defaultJobOptions: { ...getDefaultJobOptions(), removeOnComplete: 10, removeOnFail: 5 },
+    defaultJobOptions: {
+      ...getDefaultJobOptions(),
+      removeOnComplete: 10,
+      removeOnFail: 5,
+    },
   });
   pushNotificationQueue = new Queue(QUEUE_NAMES.PUSH_NOTIFICATION, {
     connection,
-    defaultJobOptions: { ...getDefaultJobOptions(), removeOnComplete: 100, removeOnFail: 10 },
+    defaultJobOptions: {
+      ...getDefaultJobOptions(),
+      removeOnComplete: 100,
+      removeOnFail: 10,
+    },
   });
   emailQueue = new Queue(QUEUE_NAMES.EMAIL, {
     connection,
-    defaultJobOptions: { ...getDefaultJobOptions(), removeOnComplete: 50, removeOnFail: 10 },
+    defaultJobOptions: {
+      ...getDefaultJobOptions(),
+      removeOnComplete: 50,
+      removeOnFail: 10,
+    },
   });
 
   const pdfEvents = new QueueEvents(QUEUE_NAMES.PDF_EXPORT, { connection });
-  const pushEvents = new QueueEvents(QUEUE_NAMES.PUSH_NOTIFICATION, { connection });
+  const pushEvents = new QueueEvents(QUEUE_NAMES.PUSH_NOTIFICATION, {
+    connection,
+  });
   const emailEvents = new QueueEvents(QUEUE_NAMES.EMAIL, { connection });
 
-  pdfEvents.on('completed', ({ jobId }) => {
+  pdfEvents.on("completed", ({ jobId }) => {
     console.log(`📄 PDF export job ${jobId} completed`);
   });
-  pdfEvents.on('failed', ({ jobId, failedReason }) => {
+  pdfEvents.on("failed", ({ jobId, failedReason }) => {
     console.error(`❌ PDF export job ${jobId} failed:`, failedReason);
   });
-  pushEvents.on('completed', ({ jobId }) => {
+  pushEvents.on("completed", ({ jobId }) => {
     console.log(`📱 Push notification job ${jobId} completed`);
   });
-  pushEvents.on('failed', ({ jobId, failedReason }) => {
+  pushEvents.on("failed", ({ jobId, failedReason }) => {
     console.error(`❌ Push notification job ${jobId} failed:`, failedReason);
   });
-  emailEvents.on('completed', ({ jobId }) => {
+  emailEvents.on("completed", ({ jobId }) => {
     console.log(`📧 Email job ${jobId} completed`);
   });
-  emailEvents.on('failed', ({ jobId, failedReason }) => {
+  emailEvents.on("failed", ({ jobId, failedReason }) => {
     console.error(`❌ Email job ${jobId} failed:`, failedReason);
   });
 
-  if (process.env.DISABLE_INLINE_QUEUE_WORKERS !== '1') {
-    const concurrency = Math.max(1, parseInt(process.env.EMAIL_WORKER_CONCURRENCY ?? '5', 10) || 5);
+  if (process.env.DISABLE_INLINE_QUEUE_WORKERS !== "1") {
+    const concurrency = Math.max(
+      1,
+      parseInt(process.env.EMAIL_WORKER_CONCURRENCY ?? "5", 10) || 5,
+    );
     emailWorker = new Worker(
       QUEUE_NAMES.EMAIL,
       async (job) => {
-        const { to, subject, html, text } = job.data as { to: string; subject: string; html: string; text?: string };
+        const { to, subject, html, text } = job.data as {
+          to: string;
+          subject: string;
+          html: string;
+          text?: string;
+        };
         const result = await sendEmail({ to, subject, html, text });
         if (result.error) {
-          if (result.error.message.startsWith('RESEND_DOMAIN_NOT_VERIFIED:')) {
+          if (result.error.message.startsWith("RESEND_DOMAIN_NOT_VERIFIED:")) {
             throw new UnrecoverableError(result.error.message);
           }
           throw result.error;
         }
       },
-      { connection, concurrency }
+      { connection, concurrency },
     );
-    emailWorker.on('failed', (job, err) => {
+    emailWorker.on("failed", (job, err) => {
       console.error(`❌ Email job ${job?.id} failed:`, err?.message);
     });
   }
 
-  console.log('✅ BullMQ queues initialized');
+  console.log("✅ BullMQ queues initialized");
 };
 
 // Helper functions to add jobs (no-op if Redis/queues not initialized)
@@ -93,7 +115,7 @@ export const addPdfExportJob = async (data: {
   type: string;
 }) => {
   if (!pdfExportQueue) return;
-  return pdfExportQueue.add('generate-pdf', data, { priority: 1 });
+  return pdfExportQueue.add("generate-pdf", data, { priority: 1 });
 };
 
 export const addPushNotificationJob = async (data: {
@@ -103,7 +125,7 @@ export const addPushNotificationJob = async (data: {
   data?: Record<string, unknown>;
 }) => {
   if (!pushNotificationQueue) return;
-  return pushNotificationQueue.add('send-push', data, { priority: 5 });
+  return pushNotificationQueue.add("send-push", data, { priority: 5 });
 };
 
 export const addEmailJob = async (data: {
@@ -111,13 +133,11 @@ export const addEmailJob = async (data: {
   subject: string;
   html: string;
   text?: string;
-  priority?: number;
 }) => {
-  const { priority = 3, ...jobData } = data;
   if (emailQueue) {
-    return emailQueue.add('send-email', jobData, { priority });
+    return emailQueue.add("send-email", data, { priority: 3 });
   }
   // No Redis: send directly so notifications still work (e.g. serverless or dev without Redis)
-  const { sendEmail } = await import('./email');
-  sendEmail(jobData).catch((e) => console.error('[email] direct send failed', e));
+  const { sendEmail } = await import("./email");
+  sendEmail(data).catch((e) => console.error("[email] direct send failed", e));
 };
