@@ -133,6 +133,7 @@ export const addEmailJob = async (data: {
   subject: string;
   html: string;
   text?: string;
+  priority?: number; // optional BullMQ job priority (lower = higher priority)
 }) => {
   if (emailQueue) {
     return emailQueue.add("send-email", data, { priority: 3 });
