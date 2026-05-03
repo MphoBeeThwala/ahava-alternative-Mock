@@ -2,8 +2,8 @@ app            = "ahava-healthcare-api"
 primary_region = "jnb"
 
 [build]
-  # Dockerfile.fly lives at repo root and correctly copies from apps/backend/
-  dockerfile = "Dockerfile.fly"
+  # ../../Dockerfile.fly = repo root, relative to this config file in deploy/fly/
+  dockerfile = "../../Dockerfile.fly"
 
 [env]
   NODE_ENV = "production"
