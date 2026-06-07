@@ -11,7 +11,7 @@
     "test:watch": "jest --watch",
     "lint": "eslint src --config eslint.config.cjs",
     "lint:fix": "eslint src --fix --config eslint.config.cjs",
-    "type-check": "tsc --noEmit",
+    "type-check": "prisma generate --schema=prisma/schema.prisma && tsc --noEmit",
     "clean": "rm -rf dist",
     "postinstall": "node scripts/generate-prisma-postinstall.js || node scripts/check-prisma.js || echo Prisma check completed",
     "prisma:generate": "prisma generate --schema=prisma/schema.prisma",

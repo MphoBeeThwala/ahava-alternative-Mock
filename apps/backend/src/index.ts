@@ -66,12 +66,8 @@ const corsOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(",")
       .map((o) => o.trim())
       .filter(Boolean)
-  : process.env.NODE_ENV === "production"
-    ? [
-        "https://frontend-production-326c.up.railway.app",
-        "https://ahava-healthcare-admin.railway.app",
-        "https://ahava-healthcare-doctor.railway.app",
-      ]
+  : process.env.FRONTEND_URL
+    ? [process.env.FRONTEND_URL.trim()].filter(Boolean)
     : [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
@@ -203,7 +199,7 @@ async function startServer() {
   // Warn on missing critical env vars (broken email links, etc.)
   if (!process.env.FRONTEND_URL) {
     console.warn(
-      "⚠️  FRONTEND_URL is not set — email verification/reset links will be broken. Set FRONTEND_URL to your frontend domain (e.g. https://yourapp.up.railway.app)",
+      "⚠️  FRONTEND_URL is not set — email verification/reset links will be broken. Set FRONTEND_URL to your frontend domain (e.g. https://yourapp.vercel.app)",
     );
   } else {
     console.log(`🔗 Frontend URL: ${process.env.FRONTEND_URL}`);

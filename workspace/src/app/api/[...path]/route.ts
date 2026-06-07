@@ -19,6 +19,8 @@ function stripHopByHopHeaders(headers: Headers): Headers {
     "upgrade",
     "host",
     "content-length",
+    "accept-encoding",
+    "origin",
   ].forEach((h) => out.delete(h));
   return out;
 }
@@ -39,14 +41,13 @@ async function proxy(req: NextRequest, path: string[]) {
     headers,
     body,
     redirect: "manual",
+    cache: "no-store",
   });
 
   const resHeaders = new Headers(upstream.headers);
-  resHeaders.delete("content-encoding");
   resHeaders.delete("content-length");
 
-  const buf = await upstream.arrayBuffer();
-  return new NextResponse(buf, {
+  return new NextResponse(upstream.body, {
     status: upstream.status,
     headers: resHeaders,
   });

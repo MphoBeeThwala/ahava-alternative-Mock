@@ -1,5 +1,4 @@
 # Build from repo root: docker build -f workspace/Dockerfile .
-# next.config.ts sets distDir:'next', so standalone is at workspace/next/standalone/
 FROM node:20-alpine AS base
 RUN corepack enable && corepack prepare pnpm@9 --activate
 WORKDIR /app
@@ -25,8 +24,8 @@ RUN mkdir -p /app/workspace/public && pnpm --filter workspace build
 FROM node:20-alpine AS runner
 RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
 WORKDIR /app
-COPY --from=builder --chown=nextjs:nodejs /app/workspace/next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/workspace/next/static ./workspace/next/static
+COPY --from=builder --chown=nextjs:nodejs /app/workspace/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/workspace/.next/static ./workspace/.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/workspace/public ./workspace/public
 # Remove monorepo root files traced into standalone — prevents Railway pnpm auto-detection
 RUN rm -f pnpm-workspace.yaml pnpm-lock.yaml package.json

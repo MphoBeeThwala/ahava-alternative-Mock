@@ -86,9 +86,17 @@ export default function AiDoctorPage() {
     const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
     if (!token) return;
 
-    const wsBase = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000')
-      .replace(/^http/, 'ws')
-      .replace(/\/$/, '');
+    const envUrl =
+      process.env.NEXT_PUBLIC_BACKEND_URL ||
+      (process.env.NEXT_PUBLIC_API_URL ?? '').replace(/\/api\/?$/, '');
+    const baseUrl =
+      envUrl ||
+      (['localhost', '127.0.0.1'].includes(window.location.hostname)
+        ? 'http://localhost:4000'
+        : null);
+    if (!baseUrl) return;
+
+    const wsBase = baseUrl.replace(/^http/, 'ws').replace(/\/+$/, '');
     const ws = new WebSocket(`${wsBase}/ws?token=${encodeURIComponent(token)}`);
     wsRef.current = ws;
 
