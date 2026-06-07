@@ -9,11 +9,17 @@ export type WsMessage = {
 };
 
 function getWsUrl(token: string): string {
-  const apiUrl =
+  const envUrl =
     process.env.NEXT_PUBLIC_BACKEND_URL ||
-    (process.env.NEXT_PUBLIC_API_URL ?? '').replace(/\/api\/?$/, '') ||
-    'http://localhost:4000';
-  const wsUrl = apiUrl.replace(/^https/, 'wss').replace(/^http/, 'ws');
+    (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/api\/?$/, "");
+  const apiUrl =
+    envUrl ||
+    (typeof window !== "undefined"
+      ? ["localhost", "127.0.0.1"].includes(window.location.hostname)
+        ? "http://localhost:4000"
+        : window.location.origin
+      : "http://localhost:4000");
+  const wsUrl = apiUrl.replace(/^https/, "wss").replace(/^http/, "ws");
   return `${wsUrl}?token=${token}`;
 }
 

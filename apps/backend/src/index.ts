@@ -173,6 +173,14 @@ const PORT = process.env.PORT || 4000;
 async function startServer() {
   console.log("🔄 Starting initialization...");
 
+  const jwtSecret = process.env.JWT_SECRET;
+  if (!jwtSecret) {
+    throw new Error("JWT_SECRET is required");
+  }
+  if (process.env.NODE_ENV === "production" && jwtSecret.length < 32) {
+    throw new Error("JWT_SECRET must be at least 32 characters in production");
+  }
+
   // Initialize Redis + Queues (optional - app works without them for core API)
   if (process.env.REDIS_URL) {
     try {

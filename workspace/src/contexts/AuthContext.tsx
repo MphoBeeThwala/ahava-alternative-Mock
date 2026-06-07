@@ -45,6 +45,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      const legacyAccessToken =
+        localStorage.getItem('ahava_access_token') ||
+        localStorage.getItem('accessToken');
+      const legacyRefreshToken =
+        localStorage.getItem('ahava_refresh_token') ||
+        localStorage.getItem('refresh_token');
+      if (!localStorage.getItem('token') && legacyAccessToken) {
+        localStorage.setItem('token', legacyAccessToken);
+      }
+      if (!localStorage.getItem('refreshToken') && legacyRefreshToken) {
+        localStorage.setItem('refreshToken', legacyRefreshToken);
+      }
+
       const storedToken = localStorage.getItem('token');
       if (!storedToken) {
         setUser(null);

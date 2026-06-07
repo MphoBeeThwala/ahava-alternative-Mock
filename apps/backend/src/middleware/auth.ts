@@ -40,8 +40,7 @@ export const authMiddleware = async (
       if (!secret || (process.env.NODE_ENV === 'production' && secret.length < 32)) {
         return res.status(503).json({ error: 'Server configuration error' });
       }
-      const jwtSecret = process.env.NODE_ENV === 'production' ? secret : (secret || 'dev_secret_key_change_me_in_prod');
-      decoded = jwt.verify(token, jwtSecret) as any;
+      decoded = jwt.verify(token, secret) as any;
     } catch (error) {
       const errName = (error as { name?: string })?.name;
       if (errName === 'TokenExpiredError') {
