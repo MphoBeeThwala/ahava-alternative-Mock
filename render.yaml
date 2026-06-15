@@ -9,7 +9,6 @@ services:
     buildCommand: npm ci && npm run build
     startCommand: sh -c "npx prisma migrate deploy && node dist/index.js"
     healthCheckPath: /health
-    healthCheckInterval: 30
     envVars:
       - key: NODE_ENV
         value: production
@@ -72,7 +71,6 @@ databases:
   - name: ahava-postgres
     databaseName: ahava_db
     plan: starter
-    version: "15"
     
   - name: ahava-redis
     plan: starter
