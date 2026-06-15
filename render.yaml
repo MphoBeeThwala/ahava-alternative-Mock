@@ -53,7 +53,7 @@ services:
         sync: false
 
   # ─── Background Worker (BullMQ) ────────────────────
-  - type: background_worker
+  - type: private_service
     name: ahava-worker
     env: node
     plan: starter
