@@ -54,7 +54,7 @@ export default function LoginPage() {
             if (is502) {
                 setError('Service temporarily unavailable. The backend may be starting or restarting—please try again in a moment.');
             } else if (isNetworkError) {
-                setError('Cannot reach the API. If local: run the backend (e.g. pnpm dev in apps/backend). If deployed: set BACKEND_URL on the frontend service and redeploy.');
+                setError('Cannot reach the API. If local: run the backend (e.g. pnpm dev in apps/backend). If deployed: set BACKEND_URL on the frontend service.');
             } else {
                 setError((e.response?.data as { error?: string })?.error || e.message || 'Login failed');
             }

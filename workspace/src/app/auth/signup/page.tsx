@@ -76,7 +76,7 @@ export default function SignupPage() {
         );
       } else if (isNetworkError) {
         setError(
-          "Cannot reach the API. If local: run the backend (e.g. pnpm dev in apps/backend). If deployed: set BACKEND_URL on the frontend service and redeploy.",
+          "Cannot reach the API. If local: run the backend (e.g. pnpm dev in apps/backend). If deployed: set BACKEND_URL on the frontend service.",
         );
       } else {
         setError(

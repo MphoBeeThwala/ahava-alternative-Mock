@@ -8,13 +8,25 @@ export type WsMessage = {
   error?: string;
 };
 
-function getWsUrl(token: string): string {
-  const apiUrl =
+function getWsUrl(token: string): string | null {
+  const envUrl =
     process.env.NEXT_PUBLIC_BACKEND_URL ||
-    (process.env.NEXT_PUBLIC_API_URL ?? '').replace(/\/api\/?$/, '') ||
-    'http://localhost:4000';
-  const wsUrl = apiUrl.replace(/^https/, 'wss').replace(/^http/, 'ws');
-  return `${wsUrl}?token=${token}`;
+    (process.env.NEXT_PUBLIC_API_URL ?? '').replace(/\/api\/?$/, '');
+
+  const baseUrl =
+    envUrl ||
+    (typeof window !== 'undefined' &&
+    ['localhost', '127.0.0.1'].includes(window.location.hostname)
+      ? 'http://localhost:4000'
+      : null);
+
+  if (!baseUrl) return null;
+
+  const wsBase = baseUrl
+    .replace(/^https/, 'wss')
+    .replace(/^http/, 'ws')
+    .replace(/\/+$/, '');
+  return `${wsBase}/ws?token=${encodeURIComponent(token)}`;
 }
 
 export function useVisitWebSocket(token: string | null) {
@@ -34,7 +46,9 @@ export function useVisitWebSocket(token: string | null) {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
     try {
-      const ws = new WebSocket(getWsUrl(token));
+      const url = getWsUrl(token);
+      if (!url) return;
+      const ws = new WebSocket(url);
       wsRef.current = ws;
 
       ws.onopen = () => {

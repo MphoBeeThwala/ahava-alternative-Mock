@@ -10,7 +10,7 @@ The **patient-facing app** (Patient Portal, Early Warning, AI Doctor) is the **N
 
 ## Fix CORS / login once and for all
 
-The frontend **always** calls `/api` on its own origin. Next.js rewrites proxy `/api/*` to the backend. So the browser never talks to the backend URL → **no CORS**.
+The frontend **always** calls `/api` on its own origin. A Next.js route handler proxies `/api/*` to the backend at runtime. So the browser never talks to the backend URL → **no CORS**.
 
 ### Frontend service (Railway)
 
@@ -18,7 +18,7 @@ The frontend **always** calls `/api` on its own origin. Next.js rewrites proxy `
    - **`BACKEND_URL`** = `https://backend-production-9a3b.up.railway.app`  
      (your real backend URL, no trailing slash, no `/api`)
 2. **Remove** **`NEXT_PUBLIC_API_URL`** if it exists (so the app never uses the backend URL from the browser).
-3. **Redeploy** the frontend (new build) so rewrites use this `BACKEND_URL`.
+3. Restart or redeploy the frontend after changing environment variables so the new values take effect.
 
 ### Backend service (Railway)
 

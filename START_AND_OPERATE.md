@@ -324,7 +324,7 @@ docker build -f apps/backend/Dockerfile .
 
 **Frontend (workspace):**
 ```powershell
-docker build -f workspace/Dockerfile --build-arg NEXT_PUBLIC_API_URL=https://api.example.com/api .
+docker build -f workspace/Dockerfile .
 ```
 
 See `apps/backend/Dockerfile` and `workspace/Dockerfile` for details.
@@ -373,5 +373,5 @@ After clearing, ensure **workspace** and **backend** are both restarted so they 
 | AI triage 500 | Ensure `GEMINI_API_KEY` or `ANTHROPIC_API_KEY` is set |
 | CORS errors | Set `CORS_ORIGIN` or `BACKEND_URL` correctly |
 | Frontend cannot reach API | Ensure backend is on 4000 and `BACKEND_URL` points to it |
-| Logged out after using services / 401 | Workspace must call backend directly in dev so `Authorization` is sent. Set `NEXT_PUBLIC_API_URL=http://localhost:4000/api` in `workspace/.env.local` and restart Next.js. Backend CORS allows `http://localhost:3000`. |
+| Logged out after using services / 401 | Ensure `BACKEND_URL=http://localhost:4000` is set in `workspace/.env.local` and restart Next.js so `/api/*` proxies to the backend. |
 | Early Warning empty / 503 | Start ML service (`cd apps\ml-service; .\run.ps1`). Or leave ML off; backend uses fallback. |
