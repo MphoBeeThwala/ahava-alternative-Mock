@@ -1,0 +1,78 @@
+services:
+  # ─── Backend API (Express.js) ───────────────────
+  - type: web
+    name: ahava-api
+    env: node
+    plan: starter
+    branch: main
+    rootDir: apps/backend
+    buildCommand: npm ci && npm run build
+    startCommand: sh -c "npx prisma migrate deploy && node dist/index.js"
+    healthCheckPath: /health
+    healthCheckInterval: 30
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: ENCRYPTION_IV_SALT
+        sync: false
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_WEBHOOK_SECRET
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+      - key: TIMEZONE
+        value: Africa/Johannesburg
+
+  # ─── Frontend (Next.js) ───────────────────────────
+  - type: web
+    name: ahava-frontend
+    env: node
+    plan: starter
+    branch: main
+    rootDir: workspace
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_API_URL
+        sync: false
+
+  # ─── Background Worker (BullMQ) ────────────────────
+  - type: background_worker
+    name: ahava-worker
+    env: node
+    plan: starter
+    branch: main
+    rootDir: apps/worker
+    buildCommand: npm ci && npm run build
+    startCommand: node dist/worker.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: REDIS_URL
+        sync: false
+
+# ─── Managed Databases ──────────────────────────────
+databases:
+  - name: ahava-postgres
+    databaseName: ahava_db
+    plan: starter
+    version: "15"
+    
+  - name: ahava-redis
+    plan: starter

@@ -1,14 +1,10 @@
 import type { NextConfig } from "next";
-import path from "path";
 
 const nextConfig: NextConfig = {
-  // Output standalone server for Docker deployment
-  output: 'standalone',
-  // Monorepo: trace from repo root so Next.js doesn't warn about multiple lockfiles (pnpm at root, workspace has no lockfile or has package-lock.json)
-  outputFileTracingRoot: path.join(__dirname, ".."),
-  // Suppress lockfile warnings in monorepo setup
-  experimental: {
-    optimizePackageImports: ['@mui/material', '@mui/icons-material'],
+  reactStrictMode: true,
+  output: "standalone", // Enables standalone server for Render/Railway
+  env: {
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:10000",
   },
 };
 
