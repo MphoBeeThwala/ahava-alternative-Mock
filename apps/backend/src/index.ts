@@ -44,7 +44,7 @@ const app = express();
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
-// Trust proxy so X-Forwarded-For is trusted (required behind Railway/reverse proxies for rate-limit)
+// Trust proxy so X-Forwarded-For is trusted (required behind Render/Railway/reverse proxies for rate-limit)
 app.set("trust proxy", 1);
 
 // Security middleware
@@ -68,6 +68,7 @@ const corsOrigins = process.env.CORS_ORIGIN
       .filter(Boolean)
   : process.env.NODE_ENV === "production"
     ? [
+        "https://ahava-frontend.onrender.com",
         "https://frontend-production-326c.up.railway.app",
         "https://ahava-healthcare-admin.railway.app",
         "https://ahava-healthcare-doctor.railway.app",
@@ -125,7 +126,7 @@ app.use(attachRateLimitUserKey);
 // Rate limiting
 app.use(rateLimiter);
 
-// Health check (Railway probes this)
+// Health check (Render/Railway probes this)
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
@@ -195,7 +196,7 @@ async function startServer() {
   // Warn on missing critical env vars (broken email links, etc.)
   if (!process.env.FRONTEND_URL) {
     console.warn(
-      "⚠️  FRONTEND_URL is not set — email verification/reset links will be broken. Set FRONTEND_URL to your frontend domain (e.g. https://yourapp.up.railway.app)",
+      "⚠️  FRONTEND_URL is not set — email verification/reset links will be broken. Set FRONTEND_URL to your frontend domain (e.g. https://yourapp.onrender.com)",
     );
   } else {
     console.log(`🔗 Frontend URL: ${process.env.FRONTEND_URL}`);
