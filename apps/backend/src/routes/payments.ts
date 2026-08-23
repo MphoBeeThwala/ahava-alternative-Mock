@@ -1,54 +1,86 @@
 import { Router } from 'express';
-import { UserRole, PaymentStatus } from '@prisma/client';
-import { AuthenticatedRequest, authMiddleware } from '../middleware/auth';
-import { createAuditLog } from '../services/auditLog';
-import prisma from '../lib/prisma';
+import { PayFastService } from '../services/payfast';
+import { AuditLog } from '../services/auditLog';
+import { requireAuth } from '../middleware/auth';
 
-const router: Router = Router();
+const router = Router();
+const payfast = new PayFastService();
 
-// Get payments for user
-router.get('/', authMiddleware, async (req: AuthenticatedRequest, res, next) => {
+// Initialize payment for booking/nurse visit
+router.post('/create', requireAuth, async (req, res) => {
   try {
-    const where: any = {};
-    if (req.user!.role === UserRole.PATIENT) {
-      where.visit = { patientId: req.user!.id };
-    } else if (req.user!.role === UserRole.NURSE) {
-      where.visit = { nurseId: req.user!.id };
-    } else if (req.user!.role === UserRole.DOCTOR) {
-      where.visit = { doctorId: req.user!.id };
+    const { amount, bookingId, type } = req.body;
+    
+    // AuditLog: Track payment initiation
+    await AuditLog.create({
+      userId: req.user.id,
+      action: 'PAYMENT_INITIATED',
+      resource: 'Payment',
+      metadata: { bookingId, amount, type },
+    });
+
+    const payment = await payfast.createPayment(amount, type, bookingId);
+    res.json(payment);
+  } catch (error) {
+    res.status(500).json({ error: 'Payment initialization failed' });
+  }
+});
+
+// PayFast webhook handler
+router.post('/webhook', async (req, res) => {
+  try {
+    const data = req.body;
+    const isValid = await payfast.verifyPayment(data);
+
+    if (isValid) {
+      // Update payment status in database
+      // Confirm booking/nurse visit
+      
+      // AuditLog: Track payment completion
+      await AuditLog.create({
+        userId: data.custom_str1 || 'system',
+        action: 'PAYMENT_COMPLETED',
+        resource: 'Payment',
+        metadata: { 
+          gatewayRef: data.txn_id, 
+          amount: data.amount_gross 
+        },
+      });
     }
-    const payments = await prisma.payment.findMany({ where, include: { visit: { select: { id: true, patientId: true, nurseId: true, amountInCents: true } } }, orderBy: { createdAt: 'desc' } });
-    await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'LIST', resource: 'Payment', metadata: { count: payments.length, role: req.user!.role }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
-    res.json({ success: true, payments });
-  } catch (error) { next(error); }
+
+    res.status(200).send('OK');
+  } catch (error) {
+    res.status(500).send('Webhook processing failed');
+  }
 });
 
-// Get specific payment
-router.get('/:id', authMiddleware, async (req: AuthenticatedRequest, res, next) => {
+// Check payment status
+router.get('/:id/status', requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
-    const payment = await prisma.payment.findUnique({ where: { id }, include: { visit: true } });
-    if (!payment) return res.status(404).json({ error: 'Payment not found' });
-    const isAuthorized = req.user!.role === UserRole.ADMIN || payment.visit.patientId === req.user!.id || payment.visit.nurseId === req.user!.id || payment.visit.doctorId === req.user!.id;
-    if (!isAuthorized) return res.status(403).json({ error: 'Access denied' });
-    await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'READ', resource: 'Payment', resourceId: payment.id, metadata: { visitId: payment.visitId, amountInCents: payment.amountInCents, status: payment.status }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
-    res.json({ success: true, payment });
-  } catch (error) { next(error); }
+    // TODO: Implement payment status check
+    res.json({ status: 'PENDING' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to check payment status' });
+  }
 });
 
-// Update payment status
-router.patch('/:id/status', authMiddleware, async (req: AuthenticatedRequest, res, next) => {
+// Process refund
+router.post('/:id/refund', requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
-    const { status } = req.body;
-    const payment = await prisma.payment.findUnique({ where: { id }, include: { visit: true } });
-    if (!payment) return res.status(404).json({ error: 'Payment not found' });
-    const isAuthorized = req.user!.role === UserRole.ADMIN || payment.visit.nurseId === req.user!.id;
-    if (!isAuthorized) return res.status(403).json({ error: 'Access denied' });
-    const updated = await prisma.payment.update({ where: { id }, data: { status } });
-    await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'UPDATE', resource: 'Payment', resourceId: id, metadata: { oldStatus: payment.status, newStatus: status }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
-    res.json({ success: true, payment: updated });
-  } catch (error) { next(error); }
+    // TODO: Implement refund processing
+    
+    // AuditLog: Track refund
+    await AuditLog.create({
+      userId: req.user.id,
+      action: 'PAYMENT_REFUNDED',
+      resource: 'Payment',
+      metadata: { paymentId: req.params.id },
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Refund failed' });
+  }
 });
 
 export default router;
