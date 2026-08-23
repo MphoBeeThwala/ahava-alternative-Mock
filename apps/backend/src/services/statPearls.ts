@@ -10,6 +10,8 @@
 
 import * as cheerio from "cheerio";
 
+const DEBUG = process.env.DEBUG === 'true';
+
 // eutils search endpoint — requires NCBI_API_KEY in env for production rate limits
 const NCBI_ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi";
 const MAX_CONTEXT_CHARS = 8000; // Keep prompt size reasonable
@@ -57,7 +59,8 @@ async function fetchFromStatPearlsService(
   const url = baseUrl.replace(/\/$/, "") + "/disease-info";
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const timeout = setTimeout(() => contr
+oller.abort(), REQUEST_TIMEOUT_MS);
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -115,7 +118,8 @@ async function fetchAndExtractArticle(url: string): Promise<string | null> {
   const $ = cheerio.load(html);
   const sections: ExtractedSection[] = [];
 
-  // NCBI StatPearls article structure
+  // NCBI StatPearls ar
+ticle structure
   $(".jig-ncbiinpagenav div[id^='article-']").each((_, el) => {
     const heading = $(el).find("> h2").first().text().trim();
     if (!heading) return;
@@ -169,7 +173,8 @@ async function fetchFromNcbi(symptoms: string): Promise<string | null> {
   const query = extractSearchQuery(symptoms);
   const results = await searchNcbiStatPearls(query);
   if (results.length === 0) return null;
-  const top = results[0];
+  const top = result
+s[0];
   const content = await fetchAndExtractArticle(top.url);
   if (!content) return null;
   return `### Reference: ${top.title}\n\n${content}`;
@@ -194,7 +199,7 @@ export async function getMedicalContext(symptoms: string): Promise<string | null
     if (redis) {
       const cached = await redis.get(cacheKey);
       if (cached) {
-        console.log('[statPearls] Cache hit for:', query);
+        if (DEBUG) console.log('[statPearls] Cache hit for:', query);
         return cached;
       }
       const content = await fetchContent(symptoms, query, serviceUrl);
