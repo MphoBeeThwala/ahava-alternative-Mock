@@ -2,6 +2,7 @@ import { Router } from 'express';
 import Joi from 'joi';
 import prisma from '../lib/prisma';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth';
+import { writeClinicalAudit } from '../services/clinicalAudit';
 import { decryptData, encryptData, isEncryptedPayload } from '../utils/encryption';
 
 const router: Router = Router();
@@ -41,7 +42,8 @@ const profileUpsertSchema = Joi.object({
     allergies: Joi.array().items(Joi.string().trim().max(120)).optional(),
     chronicConditions: Joi.array().items(Joi.string().trim().max(120)).optional(),
     currentMedications: Joi.array().items(Joi.string().trim().max(120)).optional(),
-    surgeries: Joi.array().items(Joi.string().trim().max(160)).optional(),
+    surgeries: Joi.array().items(Joi.string().trim().max(160)).optional()
+,
     familyHistory: Joi.array().items(Joi.string().trim().max(120)).optional(),
     socialDeterminants: Joi.object({
       foodInsecurity: Joi.string().trim().allow('', null).optional(),
@@ -88,7 +90,8 @@ function buildPassportProgress(user: {
     { key: 'phone_number', done: Boolean(user.phone), prompt: 'What is your best contact number?' },
     { key: 'terms', done: hasTerms, prompt: 'Please accept the terms to keep your medical record active.' },
     { key: 'date_of_birth', done: Boolean(user.dateOfBirth), prompt: 'What is your date of birth?' },
-    { key: 'gender', done: Boolean(user.gender), prompt: 'What gender should we record for clinical care?' },
+    { key: 'gender', done: Boolean(user.gender), prompt: 'What g
+ender should we record for clinical care?' },
     { key: 'address', done: Boolean(address), prompt: 'What is your current home address?' },
     { key: 'emergency_contact', done: Boolean(passport.emergencyContactName && passport.emergencyContactPhone), prompt: 'Who should we contact in an emergency?' },
     { key: 'allergies', done: Array.isArray(passport.allergies), prompt: 'Do you have any allergies?' },
@@ -135,10 +138,19 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res, next) => 
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
+    // Audit log for profile access
+    await writeClinicalAudit({
+      userId: user.id,
+      userRole: user.role,
+      action: 'PROFILE_READ',
+      resource: 'user',
+      resourceId: user.id,
+    });
     }
 
     const address = safeDecryptAddress(user.encryptedAddress);
-    const rp = (user.riskProfile as Record<string, unknown> | null) ?? {};
+    const rp = (user.riskProfile as Record<string, unkn
+own> | null) ?? {};
     const progress = buildPassportProgress(user);
 
     return res.json({
@@ -196,7 +208,8 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res, next) =>
       updateData.lastName = lastName;
     }
     if (value.phone_number !== undefined) updateData.phone = value.phone_number || null;
-    if (value.role && value.role !== current.role) updateData.role = value.role;
+    if (value.role && value.role !== 
+current.role) updateData.role = value.role;
     if (value.sanc_id !== undefined) updateData.sancId = value.sanc_id || null;
     if (value.latitude !== undefined) updateData.lastKnownLat = value.latitude;
     if (value.longitude !== undefined) updateData.lastKnownLng = value.longitude;
@@ -238,7 +251,8 @@ router.post('/', authMiddleware, async (req: AuthenticatedRequest, res, next) =>
 
     updateData.riskProfile = mergedRiskProfile;
 
-    const updated = await prisma.user.update({
+    const updated = await prisma.
+user.update({
       where: { id: userId },
       data: updateData,
       select: {
