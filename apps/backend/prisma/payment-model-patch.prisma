@@ -1,0 +1,25 @@
+// Payment model for healthcare transactions (nurse visits, telemedicine consults)
+model Payment {
+  id            String   @id @default(cuid())
+  userId        String
+  bookingId     String?
+  triageCaseId  String?
+  amount        Int      // Amount in cents (ZAR)
+  currency      String   @default("ZAR")
+  status        String   @default("PENDING") // PENDING, COMPLETED, FAILED, REFUNDED
+  gatewayRef    String?  // PayFast transaction ID
+  paymentMethod String?  // CARD, EFT, etc.
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  // Relations
+  user          User     @relation(fields: [userId], references: [id])
+  booking       Booking? @relation(fields: [bookingId], references: [id])
+  triageCase    TriageCase? @relation(fields: [triageCaseId], references: [id])
+  
+  @@index([userId])
+  @@index([bookingId])
+  @@index([triageCaseId])
+  @@index([status])
+}
