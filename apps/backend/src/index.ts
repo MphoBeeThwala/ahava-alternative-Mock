@@ -10,6 +10,8 @@ import { WebSocketServer } from "ws";
 // Load environment variables
 dotenv.config();
 
+const DEBUG = process.env.DEBUG === "true";
+
 // Import routes
 import authRoutes from "./routes/auth";
 import bookingRoutes from "./routes/bookings";
@@ -55,6 +57,7 @@ app.use(
         defaultSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         scriptSrc: ["'self'"],
+
         imgSrc: ["'self'", "data:", "https:"],
       },
     },
@@ -102,7 +105,7 @@ app.use(
     {
       stream: {
         write: (message: string) => {
-          console.log(message.replace(/\?[^\s]+/, "?[REDACTED]").trim());
+          if (DEBUG) console.log(message.replace(/\?[^\s]+/, "?[REDACTED]").trim());
         },
       },
     },
@@ -172,7 +175,7 @@ app.use("*", (req, res) => {
 const PORT = process.env.PORT || 4000;
 
 async function startServer() {
-  console.log("🔄 Starting initialization...");
+  if (DEBUG) console.log("🔄 Starting initialization...");
 
   const jwtSecret = process.env.JWT_SECRET;
   if (!jwtSecret) {
@@ -185,10 +188,10 @@ async function startServer() {
   // Initialize Redis + Queues (optional - app works without them for core API)
   if (process.env.REDIS_URL) {
     try {
-      console.log("🔄 Connecting to Redis...");
+      if (DEBUG) console.log("🔄 Connecting to Redis...");
       const redis = await initializeRedis();
       await initializeQueue(redis);
-      console.log("✅ Redis and queues initialized");
+      if (DEBUG) console.log("✅ Redis and queues initialized");
     } catch (err) {
       console.warn(
         "⚠️ Redis/Queue unavailable, running without background jobs:",
@@ -196,7 +199,7 @@ async function startServer() {
       );
     }
   } else {
-    console.log(
+    if (DEBUG) console.log(
       "⚠️ REDIS_URL not set, skipping Redis/queues (core API will work)",
     );
   }
@@ -207,30 +210,30 @@ async function startServer() {
       "⚠️  FRONTEND_URL is not set — email verification/reset links will be broken. Set FRONTEND_URL to your frontend domain (e.g. https://yourapp.onrender.com)",
     );
   } else {
-    console.log(`🔗 Frontend URL: ${process.env.FRONTEND_URL}`);
+    if (DEBUG) console.log(`🔗 Frontend URL: ${process.env.FRONTEND_URL}`);
   }
 
   // Start server
   server.listen(PORT, () => {
-    console.log(`🚀 Ahava Healthcare API server running on port ${PORT}`);
-    console.log(`🌍 Timezone: ${process.env.TIMEZONE}`);
-    console.log(`📊 Environment: ${process.env.NODE_ENV}`);
+    if (DEBUG) console.log(`🚀 Ahava Healthcare API server running on port ${PORT}`);
+    if (DEBUG) console.log(`🌍 Timezone: ${process.env.TIMEZONE}`);
+    if (DEBUG) console.log(`📊 Environment: ${process.env.NODE_ENV}`);
   });
 }
 
 // Graceful shutdown
 process.on("SIGTERM", () => {
-  console.log("🛑 SIGTERM received, shutting down gracefully");
+  if (DEBUG) console.log("🛑 SIGTERM received, shutting down gracefully");
   server.close(() => {
-    console.log("✅ Process terminated");
+    if (DEBUG) console.log("✅ Process terminated");
     process.exit(0);
   });
 });
 
 process.on("SIGINT", () => {
-  console.log("🛑 SIGINT received, shutting down gracefully");
+  if (DEBUG) console.log("🛑 SIGINT received, shutting down gracefully");
   server.close(() => {
-    console.log("✅ Process terminated");
+    if (DEBUG) console.log("✅ Process terminated");
     process.exit(0);
   });
 });
