@@ -6,6 +6,13 @@
  *
  * Optional: Set STATPEARLS_SERVICE_URL to call a deployed StatPearls HTTP wrapper
  * (e.g. StatPearls MCP behind an HTTP proxy) instead of direct NCBI fetch.
+ *
+ * RECOMMENDATION: Consider using NCBI E-utilities efetch.fcgi (XML) instead of HTML
+ * scraping for more stable article extraction. HTML selectors may break with
+ * NCBI website changes. The E-utilities API provides structured, machine-readable
+ * content that is more reliable for production use.
+ *
+ * Current implementation: search uses E-utilities, article extraction uses HTML scraping
  */
 
 import * as cheerio from "cheerio";
@@ -133,11 +140,8 @@ ticle structure
   });
 
   if (sections.length === 0) {
-    const errorMsg = '[statPearls] Article extraction returned no sections — NCBI HTML selectors may be stale.';
     if (process.env.NODE_ENV === 'production') {
-      console.warn(errorMsg);
-      // Surface this as a monitorable error
-      throw new Error(errorMsg);
+      console.warn('[statPearls] Article extraction returned no sections — NCBI HTML selectors may be stale.');
     }
     return null;
   }
@@ -158,15 +162,12 @@ async function fetchContent(symptoms: string, query: string, serviceUrl?: string
   try {
     const result = await fetchFromNcbi(symptoms);
     if (!result && process.env.NODE_ENV === 'production' && !serviceUrl) {
-      const errorMsg = '[statPearls] NCBI fetch returned null — selectors may be stale or rate-limited. Set NCBI_API_KEY.';
-      console.warn(errorMsg);
-      throw new Error(errorMsg);
+      console.warn('[statPearls] NCBI fetch returned null — selectors may be stale or rate-limited. Set NCBI_API_KEY.');
     }
     return result;
   } catch (err) {
-    const errorMsg = '[statPearls] Failed to fetch medical context: ' + (err instanceof Error ? err.message : String(err));
-    console.warn(errorMsg);
-    throw err;
+    console.warn('[statPearls] Failed to fetch medical context:', err);
+    return null;
   }
 }
 
@@ -212,13 +213,8 @@ export async function getMedicalContext(symptoms: string): Promise<string | null
       }
       return content;
     }
-  } catch (err) {
-    const errorMsg = '[statPearls] Redis cache unavailable, fetching directly: ' + (err instanceof Error ? err.message : String(err));
-    console.warn(errorMsg);
-    // In production, surface cache failures
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error(errorMsg);
-    }
+  } catch {
+    console.warn('[statPearls] Redis cache unavailable, fetching directly');
   }
 
   return fetchContent(symptoms, query, serviceUrl);
