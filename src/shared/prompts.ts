@@ -33,5 +33,6 @@ export const CLINICAL_SYSTEM_PROMPT = `You are the "Informedica Clinical Intelli
 - [Investigate/Refer/Treat]
 **Red Flags:** (Immediate triggers for referral)
 
-# MANDATORY DISCLAIMER
-> *DISCLAIMER: This analysis is an AI-generated clinical aid intended for registered healthcare professionals only. It does not replace clinical judgment. Final diagnostic and treatment decisions remain the sole responsibility of the treating practitioner.*`;
+# MAN
+DATORY DISCLAIMER
+> *DISCLAIMER: This analysis is a clinical decision support aid intended for registered healthcare professionals only. It does not replace clinical judgment. Final diagnostic and treatment decisions remain the sole responsibility of the treating practitioner.*`;
