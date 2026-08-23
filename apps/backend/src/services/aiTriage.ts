@@ -7,12 +7,14 @@ import { withResilientHttp } from './resilientHttp';
 
 dotenv.config();
 
+const DEBUG = process.env.DEBUG === 'true';
+
 // API Keys
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
 // Key presence is logged at startup only — no patient data in logs
-console.log(`[aiTriage] providers configured: gemini=${!!GEMINI_API_KEY} claude=${!!ANTHROPIC_API_KEY}`);
+if (DEBUG) console.log(`[aiTriage] providers configured: gemini=${!!GEMINI_API_KEY} claude=${!!ANTHROPIC_API_KEY}`);
 
 const genAI = GEMINI_API_KEY ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
 
@@ -37,7 +39,8 @@ export interface TriageResult {
     triageLevel: 1 | 2 | 3 | 4 | 5; // 1 = Resuscitation, 5 = Non-urgent
     possibleConditions: string[];
     recommendedAction: string;
-    reasoning: string;
+    reasoning: s
+tring;
     confidence: number; // 0-1 calibrated confidence (required for guardrails)
     uncertaintyFlags: string[]; // machine-readable uncertainty reasons
     evidenceSources: string[]; // restricted to approved clinical sources
@@ -63,7 +66,8 @@ function buildTriagePrompt(request: TriageRequest, medicalContext?: string | nul
     const caseId = request.caseId ?? 'UNSPECIFIED_CASE';
     const patientId = request.patientId ?? 'ANON_PATIENT';
 
-    const basePrompt = `Act as a strictly objective medical triage assistant trained on the South African Triage Scale (SATS).
+    const basePrompt = `Act as a strictly objective medical triage assi
+stant trained on the South African Triage Scale (SATS).
 Analyze the following symptoms and (optional) image in the context of a South African patient.
 
 CASE ISOLATION CONTRACT:
@@ -124,7 +128,8 @@ function hashInput(value: string): string {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
 
-function buildInFlightKey(request: TriageRequest): string {
+function buildInFlightKey(request: TriageRequest): strin
+g {
   const pid = request.patientId ?? 'anon';
   const symptoms = normalizeSymptoms(request.symptoms);
   const imageHash = request.imageBase64 ? hashInput(request.imageBase64) : 'no-image';
@@ -166,7 +171,8 @@ function conservativeFallback(reason: string): TriageResult {
 function mergeGuardrails(candidate: TriageResult, request: TriageRequest): TriageResult {
     const risk = assessDeterministicRisk(request.symptoms, request.vitalsSnapshot);
     const confidence = Number.isFinite(candidate.confidence) ? Math.max(0, Math.min(1, candidate.confidence)) : 0;
-    const uncertaintyFlags = [...new Set(candidate.uncertaintyFlags.filter(Boolean))];
+    const uncertaintyFla
+gs = [...new Set(candidate.uncertaintyFlags.filter(Boolean))];
 
     const mergedLevel = Math.min(candidate.triageLevel, risk.minTriageLevel) as 1 | 2 | 3 | 4 | 5;
     const combinedFlags = [...new Set([
@@ -210,7 +216,8 @@ function validateTriageResult(parsed: unknown, source: string): TriageResult {
         throw new Error(`[aiTriage] Missing recommendedAction from ${source}`);
     }
     if (typeof p?.reasoning !== 'string' || (p.reasoning as string).trim() === '') {
-        throw new Error(`[aiTriage] Missing reasoning from ${source}`);
+        throw new Error(`[aiTriage] Missing
+ reasoning from ${source}`);
     }
 
     const rawEvidence = Array.isArray(p?.evidenceSources)
@@ -259,7 +266,8 @@ const TRIAGE_PROMPT_END = `{
 
 IMPORTANT: Do not include markdown formatting like \`\`\`json. Just the raw JSON.
 CRITICAL SAFETY RULES:
-- Case isolation is mandatory: never use information from any other case or prior patient.
+- Case 
+isolation is mandatory: never use information from any other case or prior patient.
 - Use only the provided symptoms/image/context and explicit reference context.
 - Do NOT use internet/general web knowledge beyond these allowed references.
 - If uncertain, set low confidence, add uncertaintyFlags, and set requiresDoctorReview=true.
@@ -275,7 +283,7 @@ async function analyzeWithClaude(
         throw new Error("ANTHROPIC_API_KEY is not configured");
     }
 
-    console.log("[aiTriage] Using Claude via Anthropic API...");
+    if (DEBUG) console.log("[aiTriage] Using Claude via Anthropic API...");
 
     const prompt = buildTriagePrompt(request, medicalContext, patientContext) + TRIAGE_PROMPT_END;
 
@@ -315,7 +323,8 @@ async function analyzeWithClaude(
             return await fetch("https://api.anthropic.com/v1/messages", {
                 method: "POST",
                 headers: {
-                    "Content-Type": "application/json",
+                 
+   "Content-Type": "application/json",
                     "x-api-key": ANTHROPIC_API_KEY,
                     "anthropic-version": "2023-06-01"
                 },
@@ -347,7 +356,7 @@ async function analyzeWithClaude(
 
     // Clean markdown code blocks if present
     const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
-    console.log("[aiTriage] Claude response received");
+    if (DEBUG) console.log("[aiTriage] Claude response received");
 
     return validateTriageResult(JSON.parse(cleanJson), 'Claude');
 }
@@ -362,7 +371,7 @@ async function analyzeWithGemini(
         throw new Error("GEMINI_API_KEY is not configured");
     }
 
-    console.log("[aiTriage] Using Gemini...");
+    if (DEBUG) console.log("[aiTriage] Using Gemini...");
 
     const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
     const prompt = buildTriagePrompt(request, medicalContext, patientContext) + TRIAGE_PROMPT_END;
@@ -372,7 +381,8 @@ async function analyzeWithGemini(
     if (request.imageBase64) {
         const mimeMatch = request.imageBase64.match(/^data:(image\/\w+);base64,/);
         const detectedMimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
-        const supportedMimeTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'];
+        const supportedMimeTypes = ['image/j
+peg', 'image/png', 'image/webp', 'image/heic'];
         const safeMimeType = supportedMimeTypes.includes(detectedMimeType) ? detectedMimeType : 'image/jpeg';
         const cleanBase64 = request.imageBase64.replace(/^data:image\/\w+;base64,/, "");
         parts.push({
@@ -396,7 +406,7 @@ async function analyzeWithGemini(
     const text = response.text();
 
     const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
-    console.log("[aiTriage] Gemini response received");
+    if (DEBUG) console.log("[aiTriage] Gemini response received");
 
     return validateTriageResult(JSON.parse(cleanJson), 'Gemini');
 }
@@ -408,14 +418,12 @@ export async function analyzeSymptoms(request: TriageRequest): Promise<TriageRes
         symptoms: normalizeSymptoms(request.symptoms),
     };
 
-    console.log(
-        `[aiTriage] analyzeSymptoms called caseId=${normalizedRequest.caseId ?? 'n/a'} patientContext=${!!normalizedRequest.patientContext}`
-    );
+    if (DEBUG) if (DEBUG) console.log(`[aiTriage] analyzeSymptoms called caseId=${normalizedRequest.caseId ?? 'n/a'} patientContext=${!!normalizedRequest.patientContext}`);
 
     const dedupeKey = buildInFlightKey(normalizedRequest);
     const existing = inFlightTriage.get(dedupeKey);
     if (existing) {
-        console.log('[aiTriage] Reusing in-flight triage computation for identical request');
+        if (DEBUG) console.log('[aiTriage] Reusing in-flight triage computation for identical request');
         return existing;
     }
 
@@ -423,9 +431,10 @@ export async function analyzeSymptoms(request: TriageRequest): Promise<TriageRes
         // Fetch StatPearls medical context (Option A - Proxy/Context Injection)
         let medicalContext: string | null = null;
         try {
-            medicalContext = await getMedicalContext(normalizedRequest.symptoms);
+            medicalContext = await getMedica
+lContext(normalizedRequest.symptoms);
             if (medicalContext) {
-                console.log(`[aiTriage] StatPearls context fetched (${medicalContext.length} chars)`);
+                if (DEBUG) console.log(`[aiTriage] StatPearls context fetched (${medicalContext.length} chars)`);
             }
         } catch (err) {
             console.warn("[aiTriage] StatPearls context fetch failed, proceeding without:", err);
@@ -443,9 +452,9 @@ export async function analyzeSymptoms(request: TriageRequest): Promise<TriageRes
 
                 // If rate limited (429), try Gemini
                 if (error.status === 429 || error.message?.includes("429")) {
-                    console.log("[aiTriage] Claude rate limited, falling back to Gemini...");
+                    if (DEBUG) console.log("[aiTriage] Claude rate limited, falling back to Gemini...");
                 } else {
-                    console.log("[aiTriage] Claude error, falling back to Gemini...");
+                    if (DEBUG) console.log("[aiTriage] Claude error, falling back to Gemini...");
                 }
             }
         }
@@ -471,7 +480,8 @@ export async function analyzeSymptoms(request: TriageRequest): Promise<TriageRes
             guardedFallback.uncertaintyFlags = [...new Set([
                 ...guardedFallback.uncertaintyFlags,
                 'NO_PEER_REVIEW_CONTEXT',
-            ])];
+  
+          ])];
             guardedFallback.requiresDoctorReview = true;
             return guardedFallback;
         }
