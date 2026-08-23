@@ -65,7 +65,8 @@ function buildTriagePrompt(request: TriageRequest, medicalContext?: string | nul
     const safeMedicalContext = boundedText(medicalContext, MAX_PATIENT_CONTEXT_CHARS);
     const safeSymptoms = normalizeSymptoms(request.symptoms);
     const caseId = request.caseId ?? 'UNSPECIFIED_CASE';
-    const patientId = request.patientId ?? 'ANON_PATIENT';
+    const patientId = requ
+est.patientId ?? 'ANON_PATIENT';
 
     const base
 Prompt = `Act as a strictly objective medical triage assi
@@ -127,7 +128,8 @@ function normalizeSymptoms(symptoms: string): string {
 }
 
 function hashInput(value: string): string {
-  return crypto.createHash('sha256').update(value).digest('hex');
+  return crypto.cr
+eateHash('sha256').update(value).digest('hex');
 }
 
 
@@ -173,10 +175,10 @@ function conservativeFallback(reason: string): TriageResult {
 
 function mergeGuardrails(candidate: TriageResult, request: TriageRequest): TriageResult {
     const risk = assessDeterministicRisk(request.symptoms, request.vitalsSnapshot);
-    const confidence = Number.isFinite(candidate.confidence) ? Math.max(0, Math.
+    const confidence = Number.
+isFinite(candidate.confidence) ? Math.max(0, Math.
 min(1, candidate.confidence)) : 0;
-    const uncertaintyFla
-gs = [...new Set(candidate.uncertaintyFlags.filter(Boolean))];
+    const uncertaintyFlags = [...new Set(candidate.uncertaintyFlags.filter(Boolean))];
 
     const mergedLevel = Math.min(candidate.triageLevel, risk.minTriageLevel) as 1 | 2 | 3 | 4 | 5;
     const combinedFlags = [...new Set([
@@ -221,8 +223,7 @@ function validateTriageResult(parsed: unknown, source: string): TriageResult {
     }
     if (typeof p?.reasoning !== 'string' || (p.reasoning as string).
 trim() === '') {
-        throw new Error(`[aiTriage] Missing
- reasoning from ${source}`);
+        throw new Error(`[aiTriage] Missing reasoning from ${source}`);
     }
 
     const rawEvidence = Array.isArray(p?.evidenceSources)
@@ -268,6 +269,7 @@ const TRIAGE_PROMPT_END = `{
   "evidenceSources": ["StatPearls/NCBI" | "SATS" | "WHO" | "Patient Symptoms" | "Patient Vitals" | "Patient Risk Profile"],
   "requiresDoctorReview": "boolean"
 }
+
 
 IMPORTANT: Do not include markdown formatting like 
 \`\`\`json. Just the raw JSON.
@@ -326,9 +328,8 @@ async function analyzeWithClaude(
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), AI_PROVIDER_TIMEOUT_MS);
         try {
-            return await fetch("https://api.anthropic.com/v1/messages", {
-   
-             method: "POST",
+            return await
+ fetch("https://api.anthropic.com/v1/messages", { method: "POST",
                 headers: {
                  
    "Content-Type": "application/json",
@@ -386,7 +387,8 @@ async function analyzeWithGemini(
     const parts: any[] = [prompt];
 
     if (request.imageBase64) {
-        const mimeMatch = request.imageBase64.match(/^data:(image\/\w+);base64,/);
+        const mimeMatch = request.imageBase64.match
+(/^data:(image\/\w+);base64,/);
         const detected
 MimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
         const supportedMimeTypes = ['image/j
@@ -436,7 +438,7 @@ export async function analyzeSymptoms(request: TriageRequest): Promise<TriageRes
     }
 
     const work = (async (): Promise<TriageResult> => {
-      // Fetch medical context from all enabled evidence providers
+      //Fetch medical context from all enabled evidence providers
       const combinedEvidence = await combineEvidence({
         symptoms: normalizedRequest.symptoms,
         imageBase64: normalizedRequest.imageBase64,
@@ -456,14 +458,15 @@ export async function analyzeSymptoms(request: TriageRequest): Promise<TriageRes
       let medicalContext: string | null = null;
       if (combinedEvidence.results.length > 0) {
         medicalContext = combinedEvidence.results.map(r =>
-          '\n\n## ' + r.sourceId.toUpperCase() + ' Reference\n' +
+          '
+
+## ' + r.sourceId.toUpperCase() + ' Reference\n' +
           'Citation: ' + r.citation + '\n' +
           r.content
-        ).join('');');
+        ).join(''););
         if (DEBUG) console.log('[aiTriage] Evidence context assembled (' + medicalContext.length + ' chars)');
       }
       const patientCtx = normalizedRequest.patientContext ?? null;
-        const patientCtx = normalizedRequest.patientContext ?? null;
         let candidate: TriageResult | null = null;
 
         // Try Claude first (primary)
@@ -478,7 +481,8 @@ export async function analyzeSymptoms(request: TriageRequest): Promise<TriageRes
                     if (DEBUG) console.log("[aiTriage] Claude rate limited, falling back to Gemini...");
                 } else {
                     if (DEBUG) console.log("[aiTriage] Claude error, falling back to Gemini...");
-                }
+              
+  }
             }
         }
 
