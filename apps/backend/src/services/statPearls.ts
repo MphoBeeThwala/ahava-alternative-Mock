@@ -10,8 +10,6 @@
 
 import * as cheerio from "cheerio";
 
-const DEBUG = process.env.DEBUG === 'true';
-
 // eutils search endpoint — requires NCBI_API_KEY in env for production rate limits
 const NCBI_ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi";
 const MAX_CONTEXT_CHARS = 8000; // Keep prompt size reasonable
@@ -135,8 +133,11 @@ ticle structure
   });
 
   if (sections.length === 0) {
+    const errorMsg = '[statPearls] Article extraction returned no sections — NCBI HTML selectors may be stale.';
     if (process.env.NODE_ENV === 'production') {
-      console.warn('[statPearls] Article extraction returned no sections — NCBI HTML selectors may be stale.');
+      console.warn(errorMsg);
+      // Surface this as a monitorable error
+      throw new Error(errorMsg);
     }
     return null;
   }
@@ -157,12 +158,15 @@ async function fetchContent(symptoms: string, query: string, serviceUrl?: string
   try {
     const result = await fetchFromNcbi(symptoms);
     if (!result && process.env.NODE_ENV === 'production' && !serviceUrl) {
-      console.warn('[statPearls] NCBI fetch returned null — selectors may be stale or rate-limited. Set NCBI_API_KEY.');
+      const errorMsg = '[statPearls] NCBI fetch returned null — selectors may be stale or rate-limited. Set NCBI_API_KEY.';
+      console.warn(errorMsg);
+      throw new Error(errorMsg);
     }
     return result;
   } catch (err) {
-    console.warn('[statPearls] Failed to fetch medical context:', err);
-    return null;
+    const errorMsg = '[statPearls] Failed to fetch medical context: ' + (err instanceof Error ? err.message : String(err));
+    console.warn(errorMsg);
+    throw err;
   }
 }
 
@@ -199,7 +203,7 @@ export async function getMedicalContext(symptoms: string): Promise<string | null
     if (redis) {
       const cached = await redis.get(cacheKey);
       if (cached) {
-        if (DEBUG) console.log('[statPearls] Cache hit for:', query);
+        console.log('[statPearls] Cache hit for:', query);
         return cached;
       }
       const content = await fetchContent(symptoms, query, serviceUrl);
@@ -208,8 +212,13 @@ export async function getMedicalContext(symptoms: string): Promise<string | null
       }
       return content;
     }
-  } catch {
-    console.warn('[statPearls] Redis cache unavailable, fetching directly');
+  } catch (err) {
+    const errorMsg = '[statPearls] Redis cache unavailable, fetching directly: ' + (err instanceof Error ? err.message : String(err));
+    console.warn(errorMsg);
+    // In production, surface cache failures
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(errorMsg);
+    }
   }
 
   return fetchContent(symptoms, query, serviceUrl);
