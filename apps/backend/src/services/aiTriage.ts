@@ -1,7 +1,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import dotenv from 'dotenv';
 import crypto from 'crypto';
-import { getMedicalContext } from './statPearls';
+import { combineEvidence, hasSufficientEvidence, getEvidenceSummary } from './evidenceProvider';
 import { assessDeterministicRisk, TriageVitalsSnapshot } from './triageSafety';
 import { withResilientHttp } from './resilientHttp';
 
@@ -37,7 +37,8 @@ export interface TriageRequest {
 
 export interface TriageResult {
     triageLevel: 1 | 2 | 3 | 4 | 5; // 1 = Resuscitation, 5 = Non-urgent
-    possibleConditions: string[];
+    possibleConditions: s
+tring[];
     recommendedAction: string;
     reasoning: s
 tring;
@@ -66,7 +67,8 @@ function buildTriagePrompt(request: TriageRequest, medicalContext?: string | nul
     const caseId = request.caseId ?? 'UNSPECIFIED_CASE';
     const patientId = request.patientId ?? 'ANON_PATIENT';
 
-    const basePrompt = `Act as a strictly objective medical triage assi
+    const base
+Prompt = `Act as a strictly objective medical triage assi
 stant trained on the South African Triage Scale (SATS).
 Analyze the following symptoms and (optional) image in the context of a South African patient.
 
@@ -128,6 +130,7 @@ function hashInput(value: string): string {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
 
+
 function buildInFlightKey(request: TriageRequest): strin
 g {
   const pid = request.patientId ?? 'anon';
@@ -170,7 +173,8 @@ function conservativeFallback(reason: string): TriageResult {
 
 function mergeGuardrails(candidate: TriageResult, request: TriageRequest): TriageResult {
     const risk = assessDeterministicRisk(request.symptoms, request.vitalsSnapshot);
-    const confidence = Number.isFinite(candidate.confidence) ? Math.max(0, Math.min(1, candidate.confidence)) : 0;
+    const confidence = Number.isFinite(candidate.confidence) ? Math.max(0, Math.
+min(1, candidate.confidence)) : 0;
     const uncertaintyFla
 gs = [...new Set(candidate.uncertaintyFlags.filter(Boolean))];
 
@@ -215,7 +219,8 @@ function validateTriageResult(parsed: unknown, source: string): TriageResult {
     if (typeof p?.recommendedAction !== 'string' || (p.recommendedAction as string).trim() === '') {
         throw new Error(`[aiTriage] Missing recommendedAction from ${source}`);
     }
-    if (typeof p?.reasoning !== 'string' || (p.reasoning as string).trim() === '') {
+    if (typeof p?.reasoning !== 'string' || (p.reasoning as string).
+trim() === '') {
         throw new Error(`[aiTriage] Missing
  reasoning from ${source}`);
     }
@@ -264,7 +269,8 @@ const TRIAGE_PROMPT_END = `{
   "requiresDoctorReview": "boolean"
 }
 
-IMPORTANT: Do not include markdown formatting like \`\`\`json. Just the raw JSON.
+IMPORTANT: Do not include markdown formatting like 
+\`\`\`json. Just the raw JSON.
 CRITICAL SAFETY RULES:
 - Case 
 isolation is mandatory: never use information from any other case or prior patient.
@@ -321,7 +327,8 @@ async function analyzeWithClaude(
         const timer = setTimeout(() => controller.abort(), AI_PROVIDER_TIMEOUT_MS);
         try {
             return await fetch("https://api.anthropic.com/v1/messages", {
-                method: "POST",
+   
+             method: "POST",
                 headers: {
                  
    "Content-Type": "application/json",
@@ -380,7 +387,8 @@ async function analyzeWithGemini(
 
     if (request.imageBase64) {
         const mimeMatch = request.imageBase64.match(/^data:(image\/\w+);base64,/);
-        const detectedMimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+        const detected
+MimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
         const supportedMimeTypes = ['image/j
 peg', 'image/png', 'image/webp', 'image/heic'];
         const safeMimeType = supportedMimeTypes.includes(detectedMimeType) ? detectedMimeType : 'image/jpeg';
@@ -428,18 +436,33 @@ export async function analyzeSymptoms(request: TriageRequest): Promise<TriageRes
     }
 
     const work = (async (): Promise<TriageResult> => {
-        // Fetch StatPearls medical context (Option A - Proxy/Context Injection)
-        let medicalContext: string | null = null;
-        try {
-            medicalContext = await getMedica
-lContext(normalizedRequest.symptoms);
-            if (medicalContext) {
-                if (DEBUG) console.log(`[aiTriage] StatPearls context fetched (${medicalContext.length} chars)`);
-            }
-        } catch (err) {
-            console.warn("[aiTriage] StatPearls context fetch failed, proceeding without:", err);
-        }
+      // Fetch medical context from all enabled evidence providers
+      const combinedEvidence = await combineEvidence({
+        symptoms: normalizedRequest.symptoms,
+        imageBase64: normalizedRequest.imageBase64,
+        patientContext: normalizedRequest.patientContext,
+      });
 
+      const hasEvidence = hasSufficientEvidence(combinedEvidence);
+      const evidenceSummary = getEvidenceSummary(combinedEvidence);
+
+      if (DEBUG) {
+        console.log('[aiTriage] Evidence sources:', evidenceSummary,
+          ', queried:', combinedEvidence.sourcesQueried.join(', '),
+          ', succeeded:', combinedEvidence.sourcesSucceeded.join(', '));
+      }
+
+      // Build medical context from evidence results
+      let medicalContext: string | null = null;
+      if (combinedEvidence.results.length > 0) {
+        medicalContext = combinedEvidence.results.map(r =>
+          '\n\n## ' + r.sourceId.toUpperCase() + ' Reference\n' +
+          'Citation: ' + r.citation + '\n' +
+          r.content
+        ).join('');');
+        if (DEBUG) console.log('[aiTriage] Evidence context assembled (' + medicalContext.length + ' chars)');
+      }
+      const patientCtx = normalizedRequest.patientContext ?? null;
         const patientCtx = normalizedRequest.patientContext ?? null;
         let candidate: TriageResult | null = null;
 
@@ -468,27 +491,31 @@ lContext(normalizedRequest.symptoms);
             }
         }
 
-        const hasPeerReviewedContext = Boolean(medicalContext);
+      const hasPeerReviewedContext = hasEvidence;
 
         if (!candidate) {
             const fallback = conservativeFallback(
                 !ANTHROPIC_API_KEY && !genAI
-                    ? "No AI provider configured"
-                    : "All configured AI providers failed"
+                    ? 'No AI provider configured'
+                    : 'All configured AI providers failed'
             );
             const guardedFallback = mergeGuardrails(fallback, normalizedRequest);
             guardedFallback.uncertaintyFlags = [...new Set([
                 ...guardedFallback.uncertaintyFlags,
                 'NO_PEER_REVIEW_CONTEXT',
-  
-          ])];
+            ])];
+            // If we have no evidence at all, this is a critical gap
+            if (!hasEvidence) {
+                guardedFallback.uncertaintyFlags.push('NO_EVIDENCE_SOURCES_AVAILABLE');
+                guardedFallback.requiresDoctorReview = true;
+            }
             guardedFallback.requiresDoctorReview = true;
             return guardedFallback;
         }
 
         const guarded = mergeGuardrails(candidate, normalizedRequest);
-        if (!hasPeerReviewedContext) {
-            guarded.confidence = Math.min(guarded.confidence, 0.6);
+        if (!hasEvidence) {
+            guarded.confidence = Math.min(guarded.confidence, 0.5);
             guarded.uncertaintyFlags = [...new Set([
                 ...guarded.uncertaintyFlags,
                 'NO_PEER_REVIEW_CONTEXT',
