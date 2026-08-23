@@ -51,7 +51,8 @@ router.post(
         const [readings, alerts, baseline, userInfo] = await Promise.all([
           prisma.biometricReading.findMany({
             where: { userId: patientId },
-            orderBy: { createdAt: "desc" },
+            or
+derBy: { createdAt: "desc" },
             take: 5,
             select: {
               heartRate: true,
@@ -108,7 +109,8 @@ router.post(
             temperature: latest.temperature ?? null,
             bloodPressureSystolic: latest.bloodPressureSystolic ?? null,
             bloodPressureDiastolic: latest.bloodPressureDiastolic ?? null,
-            hrvRmssd: latest.hrvRmssd ?? null,
+            h
+rvRmssd: latest.hrvRmssd ?? null,
           };
           const parts: string[] = [];
           if (latest.heartRate != null)
@@ -159,7 +161,8 @@ router.post(
 
         if (alerts && alerts.length > 0) {
           const alertStr = alerts
-            .map((a) => `[${a.alertLevel}] ${a.title}: ${a.message}`)
+       
+     .map((a) => `[${a.alertLevel}] ${a.title}: ${a.message}`)
             .join(" | ");
           lines.push(`Active health alerts: ${alertStr}`);
         }
@@ -217,7 +220,8 @@ router.post(
           uncertaintyFlags: result.uncertaintyFlags,
           evidenceSources: result.evidenceSources,
           aiContextUsed: !!patientContext,
-          statPearlsUsed: result.evidenceSources.includes("StatPearls/NCBI"),
+    
+      statPearlsUsed: result.evidenceSources.includes("StatPearls/NCBI"),
           symptomsHash: hashValue(symptoms),
         },
       });
@@ -252,11 +256,13 @@ router.post(
 
       // Return acknowledgement only — NOT the AI result
       // Patient receives the result via WebSocket when doctor releases it
+      // Return acknowledgement only — NOT the AI result
+      // Patient receives the result via WebSocket when doctor releases it
       res.json({
         success: true,
-        data: result,
         triageCaseId: triageCase.id,
         slaDeadline: slaDeadline.toISOString(),
+        requiresDoctorReview: result.requiresDoctorReview,
         meta: {
           disclaimer:
             "Not a medical diagnosis. Tool for decision support only. Sent to doctor for review.",
