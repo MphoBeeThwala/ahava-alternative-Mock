@@ -4,6 +4,7 @@ import { AuthenticatedRequest, authMiddleware, requirePatient } from '../middlew
 import { idempotencyMiddleware } from '../middleware/idempotency';
 import { notifyNearbyNurses } from '../services/websocket';
 import { encryptData, isEncryptedPayload } from '../utils/encryption';
+import { createAuditLog } from '../services/auditLog';
 import Joi from 'joi';
 import prisma from '../lib/prisma';
 
@@ -16,7 +17,7 @@ const createBookingSchema = Joi.object({
   estimatedDuration: Joi.number().min(30).max(240).default(60),
   paymentMethod: Joi.string().valid('CARD', 'INSURANCE').required(),
   amountInCents: Joi.number().min(0).required(),
-  patientLat: Joi.number().min(-90).max(90).required(), // Patient location for nurse matching
+  patientLat: Joi.number().min(-90).max(90).required(),
   patientLng: Joi.number().min(-180).max(180).required(),
   insuranceProvider: Joi.string().when('paymentMethod', {
     is: 'INSURANCE',
@@ -38,42 +39,28 @@ router.post('/', requirePatient, idempotencyMiddleware({ scope: 'booking-create'
       return res.status(400).json({ error: error.details[0].message });
     }
 
-    const {
-      encryptedAddress: addressOrEncryptedAddress,
-      scheduledDate,
-      estimatedDuration,
-      paymentMethod,
-      amountInCents,
-      patientLat,
-      patientLng,
-      insuranceProvider,
-      insuranceMemberNumber,
-    } = value;
-
-    // Validate scheduled date is in the future
+    const bookingData = value;
     const now = new Date();
-    if (new Date(scheduledDate) <= now) {
+    if (new Date(bookingData.scheduledDate) <= now) {
       return res.status(400).json({ error: 'Scheduled date must be in the future' });
     }
 
-    // Server-side enforce encryption-at-rest for address data.
-    const encryptedAddress = isEncryptedPayload(addressOrEncryptedAddress)
-      ? addressOrEncryptedAddress
-      : encryptData(addressOrEncryptedAddress);
+    const encryptedAddress = isEncryptedPayload(bookingData.encryptedAddress)
+      ? bookingData.encryptedAddress
+      : encryptData(bookingData.encryptedAddress || bookingData.address || '');
 
-    // Create booking
     const booking = await prisma.booking.create({
       data: {
         patientId: req.user!.id,
         encryptedAddress,
-        scheduledDate: new Date(scheduledDate),
-        estimatedDuration,
-        paymentMethod,
+        scheduledDate: new Date(bookingData.scheduledDate),
+        estimatedDuration: bookingData.estimatedDuration,
+        paymentMethod: bookingData.paymentMethod,
         paymentStatus: 'PENDING',
-        amountInCents,
-        insuranceProvider,
-        insuranceMemberNumber,
-        insuranceStatus: paymentMethod === 'INSURANCE' ? 'PENDING_VERIFICATION' : undefined,
+        amountInCents: bookingData.amountInCents,
+        insuranceProvider: bookingData.insuranceProvider,
+        insuranceMemberNumber: bookingData.insuranceMemberNumber,
+        insuranceStatus: bookingData.paymentMethod === 'INSURANCE' ? 'PENDING_VERIFICATION' : undefined,
       },
       include: {
         patient: {
@@ -87,12 +74,28 @@ router.post('/', requirePatient, idempotencyMiddleware({ scope: 'booking-create'
       },
     });
 
-    // 🔔 Notify nearby online nurses about the new booking
-    const patientName = `${booking.patient.firstName} ${booking.patient.lastName}`;
+    // AuditLog: Log booking creation
+    await createAuditLog({
+      userId: req.user!.id,
+      userRole: req.user!.role,
+      action: 'CREATE',
+      resource: 'Booking',
+      resourceId: booking.id,
+      metadata: {
+        patientId: booking.patientId,
+        scheduledDate: booking.scheduledDate.toISOString(),
+        amountInCents: booking.amountInCents,
+        paymentMethod: booking.paymentMethod,
+      },
+      ipAddress: req.ip,
+      userAgent: req.get('User-Agent'),
+    });
+
+    const patientName = booking.patient.firstName + ' ' + booking.patient.lastName;
     const notifiedCount = await notifyNearbyNurses(
-      patientLat,
-      patientLng,
-      10, // 10km radius
+      bookingData.patientLat,
+      bookingData.patientLng,
+      10,
       {
         id: booking.id,
         patientId: booking.patientId,
@@ -113,7 +116,7 @@ router.post('/', requirePatient, idempotencyMiddleware({ scope: 'booking-create'
   }
 });
 
-// Get user's bookings
+// Get user bookings
 router.get('/', authMiddleware, async (req: AuthenticatedRequest, res, next) => {
   try {
     const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit), 10) || 10));
@@ -121,7 +124,6 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res, next) => 
     const status = req.query.status as string | undefined;
 
     const whereClause: any = {};
-
     if (req.user!.role === UserRole.PATIENT) {
       whereClause.patientId = req.user!.id;
     } else if (req.user!.role === UserRole.NURSE) {
@@ -129,48 +131,19 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res, next) => 
     } else if (req.user!.role === UserRole.DOCTOR) {
       whereClause.doctorId = req.user!.id;
     }
-
     if (status) {
-      whereClause.visit = {
-        status: status,
-      };
+      whereClause.visit = { status: status };
     }
 
     const bookings = await prisma.booking.findMany({
       where: whereClause,
       include: {
-        patient: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            phone: true,
-          },
-        },
+        patient: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
         visit: {
           select: {
-            id: true,
-            status: true,
-            scheduledStart: true,
-            actualStart: true,
-            actualEnd: true,
-            nurse: {
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                email: true,
-              },
-            },
-            doctor: {
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                email: true,
-              },
-            },
+            id: true, status: true, scheduledStart: true, actualStart: true, actualEnd: true,
+            nurse: { select: { id: true, firstName: true, lastName: true, email: true } },
+            doctor: { select: { id: true, firstName: true, lastName: true, email: true } },
           },
         },
       },
@@ -179,16 +152,21 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res, next) => 
       skip: offset,
     });
 
-    res.json({
-      success: true,
-      bookings,
+    // AuditLog: Log booking list access
+    await createAuditLog({
+      userId: req.user!.id,
+      userRole: req.user!.role,
+      action: 'LIST',
+      resource: 'Booking',
+      metadata: { count: bookings.length, filter: { status }, role: req.user!.role },
+      ipAddress: req.ip,
+      userAgent: req.get('User-Agent'),
     });
+
+    res.json({ success: true, bookings });
   } catch (error: any) {
     console.error('[Bookings] Failed to fetch:', error?.message || error);
-    return res.status(503).json({
-      success: false,
-      error: 'Unable to load bookings. Database may be unavailable.',
-    });
+    return res.status(503).json({ success: false, error: 'Unable to load bookings. Database may be unavailable.' });
   }
 });
 
@@ -196,27 +174,11 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res, next) => 
 router.get('/:id', authMiddleware, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
-
     const booking = await prisma.booking.findUnique({
       where: { id },
       include: {
-        patient: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            phone: true,
-          },
-        },
-        visit: {
-          include: {
-            messages: {
-              orderBy: { createdAt: 'desc' },
-              take: 10,
-            },
-          },
-        },
+        patient: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+        visit: { include: { messages: { orderBy: { createdAt: 'desc' }, take: 10 } } },
       },
     });
 
@@ -224,67 +186,64 @@ router.get('/:id', authMiddleware, async (req: AuthenticatedRequest, res, next) 
       return res.status(404).json({ error: 'Booking not found' });
     }
 
-    // Check permissions
     const isAuthorized =
       req.user!.role === UserRole.ADMIN ||
       booking.patientId === req.user!.id ||
       booking.nurseId === req.user!.id ||
       booking.doctorId === req.user!.id;
-
     if (!isAuthorized) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    res.json({
-      success: true,
-      booking,
+    // AuditLog: Log booking read access
+    await createAuditLog({
+      userId: req.user!.id,
+      userRole: req.user!.role,
+      action: 'READ',
+      resource: 'Booking',
+      resourceId: booking.id,
+      metadata: { patientId: booking.patientId, nurseId: booking.nurseId, doctorId: booking.doctorId, status: booking.paymentStatus },
+      ipAddress: req.ip,
+      userAgent: req.get('User-Agent'),
     });
+
+    res.json({ success: true, booking });
   } catch (error) {
     next(error);
   }
 });
 
-// Cancel booking (Patient only)
+// Cancel booking
 router.patch('/:id/cancel', requirePatient, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
-
-    const booking = await prisma.booking.findUnique({
-      where: { id },
-      include: { visit: true },
-    });
-
-    if (!booking) {
-      return res.status(404).json({ error: 'Booking not found' });
-    }
-
-    if (booking.patientId !== req.user!.id) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
-
+    const booking = await prisma.booking.findUnique({ where: { id }, include: { visit: true } });
+    if (!booking) return res.status(404).json({ error: 'Booking not found' });
+    if (booking.patientId !== req.user!.id) return res.status(403).json({ error: 'Access denied' });
     if (booking.visit?.status && ['COMPLETED', 'CANCELLED'].includes(booking.visit.status)) {
       return res.status(400).json({ error: 'Cannot cancel completed or already cancelled visit' });
     }
 
-    // Update booking and visit status
     await prisma.$transaction(async (tx) => {
-      await tx.booking.update({
-        where: { id },
-        data: { paymentStatus: 'REFUNDED' },
-      });
-
+      await tx.booking.update({ where: { id }, data: { paymentStatus: 'REFUNDED' } });
       if (booking.visit) {
-        await tx.visit.update({
-          where: { id: booking.visit.id },
-          data: { status: 'CANCELLED' },
-        });
+        await tx.visit.update({ where: { id: booking.visit.id }, data: { status: 'CANCELLED' } });
       }
     });
 
-    res.json({
-      success: true,
-      message: 'Booking cancelled successfully',
+    // AuditLog: Log booking cancellation
+    await createAuditLog({
+      userId: req.user!.id,
+      userRole: req.user!.role,
+      action: 'UPDATE',
+      resource: 'Booking',
+      resourceId: id,
+      metadata: { oldStatus: 'PENDING', newStatus: 'REFUNDED', visitStatus: 'CANCELLED', reason: 'Patient cancelled' },
+      ipAddress: req.ip,
+      userAgent: req.get('User-Agent'),
     });
+
+    res.json({ success: true, message: 'Booking cancelled successfully' });
   } catch (error) {
     next(error);
   }
