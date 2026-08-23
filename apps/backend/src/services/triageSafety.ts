@@ -277,3 +277,14 @@ export function assessDeterministicRisk(
 
     return { minTriageLevel, hardFlags, cautionFlags };
 }
+
+/**
+ * Check if image evidence forces doctor review
+ * When an image is submitted but VisualDx is not enabled, force review
+ */
+export function checkImageEvidence(imageSubmitted: boolean, visualDxEnabled: boolean = false): { forceReview: boolean; flag?: string } {
+  if (imageSubmitted && !visualDxEnabled) {
+    return { forceReview: true, flag: 'IMAGE_EVIDENCE_MISSING' };
+  }
+  return { forceReview: false };
+}
