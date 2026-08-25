@@ -9,6 +9,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import Joi from 'joi';
 import prisma from '../lib/prisma';
+import { createAuditLog } from '../services/auditLog';
 
 const router: Router = Router();
 
@@ -54,6 +55,17 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
         userAgent,
       },
     });
+
+    await createAuditLog({
+      userId,
+      userRole: (req as any).user?.role,
+      action: 'CREATE',
+      resource: 'Consent',
+      resourceId: consent.id,
+      metadata: { consentType: value.consentType, version: value.version },
+      ipAddress,
+      userAgent: typeof userAgent === 'string' ? userAgent : null,
+    }).catch(() => undefined);
 
     res.status(201).json({
       success: true,
@@ -108,6 +120,17 @@ router.delete('/:consentType', async (req: Request, res: Response, next: NextFun
       where: { userId, consentType, withdrawn: false },
       data: { withdrawn: true, withdrawnAt: new Date() },
     });
+
+    await createAuditLog({
+      userId,
+      userRole: (req as any).user?.role,
+      action: 'UPDATE',
+      resource: 'Consent',
+      metadata: { consentType, event: 'CONSENT_WITHDRAWN' },
+      ipAddress: (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()
+        ?? req.socket.remoteAddress ?? null,
+      userAgent: req.headers['user-agent'] ?? null,
+    }).catch(() => undefined);
 
     res.json({
       success: true,

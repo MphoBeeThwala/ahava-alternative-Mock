@@ -38,7 +38,7 @@ router.get('/visits', requireNurse, async (req: AuthenticatedRequest, res, next)
   try {
     const visits = await prisma.visit.findMany({
       where: { nurseId: req.user!.id },
-      include: { patient: { select: { id: true, firstName: true, lastName: true, phone: true } }, booking: { select: { scheduledDate: true, amountInCents: true } } },
+      include: { booking: { select: { scheduledDate: true, amountInCents: true, patient: { select: { id: true, firstName: true, lastName: true, phone: true } } } } },
       orderBy: { scheduledStart: 'desc' }
     });
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'LIST', resource: 'Nurse', metadata: { entity: 'Visit', count: visits.length }, ipAddress: req.ip, userAgent: req.get('User-Agent') });

@@ -64,8 +64,7 @@ async function fetchFromStatPearlsService(
   const url = baseUrl.replace(/\/$/, "") + "/disease-info";
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => contr
-oller.abort(), REQUEST_TIMEOUT_MS);
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -123,8 +122,7 @@ async function fetchAndExtractArticle(url: string): Promise<string | null> {
   const $ = cheerio.load(html);
   const sections: ExtractedSection[] = [];
 
-  // NCBI StatPearls ar
-ticle structure
+  // NCBI StatPearls article structure
   $(".jig-ncbiinpagenav div[id^='article-']").each((_, el) => {
     const heading = $(el).find("> h2").first().text().trim();
     if (!heading) return;
@@ -178,8 +176,7 @@ async function fetchFromNcbi(symptoms: string): Promise<string | null> {
   const query = extractSearchQuery(symptoms);
   const results = await searchNcbiStatPearls(query);
   if (results.length === 0) return null;
-  const top = result
-s[0];
+  const top = results[0];
   const content = await fetchAndExtractArticle(top.url);
   if (!content) return null;
   return `### Reference: ${top.title}\n\n${content}`;

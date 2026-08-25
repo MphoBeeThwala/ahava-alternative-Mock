@@ -105,7 +105,7 @@ async function searchICD11(term: string, baseUrl: string, timeoutMs: number): Pr
     const uri = firstResult.destinationUri || firstResult.uri || '';
 
     // URI format: /icd/release/11/2024-01/mms/12345678
-    const codeMatch = uri.match(//mms/([A-Z0-9]+)/);
+    const codeMatch = uri.match(/\/mms\/([A-Z0-9]+)/);
     if (codeMatch) {
       return codeMatch[1];
     }

@@ -1,4 +1,4 @@
-import { EvidenceProvider, EvidenceProviderConfig, EvidenceProviderRegistry } from './types';
+import { EvidenceProvider, EvidenceProviderConfig, EvidenceProviderRegistry, EvidenceTier } from './types';
 import { whoIcd11Provider } from './providers/whoIcd11';
 import { pubmedProvider } from './providers/pubmed';
 import { africaCdcProvider } from './providers/africaCdc';

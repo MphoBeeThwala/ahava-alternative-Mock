@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 
 export interface PaymentParams {
   amount: number;
@@ -22,8 +21,6 @@ export function usePayment() {
     paymentUrl: null,
     paymentId: null,
   });
-
-  const router = useRouter();
 
   const initiatePayment = async (params: PaymentParams) => {
     setStatus({ loading: true, error: null, paymentUrl: null, paymentId: null });
@@ -54,10 +51,10 @@ export function usePayment() {
         paymentUrl: data.url,
         paymentId: data.paymentId,
       });
-    } catch (error: any) {
+    } catch (error) {
       setStatus({
         loading: false,
-        error: error.message || 'Unknown error',
+        error: error instanceof Error ? error.message : 'Unknown error',
         paymentUrl: null,
         paymentId: null,
       });
@@ -77,7 +74,7 @@ export function usePayment() {
       }
 
       return await response.json();
-    } catch (error: any) {
+    } catch (error) {
       throw error;
     }
   };

@@ -148,7 +148,11 @@ app.use("/api/auth", authRoutes);
 app.use("/api/bookings", authMiddleware, bookingRoutes);
 app.use("/api/visits", authMiddleware, visitRoutes);
 app.use("/api/messages", authMiddleware, messageRoutes);
-app.use("/api/payments", authMiddleware, paymentRoutes);
+// NOTE: no app-level auth on payments - the PayFast ITN webhook is a
+// server-to-server callback that cannot present a JWT. It is protected by
+// PayFast signature verification instead; all other payment routes enforce
+// authMiddleware/requireAdmin inline.
+app.use("/api/payments", paymentRoutes);
 app.use("/api/admin", authMiddleware, adminRoutes);
 app.use("/api/triage", authMiddleware, triageRoutes);
 app.use("/api/triage-cases", authMiddleware, triageCasesRoutes);

@@ -23,7 +23,7 @@ router.post('/:id/release', requireDoctor, async (req: AuthenticatedRequest, res
 // Get cases needing review
 router.get('/pending', requireDoctor, async (req: AuthenticatedRequest, res, next) => {
   try {
-    const cases = await prisma.triageCase.findMany({ where: { status: TriageCaseStatus.PENDING_REVIEW, doctorId: null }, include: { patient: { select: { id: true, firstName: true, lastName: true, age: true } } }, orderBy: { createdAt: 'asc' } });
+    const cases = await prisma.triageCase.findMany({ where: { status: TriageCaseStatus.PENDING_REVIEW, doctorId: null }, include: { patient: { select: { id: true, firstName: true, lastName: true, dateOfBirth: true } } }, orderBy: { createdAt: 'asc' } });
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'LIST', resource: 'TriageCaseReview', metadata: { count: cases.length, status: 'PENDING_REVIEW' }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
     res.json({ success: true, cases });
   } catch (error) { next(error); }

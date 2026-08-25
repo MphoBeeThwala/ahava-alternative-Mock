@@ -37,11 +37,9 @@ export interface TriageRequest {
 
 export interface TriageResult {
     triageLevel: 1 | 2 | 3 | 4 | 5; // 1 = Resuscitation, 5 = Non-urgent
-    possibleConditions: s
-tring[];
+possibleConditions: string[];
     recommendedAction: string;
-    reasoning: s
-tring;
+reasoning: string;
     confidence: number; // 0-1 calibrated confidence (required for guardrails)
     uncertaintyFlags: string[]; // machine-readable uncertainty reasons
     evidenceSources: string[]; // restricted to approved clinical sources
@@ -65,12 +63,9 @@ function buildTriagePrompt(request: TriageRequest, medicalContext?: string | nul
     const safeMedicalContext = boundedText(medicalContext, MAX_PATIENT_CONTEXT_CHARS);
     const safeSymptoms = normalizeSymptoms(request.symptoms);
     const caseId = request.caseId ?? 'UNSPECIFIED_CASE';
-    const patientId = requ
-est.patientId ?? 'ANON_PATIENT';
+    const patientId = request.patientId ?? 'ANON_PATIENT';
 
-    const base
-Prompt = `Act as a strictly objective medical triage assi
-stant trained on the South African Triage Scale (SATS).
+    const basePrompt = `Act as a strictly objective medical triage assistant trained on the South African Triage Scale (SATS).
 Analyze the following symptoms and (optional) image in the context of a South African patient.
 
 CASE ISOLATION CONTRACT:
@@ -128,13 +123,11 @@ function normalizeSymptoms(symptoms: string): string {
 }
 
 function hashInput(value: string): string {
-  return crypto.cr
-eateHash('sha256').update(value).digest('hex');
+  return crypto.createHash('sha256').update(value).digest('hex');
 }
 
 
-function buildInFlightKey(request: TriageRequest): strin
-g {
+function buildInFlightKey(request: TriageRequest): string {
   const pid = request.patientId ?? 'anon';
   const symptoms = normalizeSymptoms(request.symptoms);
   const imageHash = request.imageBase64 ? hashInput(request.imageBase64) : 'no-image';
@@ -387,12 +380,9 @@ async function analyzeWithGemini(
     const parts: any[] = [prompt];
 
     if (request.imageBase64) {
-        const mimeMatch = request.imageBase64.match
-(/^data:(image\/\w+);base64,/);
-        const detected
-MimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
-        const supportedMimeTypes = ['image/j
-peg', 'image/png', 'image/webp', 'image/heic'];
+        const mimeMatch = request.imageBase64.match(/^data:(image\/\w+);base64,/);
+        const detectedMimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+        const supportedMimeTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'];
         const safeMimeType = supportedMimeTypes.includes(detectedMimeType) ? detectedMimeType : 'image/jpeg';
         const cleanBase64 = request.imageBase64.replace(/^data:image\/\w+;base64,/, "");
         parts.push({
@@ -458,12 +448,10 @@ export async function analyzeSymptoms(request: TriageRequest): Promise<TriageRes
       let medicalContext: string | null = null;
       if (combinedEvidence.results.length > 0) {
         medicalContext = combinedEvidence.results.map(r =>
-          '
-
-## ' + r.sourceId.toUpperCase() + ' Reference\n' +
+          '\n\n## ' + r.sourceId.toUpperCase() + ' Reference\n' +
           'Citation: ' + r.citation + '\n' +
           r.content
-        ).join(''););
+        ).join('');
         if (DEBUG) console.log('[aiTriage] Evidence context assembled (' + medicalContext.length + ' chars)');
       }
       const patientCtx = normalizedRequest.patientContext ?? null;

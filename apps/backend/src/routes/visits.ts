@@ -10,10 +10,10 @@ const router: Router = Router();
 router.get('/', authMiddleware, async (req: AuthenticatedRequest, res, next) => {
   try {
     const where: any = {};
-    if (req.user!.role === UserRole.PATIENT) where.patientId = req.user!.id;
+    if (req.user!.role === UserRole.PATIENT) where.booking = { patientId: req.user!.id };
     else if (req.user!.role === UserRole.NURSE) where.nurseId = req.user!.id;
     else if (req.user!.role === UserRole.DOCTOR) where.doctorId = req.user!.id;
-    const visits = await prisma.visit.findMany({ where, include: { patient: { select: { id: true, firstName: true, lastName: true } }, nurse: { select: { id: true, firstName: true, lastName: true } } }, orderBy: { createdAt: 'desc' } });
+    const visits = await prisma.visit.findMany({ where, include: { booking: { select: { patientId: true, patient: { select: { id: true, firstName: true, lastName: true } } } }, nurse: { select: { id: true, firstName: true, lastName: true } } }, orderBy: { createdAt: 'desc' } });
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'LIST', resource: 'Visit', metadata: { count: visits.length, role: req.user!.role }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
     res.json({ success: true, visits });
   } catch (error) { next(error); }
@@ -23,11 +23,11 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res, next) => 
 router.get('/:id', authMiddleware, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
-    const visit = await prisma.visit.findUnique({ where: { id }, include: { patient: true, nurse: true, doctor: true, messages: { orderBy: { createdAt: 'desc' }, take: 10 } } });
+    const visit = await prisma.visit.findUnique({ where: { id }, include: { booking: { select: { patientId: true, patient: { select: { id: true, firstName: true, lastName: true } } } }, nurse: true, doctor: true, messages: { orderBy: { createdAt: 'desc' }, take: 10 } } });
     if (!visit) return res.status(404).json({ error: 'Visit not found' });
-    const isAuthorized = req.user!.role === UserRole.ADMIN || visit.patientId === req.user!.id || visit.nurseId === req.user!.id || visit.doctorId === req.user!.id;
+    const isAuthorized = req.user!.role === UserRole.ADMIN || visit.booking.patientId === req.user!.id || visit.nurseId === req.user!.id || visit.doctorId === req.user!.id;
     if (!isAuthorized) return res.status(403).json({ error: 'Access denied' });
-    await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'READ', resource: 'Visit', resourceId: visit.id, metadata: { patientId: visit.patientId, nurseId: visit.nurseId, status: visit.status }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
+    await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'READ', resource: 'Visit', resourceId: visit.id, metadata: { patientId: visit.booking.patientId, nurseId: visit.nurseId, status: visit.status }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
     res.json({ success: true, visit });
   } catch (error) { next(error); }
 });

@@ -253,7 +253,7 @@ async function callInfermedica(
       return null;
     }
 
-    const data: InfermedicaResponse = await response.json();
+    const data = await response.json() as InfermedicaResponse;
     return data;
   } catch (error: any) {
     console.warn('[Infermedica] API call failed:', error.message);

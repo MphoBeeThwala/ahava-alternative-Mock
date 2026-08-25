@@ -129,7 +129,7 @@ async function searchNcbiStatPearls(query: string, apiKey: string, timeoutMs: nu
     if (!title || !href) return;
     const url = href.startsWith("http")
       ? href
-      : new URL(href, baseUrl).toString();
+      : new URL(href, "https://www.ncbi.nlm.nih.gov").toString();
     const desc = $el.find("p").first().text().trim();
     results.push({ title, url });
   });

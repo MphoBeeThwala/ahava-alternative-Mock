@@ -773,13 +773,22 @@ router.post("/resend-verification", authRateLimiter, async (req, res, next) => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /auth/manual-verify — bypass email verification (Trial/Dev mode)
+// POST /auth/manual-verify — bypass email verification
+// Dev/trial convenience only: in production this is restricted to ADMINs.
 // ---------------------------------------------------------------------------
 router.post(
   "/manual-verify",
   authMiddleware,
   async (req: AuthenticatedRequest, res) => {
     try {
+      if (
+        process.env.NODE_ENV === "production" &&
+        req.user!.role !== "ADMIN"
+      ) {
+        return res
+          .status(403)
+          .json({ error: "Manual verification is not available." });
+      }
       const userId = req.user!.id;
       await (prisma.user.update as Function)({
         where: { id: userId },

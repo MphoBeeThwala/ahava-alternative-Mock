@@ -11,7 +11,16 @@ const prisma = new PrismaClient();
 /**
  * AuditLog action types
  */
-export type AuditAction = 'READ' | 'CREATE' | 'UPDATE' | 'DELETE' | 'EXPORT' | 'LIST';
+export type AuditAction =
+  | 'READ'
+  | 'CREATE'
+  | 'UPDATE'
+  | 'DELETE'
+  | 'EXPORT'
+  | 'LIST'
+  | 'PAYMENT_INITIATED'
+  | 'PAYMENT_COMPLETED'
+  | 'PAYMENT_REFUNDED';
 
 /**
  * Entity types for AuditLog

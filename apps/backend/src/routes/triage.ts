@@ -9,6 +9,7 @@ import { broadcastToUsers } from "../services/websocket";
 import prisma from "../lib/prisma";
 import { randomUUID } from "crypto";
 import { hashValue, writeClinicalAudit } from "../services/clinicalAudit";
+import { sanitizeDataUrlImage } from "../utils/imageUtils";
 
 const router: Router = Router();
 
@@ -21,7 +22,8 @@ router.post(
   requireConsent("AI_TRIAGE"),
   async (req: AuthenticatedRequest, res, next) => {
     try {
-      const { symptoms, imageBase64 } = req.body;
+      const { symptoms } = req.body;
+      let { imageBase64 } = req.body;
       const patientId = req.user?.id;
       const caseId = randomUUID();
 
@@ -32,6 +34,23 @@ router.post(
       }
       if (!patientId) {
         return res.status(401).json({ error: "Not authenticated" });
+      }
+
+      // ── Privacy: strip EXIF/GPS metadata from the photo before it reaches
+      // any AI provider. If the image cannot be processed, drop it rather
+      // than forwarding unstripped PHI.
+      if (imageBase64) {
+        try {
+          imageBase64 = await sanitizeDataUrlImage(imageBase64);
+          if (!imageBase64) {
+            console.warn(
+              "[triage] Image dropped: could not be sanitized (EXIF strip failed)",
+            );
+          }
+        } catch (imgErr) {
+          console.warn("[triage] Image sanitization failed, dropping image:", imgErr);
+          imageBase64 = undefined;
+        }
       }
 
       // ── Enrich AI prompt with patient's real health data ──────────────────
@@ -51,8 +70,7 @@ router.post(
         const [readings, alerts, baseline, userInfo] = await Promise.all([
           prisma.biometricReading.findMany({
             where: { userId: patientId },
-            or
-derBy: { createdAt: "desc" },
+            orderBy: { createdAt: "desc" },
             take: 5,
             select: {
               heartRate: true,
@@ -109,8 +127,7 @@ derBy: { createdAt: "desc" },
             temperature: latest.temperature ?? null,
             bloodPressureSystolic: latest.bloodPressureSystolic ?? null,
             bloodPressureDiastolic: latest.bloodPressureDiastolic ?? null,
-            h
-rvRmssd: latest.hrvRmssd ?? null,
+            hrvRmssd: latest.hrvRmssd ?? null,
           };
           const parts: string[] = [];
           if (latest.heartRate != null)

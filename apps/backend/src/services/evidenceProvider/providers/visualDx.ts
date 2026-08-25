@@ -132,10 +132,8 @@ export function visualDxProvider(config: EvidenceProviderConfig): EvidenceProvid
           
           results.push({
             sourceId: 'visualdx',
-            content: 'VisualDx Image Analysis: Top diagnoses - ' + diagnosisNames + 
-              '. Average probability: ' + (avgProbability * 100).toFixed(1) + '%'.
-              + (topResult.observations?.length ? ' Observations: ' + topResult.observations.map(o => o.name).join(', ') : ''),
-            citation: 'VisualDx API v1 - Search ID: ' + response.meta.searchId,
+            content: 'VisualDx Image Analysis: Top diagnoses - ' + diagnosisNames + '. Average probability: ' + (avgProbability * 100).toFixed(1) + '%' + (topResult.observations?.length ? ' Observations: ' + topResult.observations.map(o => o.name).join(', ') : ''),
+            citation: 'VisualDx API v1 - Search ID: the above',
             confidence: avgProbability,
             retrievedAt: new Date().toISOString(),
           });
@@ -207,7 +205,7 @@ async function callVisualDx(
       return null;
     }
 
-    const data: VisualDxResponse = await response.json();
+    const data = await response.json() as VisualDxResponse;
     return data;
   } catch (error: any) {
     console.warn('[VisualDx] API call failed:', error.message);

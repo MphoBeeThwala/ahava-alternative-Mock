@@ -464,8 +464,7 @@ export async function runValidationTests(testCases?: ValidationTestCase[]): Prom
     const casesToRun = testCases || TEST_CASES;
     const results: ValidationResult[] = [];
     
-    console.log('Running ' + casesToRun.length + ' validation tests...
-');
+    console.log('Running ' + casesToRun.length + ' validation tests...\n');
     
     for (const testCase of casesToRun) {
         process.stdout.write('[' + testCase.category.toUpperCase() + '] ' + testCase.name + '... ');
@@ -496,46 +495,26 @@ export async function generateValidationReport(): Promise<string> {
     
     const avgConfidence = results.reduce((sum, r) => sum + (r.actualConfidence || 0), 0) / results.filter(r => r.actualConfidence !== undefined).length;
     
-    let report = '
-';
-    report += '='.repeat(80) + '
-';
-    report += 'EVIDENCE PROVIDER VALIDATION TEST REPORT
-';
-    report += '='.repeat(80) + '
+    let report = '\n';
+    report += '='.repeat(80) + '\n';
+    report += 'EVIDENCE PROVIDER VALIDATION TEST REPORT\n';
+    report += '='.repeat(80) + '\n\n';
 
-';
-    
-    report += 'Generated: ' + new Date().toISOString() + '
-';
-    report += 'Total Tests: ' + total + '
-';
-    report += 'Passed: ' + passed + ' (' + ((passed / total) * 100).toFixed(1) + '%)
-';
-    report += 'Failed: ' + failed + ' (' + ((failed / total) * 100).toFixed(1) + '%)
+    report += 'Generated: ' + new Date().toISOString() + '\n';
+    report += 'Total Tests: ' + total + '\n';
+    report += 'Passed: ' + passed + ' (' + ((passed / total) * 100).toFixed(1) + '%)\n';
+    report += 'Failed: ' + failed + ' (' + ((failed / total) * 100).toFixed(1) + '%)\n\n';
 
-';
-    
-    report += 'By Category:
-';
-    report += '-'.repeat(40) + '
-';
-    report += 'Emergency: ' + emergencyPassed + '/' + emergencyTotal + ' passed (' + ((emergencyPassed / emergencyTotal) * 100).toFixed(1) + '%)
-';
-    report += 'Common: ' + commonPassed + '/' + commonTotal + ' passed (' + ((commonPassed / commonTotal) * 100).toFixed(1) + '%)
-';
-    report += 'Other: ' + otherPassed + '/' + otherTotal + ' passed (' + ((otherPassed / otherTotal) * 100).toFixed(1) + '%)
+    report += 'By Category:\n';
+    report += '-'.repeat(40) + '\n';
+    report += 'Emergency: ' + emergencyPassed + '/' + emergencyTotal + ' passed (' + ((emergencyPassed / emergencyTotal) * 100).toFixed(1) + '%)\n';
+    report += 'Common: ' + commonPassed + '/' + commonTotal + ' passed (' + ((commonPassed / commonTotal) * 100).toFixed(1) + '%)\n';
+    report += 'Other: ' + otherPassed + '/' + otherTotal + ' passed (' + ((otherPassed / otherTotal) * 100).toFixed(1) + '%)\n\n';
 
-';
-    
-    report += 'Average Confidence: ' + avgConfidence.toFixed(2) + '
+    report += 'Average Confidence: ' + avgConfidence.toFixed(2) + '\n\n';
 
-';
-    
-    report += 'Provider Performance:
-';
-    report += '-'.repeat(40) + '
-';
+    report += 'Provider Performance:\n';
+    report += '-'.repeat(40) + '\n';
     
     const providerStats: Record<string, { total: number; passed: number; avgScore: number }> = {};
     results.forEach(r => {
@@ -555,36 +534,24 @@ export async function generateValidationReport(): Promise<string> {
     
     Object.entries(providerStats).forEach(([provider, stats]) => {
         const avg = stats.total > 0 ? stats.avgScore / stats.passed : 0;
-        report += provider + ': ' + stats.passed + '/' + stats.total + ' passed, avg score: ' + avg.toFixed(2) + '
-';
+        report += provider + ': ' + stats.passed + '/' + stats.total + ' passed, avg score: ' + avg.toFixed(2) + '\n';
     });
-    
-    if (failed > 0) {
-        report += '
 
-Failed Tests:
-';
-        report += '-'.repeat(40) + '
-';
+    if (failed > 0) {
+        report += '\n\nFailed Tests:\n';
+        report += '-'.repeat(40) + '\n';
         results.filter(r => !r.passed).forEach((r, i) => {
-            report += (i + 1) + '. [' + r.category.toUpperCase() + '] ' + r.testCaseName + '
-';
-            report += '   Error: ' + r.error + '
-';
-            report += '   Expected: ' + r.actualOutcome + '
-';
+            report += (i + 1) + '. [' + r.category.toUpperCase() + '] ' + r.testCaseName + '\n';
+            report += '   Error: ' + r.error + '\n';
+            report += '   Expected: ' + r.actualOutcome + '\n';
             if (r.actualEvidenceSources) {
-                report += '   Sources: ' + r.actualEvidenceSources.join(', ') + '
-';
+                report += '   Sources: ' + r.actualEvidenceSources.join(', ') + '\n';
             }
-            report += '
-';
+            report += '\n';
         });
     }
-    
-    report += '
-' + '='.repeat(80) + '
-';
+
+    report += '\n' + '='.repeat(80) + '\n';
     
     // Save report to file
     const fs = require('fs');
@@ -656,4 +623,4 @@ export function getTestStatistics(results: ValidationResult[]): {
     };
 }
 
-export { TEST_CASES, ValidationTestCase, ValidationResult };
+export { TEST_CASES };

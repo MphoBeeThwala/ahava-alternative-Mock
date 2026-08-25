@@ -13,7 +13,7 @@ export default function TermsOfServicePage() {
         <div style={{ background: "white", borderRadius: 16, padding: "32px 36px", boxShadow: "0 2px 16px rgba(0,0,0,0.06)", lineHeight: 1.8, color: "#334155" }}>
 
           <h2 style={{ fontSize: 20, fontWeight: 800, color: "#0f172a", marginTop: 0 }}>1. Acceptance of Terms</h2>
-          <p>By creating an account or using the Ahava Healthcare platform ("Platform"), you agree to these Terms of Service. If you do not agree, do not use the Platform. These terms are governed by the laws of the Republic of South Africa.</p>
+          <p>By creating an account or using the Ahava Healthcare platform (&quot;Platform&quot;), you agree to these Terms of Service. If you do not agree, do not use the Platform. These terms are governed by the laws of the Republic of South Africa.</p>
 
           <h2 style={{ fontSize: 20, fontWeight: 800, color: "#0f172a" }}>2. Description of Service</h2>
           <p>Ahava Healthcare is a digital health coordination platform that connects patients with registered nurses and doctors for home visits, remote monitoring, and health tracking. The Platform is not an emergency service. In case of a medical emergency, call 112 or your local emergency number immediately.</p>

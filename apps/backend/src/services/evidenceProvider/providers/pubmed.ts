@@ -53,7 +53,7 @@ export function pubmedProvider(config: EvidenceProviderConfig): EvidenceProvider
         const searchTerms = extractSearchTerms(symptoms);
         
         // Search PubMed
-        const pmidList = await searchPubMed(searchTerms, baseUrl, apiKey, timeoutMs);
+        const pmidList = await searchPubMed(searchTerms, baseUrl, apiKey, timeoutMs, maxResults);
         
         if (pmidList.length === 0) {
           return [];
@@ -116,7 +116,7 @@ function extractSearchTerms(symptoms: string): string {
 /**
  * Search PubMed for relevant articles
  */
-async function searchPubMed(terms: string, baseUrl: string, apiKey: string, timeoutMs: number): Promise<string[]> {
+async function searchPubMed(terms: string, baseUrl: string, apiKey: string, timeoutMs: number, maxResults: number): Promise<string[]> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);

@@ -11,10 +11,10 @@ router.get('/visit/:visitId', authMiddleware, async (req: AuthenticatedRequest, 
     const { visitId } = req.params;
     const visit = await prisma.visit.findUnique({
       where: { id: visitId },
-      select: { patientId: true, nurseId: true, doctorId: true },
+      select: { nurseId: true, doctorId: true, booking: { select: { patientId: true } } },
     });
     if (!visit) return res.status(404).json({ error: 'Visit not found' });
-    const isAuthorized = req.user!.role === UserRole.ADMIN || visit.patientId === req.user!.id || visit.nurseId === req.user!.id || visit.doctorId === req.user!.id;
+    const isAuthorized = req.user!.role === UserRole.ADMIN || visit.booking.patientId === req.user!.id || visit.nurseId === req.user!.id || visit.doctorId === req.user!.id;
     if (!isAuthorized) return res.status(403).json({ error: 'Access denied' });
     const messages = await prisma.message.findMany({ where: { visitId }, orderBy: { createdAt: 'asc' } });
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'LIST', resource: 'Message', metadata: { visitId, count: messages.length }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
@@ -25,9 +25,9 @@ router.get('/visit/:visitId', authMiddleware, async (req: AuthenticatedRequest, 
 router.post('/', authMiddleware, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { visitId, recipientId, content, type } = req.body;
-    const visit = await prisma.visit.findUnique({ where: { id: visitId }, select: { id: true, patientId: true, nurseId: true, doctorId: true } });
+    const visit = await prisma.visit.findUnique({ where: { id: visitId }, select: { id: true, nurseId: true, doctorId: true, booking: { select: { patientId: true } } } });
     if (!visit) return res.status(404).json({ error: 'Visit not found' });
-    const isAuthorized = req.user!.role === UserRole.ADMIN || visit.patientId === req.user!.id || visit.nurseId === req.user!.id || visit.doctorId === req.user!.id;
+    const isAuthorized = req.user!.role === UserRole.ADMIN || visit.booking.patientId === req.user!.id || visit.nurseId === req.user!.id || visit.doctorId === req.user!.id;
     if (!isAuthorized) return res.status(403).json({ error: 'Access denied' });
     const message = await prisma.message.create({ data: { visitId, senderId: req.user!.id, recipientId, content, type: type || 'TEXT' } });
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'CREATE', resource: 'Message', resourceId: message.id, metadata: { visitId, recipientId, type }, ipAddress: req.ip, userAgent: req.get('User-Agent') });

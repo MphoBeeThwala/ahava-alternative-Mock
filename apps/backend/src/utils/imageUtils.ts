@@ -57,7 +57,7 @@ export async function stripMetadataFromBuffer(
   const mergedOptions = { ...DEFAULT_OPTIONS, ...options };
   
   const processor = sharp(buffer);
-  
+
   // Resize if needed
   if (mergedOptions.maxWidth || mergedOptions.maxHeight) {
     processor.resize({
@@ -67,10 +67,15 @@ export async function stripMetadataFromBuffer(
       withoutEnlargement: true,
     });
   }
-  
-  // Strip all metadata by default
-  processor.withMetadata({});
-  
+
+  // Auto-rotate using EXIF orientation BEFORE stripping metadata, so the
+  // output pixels are correctly oriented without relying on EXIF.
+  processor.rotate();
+
+  // NOTE: sharp strips ALL metadata (EXIF/GPS/ICC comments) by default when
+  // encoding the output. Do NOT call .withMetadata() here - that would
+  // re-embed the metadata we are trying to remove.
+
   // Convert format and set quality
   return processor
     .toFormat(mergedOptions.format, {
@@ -82,10 +87,20 @@ export async function stripMetadataFromBuffer(
 }
 
 /**
+ * Minimal shape of an uploaded file (multer-compatible)
+ */
+export interface UploadedFile {
+  buffer: Buffer;
+  originalname: string;
+  mimetype: string;
+  size: number;
+}
+
+/**
  * Processes an uploaded image for safe storage
  */
 export async function processUploadedImage(
-  file: Express.Multer.File,
+  file: UploadedFile,
   options: ImageProcessingOptions = {},
 ): Promise<{
   buffer: Buffer;
@@ -111,6 +126,30 @@ export async function processUploadedImage(
     width: metadata.width || 0,
     height: metadata.height || 0,
   };
+}
+
+/**
+ * Strips EXIF/metadata from a base64 data-URL image (e.g. patient photos
+ * submitted to AI triage). Returns a cleaned data URL, or null when the
+ * input is not a processable image (callers should then drop the image
+ * rather than forward unstripped PHI).
+ */
+export async function sanitizeDataUrlImage(
+  dataUrl: string,
+  options: ImageProcessingOptions = {},
+): Promise<string | null> {
+  const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/s.exec(dataUrl.trim());
+  if (!match) return null;
+
+  const mimeType = match[1].toLowerCase();
+  const buffer = Buffer.from(match[2], 'base64');
+  if (buffer.length === 0) return null;
+
+  const isValid = await validateImageBuffer(buffer);
+  if (!isValid) return null;
+
+  const cleanedBuffer = await stripMetadataFromBuffer(buffer, options);
+  return `data:${mimeType};base64,${cleanedBuffer.toString('base64')}`;
 }
 
 /**
@@ -146,5 +185,6 @@ export default {
   validateImageBuffer,
   stripMetadataFromBuffer,
   processUploadedImage,
+  sanitizeDataUrlImage,
   stripImageMetadataMiddleware,
 };

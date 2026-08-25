@@ -15,6 +15,7 @@ export interface PayFastVerificationData {
   txn_id?: string;
   amount_gross?: string;
   custom_str1?: string;
+  signature?: string;
   [key: string]: any;
 }
 
@@ -61,9 +62,33 @@ export class PayFastService {
   }
 
   async verifyPayment(data: PayFastVerificationData): Promise<boolean> {
-    // Verify the signature from PayFast
-    // This is a placeholder - actual implementation requires PayFast credentials
-    return true;
+    // PayFast ITN signature verification:
+    // MD5 over all posted fields (except `signature`), sorted alphabetically,
+    // concatenated as urlencoded key=value joined by '&', with the passphrase
+    // appended as a final '&passphrase=...' segment when configured.
+    if (!data || typeof data !== 'object') return false;
+
+    const received = String(data.signature ?? '').toLowerCase();
+    if (!received) return false;
+
+    const entries = Object.keys(data)
+      .filter((k) => k !== 'signature' && k !== 'rawBody')
+      .filter((k) => data[k] !== undefined && data[k] !== null && data[k] !== '')
+      .sort()
+      .map((k) => `${k}=${encodeURIComponent(String(data[k])).replace(/%20/g, '+')}`);
+
+    let signatureString = entries.join('&');
+    if (this.passPhrase) {
+      signatureString += `&passphrase=${encodeURIComponent(this.passPhrase).replace(/%20/g, '+')}`;
+    }
+
+    const expected = crypto.createHash('md5').update(signatureString).digest('hex');
+
+    // Timing-safe comparison to avoid leaking the signature via early exit
+    const a = Buffer.from(received, 'utf8');
+    const b = Buffer.from(expected, 'utf8');
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
   }
 
   private generateSignature(data: PayFastPaymentData): string {
