@@ -6,7 +6,11 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+  // Uses Railway's PgBouncer pooled connection endpoint (transaction mode).
+  // This multiplexes many application connections onto a small number of
+  // real Postgres connections, which is required when running multiple
+  // backend replicas under high concurrency (see src/lib/prisma.ts).
+  url      = env("POOLED_DATABASE_URL")
 }
 
 enum UserRole {
