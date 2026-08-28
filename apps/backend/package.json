@@ -24,9 +24,6 @@
     "db:reset": "prisma migrate reset --force",
     "validate:env": "node scripts/validate-env.js"
   },
-  "prisma": {
-    "seed": "tsx src/seed.ts"
-  },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "@prisma/client": "6.19.3",
