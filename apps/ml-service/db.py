@@ -42,21 +42,37 @@ def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
     if _pool is None:
         if not _db_url:
             raise RuntimeError("DATABASE_URL environment variable not set")
+        min_conn = int(os.getenv("ML_DB_POOL_MIN", "5"))
+        max_conn = int(os.getenv("ML_DB_POOL_MAX", "30"))
         _pool = psycopg2.pool.ThreadedConnectionPool(
-            minconn=1,
-            maxconn=10,
+            minconn=min_conn,
+            maxconn=max_conn,
             dsn=_db_url,
         )
-        logger.info("[db] Connection pool created")
+        logger.info("[db] Connection pool created min=%s max=%s", min_conn, max_conn)
     return _pool
 
 
-def _get_conn():
-    return _get_pool().getconn()
+def _get_conn(timeout: float = 5.0):
+    """Get connection with retry - avoids immediate PoolError under burst."""
+    import time
+    pool = _get_pool()
+    deadline = time.time() + timeout
+    last_err = None
+    while time.time() < deadline:
+        try:
+            return pool.getconn()
+        except psycopg2.pool.PoolError as e:
+            last_err = e
+            time.sleep(0.05)
+    raise last_err if last_err else psycopg2.pool.PoolError("connection pool exhausted (timeout)")
 
 
 def _put_conn(conn):
-    _get_pool().putconn(conn)
+    try:
+        _get_pool().putconn(conn)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +190,15 @@ def save_biometric(
         row["anomalies"] = anomalies
         _memory_biometrics.setdefault(user_id, []).append(row)
         return
-    conn = _get_conn()
+    try:
+        conn = _get_conn()
+    except psycopg2.pool.PoolError as e:
+        logger.warning("[db] save_biometric pool exhausted for %s, using memory fallback: %s", user_id, e)
+        row = data.model_dump()
+        row["alert_level"] = alert_level
+        row["anomalies"] = anomalies
+        _memory_biometrics.setdefault(user_id, []).append(row)
+        return
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -204,7 +228,10 @@ def save_biometric(
             )
         conn.commit()
     except Exception:
-        conn.rollback()
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         raise
     finally:
         _put_conn(conn)
@@ -221,7 +248,11 @@ def load_biometrics(user_id: str, days: int = 30) -> List[dict]:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         filtered = [r for r in rows if isinstance(r.get("timestamp"), datetime) and r["timestamp"].astimezone(timezone.utc) >= cutoff]
         return sorted(filtered, key=lambda r: r.get("timestamp") or datetime.now(timezone.utc))
-    conn = _get_conn()
+    try:
+        conn = _get_conn()
+    except psycopg2.pool.PoolError as e:
+        logger.warning("[db] load_biometrics pool exhausted for %s: %s", user_id, e)
+        return []
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
@@ -259,7 +290,11 @@ def load_latest_biometric(user_id: str) -> Optional[dict]:
         if not rows:
             return None
         return max(rows, key=lambda r: r.get("timestamp") or datetime.min.replace(tzinfo=timezone.utc))
-    conn = _get_conn()
+    try:
+        conn = _get_conn()
+    except psycopg2.pool.PoolError as e:
+        logger.warning("[db] load_latest_biometric pool exhausted for %s: %s", user_id, e)
+        return None
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
@@ -294,7 +329,11 @@ def load_latest_biometric(user_id: str) -> Optional[dict]:
 def count_biometrics(user_id: str, days: int = 30) -> int:
     if not _use_db:
         return len(load_biometrics(user_id, days=days))
-    conn = _get_conn()
+    try:
+        conn = _get_conn()
+    except psycopg2.pool.PoolError as e:
+        logger.warning("[db] count_biometrics pool exhausted for %s: %s", user_id, e)
+        return 0
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -319,7 +358,11 @@ def count_biometrics(user_id: str, days: int = 30) -> int:
 def load_context(user_id: str) -> Optional[ContextualProfile]:
     if not _use_db:
         return _memory_context.get(user_id)
-    conn = _get_conn()
+    try:
+        conn = _get_conn()
+    except psycopg2.pool.PoolError as e:
+        logger.warning("[db] load_context pool exhausted for %s: %s", user_id, e)
+        return None
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -350,7 +393,12 @@ def save_context(user_id: str, profile: ContextualProfile) -> None:
     if not _use_db:
         _memory_context[user_id] = profile
         return
-    conn = _get_conn()
+    try:
+        conn = _get_conn()
+    except psycopg2.pool.PoolError as e:
+        logger.warning("[db] save_context pool exhausted for %s, using memory fallback: %s", user_id, e)
+        _memory_context[user_id] = profile
+        return
     try:
         profile_json = json.dumps({
             "age": profile.age,
@@ -366,7 +414,10 @@ def save_context(user_id: str, profile: ContextualProfile) -> None:
             )
         conn.commit()
     except Exception:
-        conn.rollback()
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         raise
     finally:
         _put_conn(conn)
