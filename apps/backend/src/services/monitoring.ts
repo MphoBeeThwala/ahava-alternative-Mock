@@ -358,7 +358,7 @@ export function detectEarlyWarningSigns(
 }
 
 /**
- * Get monitoring summary for a patient
+ * Get monitoring summary for a patient - cached 60s per user in Redis
  */
 export async function getMonitoringSummary(userId: string): Promise<{
   baselineEstablished: boolean;
@@ -367,6 +367,13 @@ export async function getMonitoringSummary(userId: string): Promise<{
   recentAlerts: number;
   trend: "STABLE" | "IMPROVING" | "DECLINING";
 }> {
+  const cacheKey = `monitor:summary:${userId}`;
+  try {
+    const { getRedis } = await import("./redis");
+    const redis = getRedis();
+    const cached = await redis.get(cacheKey);
+    if (cached) return JSON.parse(cached);
+  } catch {}
   // Get baseline status (select only columns that exist in all environments)
   let readings: any[] = [];
   try {
@@ -442,11 +449,17 @@ export async function getMonitoringSummary(userId: string): Promise<{
     else if (secondHalf < firstHalf - 5) trend = "DECLINING";
   }
 
-  return {
+  const result = {
     baselineEstablished,
     daysUntilBaseline,
     currentReadinessScore,
     recentAlerts,
     trend,
   };
+  try {
+    const { getRedis } = await import("./redis");
+    const redis = getRedis();
+    await redis.set(cacheKey, JSON.stringify(result), "EX", 60);
+  } catch {}
+  return result;
 }
