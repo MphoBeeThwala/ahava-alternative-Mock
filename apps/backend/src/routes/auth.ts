@@ -346,11 +346,6 @@ router.post("/login", authRateLimiter, async (req, res, next) => {
     // Successful login — clear any failure counter
     await clearFailedAttempts(email);
 
-    // Purge any existing refresh tokens for this user before issuing a new one.
-    // This prevents a unique-constraint collision when register + login both
-    // execute within the same second (identical JWT iat → identical token hash).
-    await prisma.refreshToken.deleteMany({ where: { userId: user.id } });
-
     // Generate tokens
     const { accessToken, refreshToken } = await generateTokens(
       user.id,
@@ -397,13 +392,25 @@ router.post("/refresh", async (req, res, next) => {
     };
     const tokenHash = hashRefreshToken(refreshToken);
 
-    // Check if refresh token exists in database
-    const tokenRecord = await prisma.refreshToken.findUnique({
-      where: { token: tokenHash },
-      include: { user: true },
-    });
+    // Check Redis first (fast path), fallback to DB
+    let tokenRecord: any = null;
+    let userId: string | null = null;
+    try {
+      const redis = getRedis();
+      userId = await redis.get(`refresh:${tokenHash}`);
+      if (userId) {
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        if (user) tokenRecord = { user, expiresAt: new Date(Date.now() + 86400000), token: tokenHash };
+      }
+    } catch {}
+    if (!tokenRecord) {
+      tokenRecord = await prisma.refreshToken.findUnique({
+        where: { token: tokenHash },
+        include: { user: true },
+      });
+    }
 
-    if (!tokenRecord || tokenRecord.expiresAt < new Date()) {
+    if (!tokenRecord || (tokenRecord.expiresAt && tokenRecord.expiresAt < new Date())) {
       return res
         .status(401)
         .json({ error: "Invalid or expired refresh token" });
@@ -419,10 +426,9 @@ router.post("/refresh", async (req, res, next) => {
       tokenRecord.user.role,
     );
 
-    // Delete old refresh token
-    await prisma.refreshToken.delete({
-      where: { token: tokenHash },
-    });
+    // Delete old refresh token from both stores
+    try { await getRedis().del(`refresh:${tokenHash}`); } catch {}
+    await prisma.refreshToken.delete({ where: { token: tokenHash } }).catch(() => {});
 
     res.json({
       success: true,
@@ -441,9 +447,10 @@ router.post("/logout", async (req, res, next) => {
 
     if (refreshToken) {
       const tokenHash = hashRefreshToken(refreshToken);
+      try { await getRedis().del(`refresh:${tokenHash}`); } catch {}
       await prisma.refreshToken.deleteMany({
         where: { token: tokenHash },
-      });
+      }).catch(() => {});
     }
 
     res.json({ success: true, message: "Logged out successfully" });
@@ -452,37 +459,12 @@ router.post("/logout", async (req, res, next) => {
   }
 });
 
-// Get current user profile
-router.get("/me", async (req, res, next) => {
+// Get current user profile - uses authMiddleware cache (Redis + in-memory, 5m TTL)
+router.get("/me", authMiddleware, async (req: AuthenticatedRequest, res, next) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({ error: "No token provided" });
-    }
-
-    const token = authHeader.substring(7);
-
-    if (!process.env.JWT_SECRET) {
-      throw new Error("JWT_SECRET not configured");
-    }
-
-    let decoded: { userId: string };
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET) as { userId: string };
-    } catch (verifyError) {
-      const errName = (verifyError as { name?: string })?.name;
-      if (errName === "TokenExpiredError") {
-        return res
-          .status(401)
-          .json({ error: "Token expired", code: "TOKEN_EXPIRED" });
-      }
-      return res
-        .status(401)
-        .json({ error: "Invalid token", code: "TOKEN_INVALID" });
-    }
-
+    const userId = req.user!.id;
     const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
+      where: { id: userId },
       select: {
         id: true,
         email: true,
@@ -837,24 +819,35 @@ async function generateTokens(userId: string, role: string) {
   const refreshExpiry = process.env.REFRESH_TOKEN_EXPIRES_IN
     ? parseExpiry(process.env.REFRESH_TOKEN_EXPIRES_IN)
     : 604800; // 7d
-  const accessToken = jwt.sign({ userId, role }, secret, {
+  const jti = crypto.randomUUID();
+  const accessToken = jwt.sign({ userId, role, jti: `${jti}-a` }, secret, {
     expiresIn: accessExpiry,
   });
-  const refreshToken = jwt.sign({ userId, role }, secret, {
+  const refreshToken = jwt.sign({ userId, role, jti: `${jti}-r` }, secret, {
     expiresIn: refreshExpiry,
   });
   const refreshTokenHash = hashRefreshToken(refreshToken);
 
-  // Store refresh token in database
+  // Store refresh token - Redis primary (fast, no DB lock), DB fallback
   const expiresAt = new Date(Date.now() + refreshExpiry * 1000);
-
-  await prisma.refreshToken.create({
-    data: {
-      token: refreshTokenHash,
-      userId,
-      expiresAt,
-    },
-  });
+  try {
+    const redis = getRedis();
+    await redis.set(`refresh:${refreshTokenHash}`, userId, 'EX', refreshExpiry);
+  } catch {
+    // Redis unavailable - will fall through to DB
+  }
+  try {
+    await prisma.refreshToken.create({
+      data: {
+        token: refreshTokenHash,
+        userId,
+        expiresAt,
+      },
+    });
+  } catch (e: any) {
+    // P2002 unique constraint = hash collision within same second - safe to ignore due to jti
+    if (e?.code !== 'P2002') throw e;
+  }
 
   return { accessToken, refreshToken };
 }

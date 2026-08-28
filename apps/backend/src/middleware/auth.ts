@@ -14,6 +14,23 @@ export interface AuthenticatedRequest extends Request {
 
 const userCache = new Map<string, { user: NonNullable<AuthenticatedRequest['user']>; expiresAt: number }>();
 
+async function getCachedUser(userId: string): Promise<NonNullable<AuthenticatedRequest['user']> | null> {
+  try {
+    const { getRedis } = await import('../services/redis');
+    const redis = getRedis();
+    const cached = await redis.get(`auth:user:${userId}`);
+    if (cached) return JSON.parse(cached);
+  } catch {}
+  return null;
+}
+async function setCachedUser(userId: string, user: NonNullable<AuthenticatedRequest['user']>, ttlSeconds: number) {
+  try {
+    const { getRedis } = await import('../services/redis');
+    const redis = getRedis();
+    await redis.set(`auth:user:${userId}`, JSON.stringify(user), 'EX', ttlSeconds);
+  } catch {}
+}
+
 export const authMiddleware = async (
   req: AuthenticatedRequest,
   res: Response,
@@ -53,10 +70,17 @@ export const authMiddleware = async (
 
     const cacheTtlSeconds = Math.max(
       0,
-      parseInt(process.env.AUTH_USER_CACHE_TTL_SECONDS ?? '60', 10) || 0
+      parseInt(process.env.AUTH_USER_CACHE_TTL_SECONDS ?? '300', 10) || 0
     );
     const now = Date.now();
+    // Try Redis first, then in-memory
     if (cacheTtlSeconds > 0) {
+      const redisUser = await getCachedUser(decoded.userId);
+      if (redisUser) {
+        if (!redisUser.isActive) return res.status(401).json({ error: 'Invalid or inactive user' });
+        req.user = redisUser;
+        return next();
+      }
       const cached = userCache.get(decoded.userId);
       if (cached && cached.expiresAt > now) {
         if (!cached.user.isActive) {
@@ -86,6 +110,7 @@ export const authMiddleware = async (
     req.user = user;
     if (cacheTtlSeconds > 0) {
       userCache.set(decoded.userId, { user, expiresAt: now + cacheTtlSeconds * 1000 });
+      await setCachedUser(decoded.userId, user, cacheTtlSeconds);
     }
     next();
   } catch (error) {
