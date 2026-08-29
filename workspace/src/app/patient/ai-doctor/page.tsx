@@ -156,7 +156,7 @@ export default function AiDoctorPage() {
     setLoading(true);
     try {
       const result = await patientApi.submitTriage(payload);
-      if (result.status === 'PENDING_REVIEW' && result.triageCaseId) {
+      if ((result.status === 'PENDING_REVIEW' || (result.success && result.triageCaseId)) && result.triageCaseId) {
         setPendingCase({
           triageCaseId: result.triageCaseId,
           estimatedWaitMinutes: result.meta?.estimatedWaitMinutes ?? 60,

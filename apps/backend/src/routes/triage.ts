@@ -277,10 +277,14 @@ router.post(
       // Patient receives the result via WebSocket when doctor releases it
       res.json({
         success: true,
+        status: "PENDING_REVIEW",
         triageCaseId: triageCase.id,
         slaDeadline: slaDeadline.toISOString(),
         requiresDoctorReview: result.requiresDoctorReview,
         meta: {
+          estimatedWaitMinutes: { 1: 5, 2: 15, 3: 60, 4: 240, 5: 480 }[
+            result.triageLevel
+          ],
           disclaimer:
             "Not a medical diagnosis. Tool for decision support only. Sent to doctor for review.",
           satsLevel: result.triageLevel,
