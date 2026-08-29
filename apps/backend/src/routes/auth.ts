@@ -2,6 +2,7 @@ import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
+import { Prisma } from "@prisma/client";
 import { authRateLimiter } from "../middleware/rateLimiter";
 import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
 import Joi from "joi";
@@ -114,6 +115,134 @@ const refreshTokenSchema = Joi.object({
 
 function hashRefreshToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+type PrismaWriteClient = Prisma.TransactionClient | typeof prisma;
+
+type SignedTokens = {
+  accessToken: string;
+  refreshToken: string;
+  refreshTokenHash: string;
+  expiresAt: Date;
+};
+
+const REFRESH_REPLAY_TTL_SECONDS = Math.max(
+  1,
+  parseInt(process.env.REFRESH_TOKEN_REPLAY_TTL_SECONDS ?? "30", 10) || 30,
+);
+
+function getRefreshReplayCacheKey(tokenHash: string): string {
+  return `auth:refresh:replay:${tokenHash}`;
+}
+
+async function getRefreshReplayTokens(tokenHash: string): Promise<{
+  accessToken: string;
+  refreshToken: string;
+} | null> {
+  try {
+    const redis = getRedis();
+    const raw = await redis.get(getRefreshReplayCacheKey(tokenHash));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as {
+      accessToken?: string;
+      refreshToken?: string;
+    };
+    if (!parsed.accessToken || !parsed.refreshToken) return null;
+    return {
+      accessToken: parsed.accessToken,
+      refreshToken: parsed.refreshToken,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function setRefreshReplayTokens(
+  tokenHash: string,
+  tokens: { accessToken: string; refreshToken: string },
+): Promise<void> {
+  try {
+    const redis = getRedis();
+    await redis.set(
+      getRefreshReplayCacheKey(tokenHash),
+      JSON.stringify(tokens),
+      "EX",
+      REFRESH_REPLAY_TTL_SECONDS,
+    );
+  } catch {
+    // Best effort only — refresh still works without replay protection.
+  }
+}
+
+function createSignedTokens(userId: string, role: string): SignedTokens {
+  if (!process.env.JWT_SECRET) {
+    throw new Error("JWT_SECRET not configured");
+  }
+
+  const secret = process.env.JWT_SECRET as jwt.Secret;
+  const accessExpiry = Math.max(
+    60,
+    process.env.JWT_EXPIRES_IN ? parseExpiry(process.env.JWT_EXPIRES_IN) : 900,
+  ); // 15m default
+  const refreshExpiry = process.env.REFRESH_TOKEN_EXPIRES_IN
+    ? parseExpiry(process.env.REFRESH_TOKEN_EXPIRES_IN)
+    : 604800; // 7d
+
+  const accessToken = jwt.sign({ userId, role }, secret, {
+    expiresIn: accessExpiry,
+  });
+  const refreshToken = jwt.sign({ userId, role }, secret, {
+    expiresIn: refreshExpiry,
+    jwtid: crypto.randomUUID(),
+  });
+  const refreshTokenHash = hashRefreshToken(refreshToken);
+
+  return {
+    accessToken,
+    refreshToken,
+    refreshTokenHash,
+    expiresAt: new Date(Date.now() + refreshExpiry * 1000),
+  };
+}
+
+async function storeRefreshToken(
+  client: PrismaWriteClient,
+  userId: string,
+  refreshTokenHash: string,
+  expiresAt: Date,
+): Promise<void> {
+  await client.refreshToken.create({
+    data: {
+      token: refreshTokenHash,
+      userId,
+      expiresAt,
+    },
+  });
+}
+
+async function rotateRefreshToken(
+  oldTokenHash: string,
+  userId: string,
+  role: string,
+): Promise<SignedTokens | null> {
+  return prisma.$transaction(async (tx) => {
+    const deleted = await tx.refreshToken.deleteMany({
+      where: { token: oldTokenHash },
+    });
+
+    if (deleted.count === 0) {
+      return null;
+    }
+
+    const signedTokens = createSignedTokens(userId, role);
+    await storeRefreshToken(
+      tx,
+      userId,
+      signedTokens.refreshTokenHash,
+      signedTokens.expiresAt,
+    );
+    return signedTokens;
+  });
 }
 
 // Register new user
@@ -387,9 +516,23 @@ router.post("/refresh", async (req, res, next) => {
       throw new Error("JWT_SECRET not configured");
     }
 
-    const _decoded = jwt.verify(refreshToken, process.env.JWT_SECRET) as {
-      userId: string;
-    };
+    let decoded: { userId: string; role: string };
+    try {
+      decoded = jwt.verify(refreshToken, process.env.JWT_SECRET) as {
+        userId: string;
+        role: string;
+      };
+    } catch (verifyError) {
+      const errName = (verifyError as { name?: string })?.name;
+      return res.status(401).json({
+        error: "Invalid or expired refresh token",
+        code:
+          errName === "TokenExpiredError"
+            ? "REFRESH_TOKEN_EXPIRED"
+            : "REFRESH_TOKEN_INVALID",
+      });
+    }
+
     const tokenHash = hashRefreshToken(refreshToken);
 
     // Check Redis first (fast path), fallback to DB
@@ -410,7 +553,20 @@ router.post("/refresh", async (req, res, next) => {
       });
     }
 
-    if (!tokenRecord || (tokenRecord.expiresAt && tokenRecord.expiresAt < new Date())) {
+    if (!tokenRecord) {
+      const replayTokens = await getRefreshReplayTokens(tokenHash);
+      if (replayTokens) {
+        return res.json({
+          success: true,
+          ...replayTokens,
+        });
+      }
+      return res
+        .status(401)
+        .json({ error: "Invalid or expired refresh token" });
+    }
+
+    if (tokenRecord.expiresAt < new Date()) {
       return res
         .status(401)
         .json({ error: "Invalid or expired refresh token" });
@@ -420,20 +576,52 @@ router.post("/refresh", async (req, res, next) => {
       return res.status(401).json({ error: "Account is deactivated" });
     }
 
-    // Generate new tokens
-    const { accessToken, refreshToken: newRefreshToken } = await generateTokens(
+    const rotatedTokens = await rotateRefreshToken(
+      tokenHash,
       tokenRecord.user.id,
-      tokenRecord.user.role,
+      decoded.role || tokenRecord.user.role,
     );
 
-    // Delete old refresh token from both stores
-    try { await getRedis().del(`refresh:${tokenHash}`); } catch {}
-    await prisma.refreshToken.delete({ where: { token: tokenHash } }).catch(() => {});
+    if (!rotatedTokens) {
+      const replayTokens = await getRefreshReplayTokens(tokenHash);
+      if (replayTokens) {
+        return res.json({
+          success: true,
+          ...replayTokens,
+        });
+      }
+
+      return res
+        .status(401)
+        .json({ error: "Invalid or expired refresh token" });
+    }
+
+    try {
+      const redis = getRedis();
+      const refreshTtlSeconds = Math.max(
+        1,
+        Math.ceil((rotatedTokens.expiresAt.getTime() - Date.now()) / 1000),
+      );
+      await redis.del(`refresh:${tokenHash}`);
+      await redis.set(
+        `refresh:${rotatedTokens.refreshTokenHash}`,
+        tokenRecord.user.id,
+        "EX",
+        refreshTtlSeconds,
+      );
+    } catch {
+      // Redis is an optimization; DB state remains authoritative.
+    }
+
+    await setRefreshReplayTokens(tokenHash, {
+      accessToken: rotatedTokens.accessToken,
+      refreshToken: rotatedTokens.refreshToken,
+    });
 
     res.json({
       success: true,
-      accessToken,
-      refreshToken: newRefreshToken,
+      accessToken: rotatedTokens.accessToken,
+      refreshToken: rotatedTokens.refreshToken,
     });
   } catch (error) {
     next(error);
@@ -806,50 +994,39 @@ function parseExpiry(s: string): number {
 
 // Helper function to generate tokens
 async function generateTokens(userId: string, role: string) {
-  if (!process.env.JWT_SECRET) {
-    throw new Error("JWT_SECRET not configured");
-  }
+  const signedTokens = createSignedTokens(userId, role);
 
-  const secret = process.env.JWT_SECRET as jwt.Secret;
-  // Use numeric seconds to satisfy jsonwebtoken SignOptions (avoids StringValue type issue). Minimum 60s so load tests work.
-  const accessExpiry = Math.max(
-    60,
-    process.env.JWT_EXPIRES_IN ? parseExpiry(process.env.JWT_EXPIRES_IN) : 900,
-  ); // 15m default
-  const refreshExpiry = process.env.REFRESH_TOKEN_EXPIRES_IN
-    ? parseExpiry(process.env.REFRESH_TOKEN_EXPIRES_IN)
-    : 604800; // 7d
-  const jti = crypto.randomUUID();
-  const accessToken = jwt.sign({ userId, role, jti: `${jti}-a` }, secret, {
-    expiresIn: accessExpiry,
-  });
-  const refreshToken = jwt.sign({ userId, role, jti: `${jti}-r` }, secret, {
-    expiresIn: refreshExpiry,
-  });
-  const refreshTokenHash = hashRefreshToken(refreshToken);
-
-  // Store refresh token - Redis primary (fast, no DB lock), DB fallback
-  const expiresAt = new Date(Date.now() + refreshExpiry * 1000);
+  const refreshTtlSeconds = Math.max(
+    1,
+    Math.ceil((signedTokens.expiresAt.getTime() - Date.now()) / 1000),
+  );
   try {
     const redis = getRedis();
-    await redis.set(`refresh:${refreshTokenHash}`, userId, 'EX', refreshExpiry);
+    await redis.set(
+      `refresh:${signedTokens.refreshTokenHash}`,
+      userId,
+      "EX",
+      refreshTtlSeconds,
+    );
   } catch {
-    // Redis unavailable - will fall through to DB
-  }
-  try {
-    await prisma.refreshToken.create({
-      data: {
-        token: refreshTokenHash,
-        userId,
-        expiresAt,
-      },
-    });
-  } catch (e: any) {
-    // P2002 unique constraint = hash collision within same second - safe to ignore due to jti
-    if (e?.code !== 'P2002') throw e;
+    // Redis unavailable - DB remains the source of truth.
   }
 
-  return { accessToken, refreshToken };
+  try {
+    await storeRefreshToken(
+      prisma,
+      userId,
+      signedTokens.refreshTokenHash,
+      signedTokens.expiresAt,
+    );
+  } catch (e: any) {
+    if (e?.code !== "P2002") throw e;
+  }
+
+  return {
+    accessToken: signedTokens.accessToken,
+    refreshToken: signedTokens.refreshToken,
+  };
 }
 
 export default router;

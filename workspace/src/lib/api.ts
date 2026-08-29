@@ -6,6 +6,16 @@ function getApiBaseUrl(): string {
   return '/api';
 }
 
+function isRefreshExcludedRequest(url?: string): boolean {
+  if (!url) return false;
+  return [
+    '/auth/refresh',
+    '/auth/login',
+    '/auth/logout',
+    '/auth/register',
+  ].some((path) => url.includes(path));
+}
+
 // Create axios instance with default config
 const apiClient: AxiosInstance = axios.create({
   baseURL: getApiBaseUrl(),
@@ -70,8 +80,16 @@ apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+    const requestUrl =
+      originalRequest && typeof originalRequest.url === 'string'
+        ? originalRequest.url
+        : '';
 
     if (error.response?.status === 401 && originalRequest && !originalRequest._retry && typeof window !== 'undefined') {
+      if (isRefreshExcludedRequest(requestUrl)) {
+        return Promise.reject(error);
+      }
+
       originalRequest._retry = true;
       const path = window.location.pathname || '';
       
