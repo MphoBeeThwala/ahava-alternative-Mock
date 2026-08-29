@@ -55,6 +55,15 @@ router.post(
     try {
       const userId = (req as any).user.id;
 
+      const frontendUrl = (process.env.FRONTEND_URL ?? "").trim().replace(/\/$/, "");
+      if (!TERRA_DEV_ID || !TERRA_API_KEY || !frontendUrl) {
+        return res.status(503).json({
+          success: false,
+          error:
+            "Wearable connection is not configured right now. Please try again later.",
+        });
+      }
+
       // Check if this user is already connected (doesn't count against limit)
       const currentUser = await prisma.user.findUnique({
         where: { id: userId },
@@ -76,8 +85,8 @@ router.post(
       const body = {
         reference_id: userId,
         language: "en",
-        auth_success_redirect_url: `${process.env.FRONTEND_URL ?? ""}/patient/wearable-connected`,
-        auth_failure_redirect_url: `${process.env.FRONTEND_URL ?? ""}/patient/wearable-failed`,
+        auth_success_redirect_url: `${frontendUrl}/patient/wearable-connected`,
+        auth_failure_redirect_url: `${frontendUrl}/patient/wearable-failed`,
       };
 
       const terraRes = await fetch(

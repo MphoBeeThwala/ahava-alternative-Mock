@@ -35,22 +35,27 @@ async function proxy(req: NextRequest, path: string[]) {
     req.method === "GET" || req.method === "HEAD"
       ? undefined
       : await req.arrayBuffer();
+  try {
+    const upstream = await fetch(targetUrl, {
+      method: req.method,
+      headers,
+      body,
+      redirect: "manual",
+      cache: "no-store",
+    });
 
-  const upstream = await fetch(targetUrl, {
-    method: req.method,
-    headers,
-    body,
-    redirect: "manual",
-    cache: "no-store",
-  });
+    const resHeaders = new Headers(upstream.headers);
+    resHeaders.delete("content-length");
+    resHeaders.delete("content-encoding");
+    resHeaders.delete("transfer-encoding");
 
-  const resHeaders = new Headers(upstream.headers);
-  resHeaders.delete("content-length");
-
-  return new NextResponse(upstream.body, {
-    status: upstream.status,
-    headers: resHeaders,
-  });
+    return new NextResponse(upstream.body, {
+      status: upstream.status,
+      headers: resHeaders,
+    });
+  } catch (error) {
+    throw error;
+  }
 }
 
 export async function GET(

@@ -580,68 +580,8 @@ router.get(
                     ? r.temperatureTrend
                     : "normal",
                 },
-              );
-              const clampR = (
-                v: number | null | undefined,
-                min: number,
-                max: number,
-                def: number,
-              ) => (v != null ? Math.min(max, Math.max(min, Number(v))) : def);
-              for (const row of [...recentReadings].reverse()) {
-                const rb = row as any;
-                await axios
-                  .post(
-                    `${ML_SERVICE_URL}/ingest?user_id=${encodeURIComponent(userId)}`,
-                    {
-                      timestamp: rb.createdAt
-                        ? new Date(rb.createdAt).toISOString()
-                        : new Date().toISOString(),
-                      heart_rate_resting: clampR(
-                        rb.heartRateResting ?? rb.heartRate,
-                        30,
-                        200,
-                        72,
-                      ),
-                      hrv_rmssd: clampR(rb.hrvRmssd, 0, 300, 35),
-                      spo2: clampR(rb.oxygenSaturation, 50, 100, 98),
-                      skin_temp_offset: clampR(rb.skinTempOffset, -5, 5, 0),
-                      respiratory_rate: clampR(rb.respiratoryRate, 4, 60, 16),
-                      step_count: Math.max(0, Number(rb.stepCount) || 0),
-                      active_calories: Math.max(
-                        0,
-                        Number(rb.activeCalories) || 0,
-                      ),
-                      sleep_duration_hours: Math.min(
-                        24,
-                        Math.max(0, Number(rb.sleepDurationHours) || 0),
-                      ),
-                      ecg_rhythm: ["regular", "irregular", "unknown"].includes(
-                        rb.ecgRhythm,
-                      )
-                        ? rb.ecgRhythm
-                        : "unknown",
-                      temperature_trend: [
-                        "normal",
-                        "elevated_single_day",
-                        "elevated_over_3_days",
-                      ].includes(rb.temperatureTrend)
-                        ? rb.temperatureTrend
-                        : "normal",
-                    },
-                    {
-                      timeout: 3000,
-                      headers: mlServiceHeaders(),
-                    },
-                  )
-                  .catch(() => {
-                    /* ignore individual ingest failures */
-                  });
-              }
-              const analyzeRes = await axios.post(
-                `${ML_SERVICE_URL}/early-warning/analyze?user_id=${encodeURIComponent(userId)}`,
-                { biometrics, context },
                 {
-                  timeout: 10000,
+                  timeout: 3000,
                   headers: mlServiceHeaders(),
                 },
               );
@@ -652,7 +592,10 @@ router.get(
           const analyzeRes = await axios.post(
             `${ML_SERVICE_URL}/early-warning/analyze?user_id=${encodeURIComponent(userId)}`,
             { biometrics, context },
-            { timeout: 10000 },
+            {
+              timeout: 10000,
+              headers: mlServiceHeaders(),
+            },
           );
           mlData = analyzeRes.data;
         }
