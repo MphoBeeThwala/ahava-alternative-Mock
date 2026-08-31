@@ -31,6 +31,15 @@ async function setCachedUser(userId: string, user: NonNullable<AuthenticatedRequ
   } catch {}
 }
 
+export async function invalidateCachedUser(userId: string) {
+  userCache.delete(userId);
+  try {
+    const { getRedis } = await import("../services/redis");
+    const redis = getRedis();
+    await redis.del(`auth:user:${userId}`);
+  } catch {}
+}
+
 export const authMiddleware = async (
   req: AuthenticatedRequest,
   res: Response,

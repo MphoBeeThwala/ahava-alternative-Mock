@@ -4,7 +4,11 @@ import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 import { authRateLimiter } from "../middleware/rateLimiter";
-import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
+import {
+  authMiddleware,
+  AuthenticatedRequest,
+  invalidateCachedUser,
+} from "../middleware/auth";
 import Joi from "joi";
 import { verifySancRegistration } from "../services/sancVerification";
 import { seedBaselineForUser } from "../services/baselineSeed";
@@ -777,6 +781,7 @@ router.put(
           role: true,
         },
       });
+      await invalidateCachedUser(userId);
 
       res.json({ success: true, user: updated, emailChanged });
     } catch (error) {

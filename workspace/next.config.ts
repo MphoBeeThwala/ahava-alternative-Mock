@@ -9,7 +9,14 @@ const nextConfig: NextConfig = {
     ? {}
     : { output: "standalone" as const }),
   env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:10000",
+    NEXT_PUBLIC_API_URL:
+      process.env.NEXT_PUBLIC_API_URL ||
+      (process.env.NODE_ENV === "production" ? "" : "http://localhost:10000"),
+    NEXT_PUBLIC_BACKEND_URL:
+      process.env.NEXT_PUBLIC_BACKEND_URL ||
+      process.env.BACKEND_PUBLIC_URL ||
+      process.env.BACKEND_URL ||
+      (process.env.NODE_ENV === "production" ? "" : "http://localhost:4000"),
   },
 };
 

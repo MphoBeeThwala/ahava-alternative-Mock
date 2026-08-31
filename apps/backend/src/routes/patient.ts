@@ -1,5 +1,9 @@
 import { Router } from "express";
-import { AuthenticatedRequest, authMiddleware } from "../middleware/auth";
+import {
+  AuthenticatedRequest,
+  authMiddleware,
+  invalidateCachedUser,
+} from "../middleware/auth";
 import { rateLimiter } from "../middleware/rateLimiter";
 import { idempotencyMiddleware } from "../middleware/idempotency";
 import { aiTriageBudgetMiddleware } from "../middleware/aiTriageBudget";
@@ -783,6 +787,7 @@ router.patch(
         where: { id: userId },
         data: { riskProfile: merged as object },
       });
+      await invalidateCachedUser(userId);
 
       const ML_URL = (process.env.ML_SERVICE_URL ?? "").replace(/\/$/, "");
       const mlServiceAvailable = !!ML_URL && !ML_URL.includes("localhost");

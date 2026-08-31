@@ -8,6 +8,7 @@ import apiClient, {
   consentApi,
   type PatientTriageCase,
 } from "../../../lib/api";
+import { getRealtimeWebSocketUrl } from "../../../lib/realtime";
 import { useToast } from "../../../contexts/ToastContext";
 import DashboardLayout from "../../../components/DashboardLayout";
 import { Card, CardHeader, CardTitle } from "../../../components/ui/Card";
@@ -65,6 +66,17 @@ type FollowUpNotice = {
   attachments?: { id: string; fileName: string; url: string; kind: string }[];
 };
 
+function pickCaseToDisplay(cases: PatientTriageCase[]): PatientTriageCase | null {
+  return (
+    cases.find((triageCase) => triageCase.status === "AWAITING_PATIENT_RESPONSE") ??
+    cases.find((triageCase) =>
+      ["PENDING_REVIEW", "ASSIGNED", "REVIEWED"].includes(triageCase.status),
+    ) ??
+    cases[0] ??
+    null
+  );
+}
+
 async function downloadPdf(relativeUrl: string, filename: string) {
   try {
     const res = await apiClient.get(relativeUrl, { responseType: 'blob' });
@@ -120,6 +132,7 @@ export default function AiDoctorPage() {
   const [followUpResponse, setFollowUpResponse] = useState("");
   const [followUpFiles, setFollowUpFiles] = useState<PendingLabResult[]>([]);
   const [submittingFollowUp, setSubmittingFollowUp] = useState(false);
+  const [showNewSubmissionForm, setShowNewSubmissionForm] = useState(false);
 
   const resetCaseState = useCallback(() => {
     setPendingCase(null);
@@ -131,9 +144,13 @@ export default function AiDoctorPage() {
 
   const hydrateCase = useCallback((triageCase: PatientTriageCase | null) => {
     resetCaseState();
-    if (!triageCase) return;
+    if (!triageCase) {
+      setShowNewSubmissionForm(false);
+      return;
+    }
 
     if (triageCase.prescription) {
+      setShowNewSubmissionForm(false);
       setPrescriptionNotice({
         triageCaseId: triageCase.id,
         prescriptionId: triageCase.prescription.id,
@@ -147,6 +164,7 @@ export default function AiDoctorPage() {
     }
 
     if (triageCase.referral) {
+      setShowNewSubmissionForm(false);
       setReferralNotice({
         triageCaseId: triageCase.id,
         referralId: triageCase.referral.id,
@@ -162,6 +180,7 @@ export default function AiDoctorPage() {
     }
 
     if (triageCase.status === 'AWAITING_PATIENT_RESPONSE') {
+      setShowNewSubmissionForm(false);
       setFollowUpNotice({
         id: triageCase.id,
         followUpRequestType: triageCase.followUpRequestType,
@@ -174,6 +193,7 @@ export default function AiDoctorPage() {
     }
 
     if (triageCase.releasedAt) {
+      setShowNewSubmissionForm(false);
       setTriageResult({
         triageLevel: triageCase.finalTriageLevel ?? triageCase.aiTriageLevel,
         recommendedAction: triageCase.aiRecommendedAction,
@@ -197,8 +217,8 @@ export default function AiDoctorPage() {
   const loadExistingCases = useCallback(async () => {
     try {
       const data = await patientApi.getMyTriageCases();
-      const latest = (data.cases as PatientTriageCase[])[0] ?? null;
-      hydrateCase(latest);
+      const cases = data.cases as PatientTriageCase[];
+      hydrateCase(pickCaseToDisplay(cases));
     } catch {
       // keep page usable even if history load fails
     }
@@ -209,21 +229,13 @@ export default function AiDoctorPage() {
     const activeCaseId = pendingCase?.triageCaseId ?? followUpNotice?.id;
     if (!activeCaseId) return;
 
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+    const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
     if (!token) return;
 
-    const envUrl =
-      process.env.NEXT_PUBLIC_BACKEND_URL ||
-      (process.env.NEXT_PUBLIC_API_URL ?? '').replace(/\/api\/?$/, '');
-    const baseUrl =
-      envUrl ||
-      (['localhost', '127.0.0.1'].includes(window.location.hostname)
-        ? 'http://localhost:4000'
-        : null);
-    if (!baseUrl) return;
+    const wsUrl = getRealtimeWebSocketUrl(token);
+    if (!wsUrl) return;
 
-    const wsBase = baseUrl.replace(/^http/, 'ws').replace(/\/+$/, '');
-    const ws = new WebSocket(`${wsBase}/ws?token=${encodeURIComponent(token)}`);
+    const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onmessage = (event) => {
@@ -245,6 +257,7 @@ export default function AiDoctorPage() {
           setPendingCase(null);
           setFollowUpNotice(null);
           toast.success('Your triage result has been released by a doctor.');
+          void loadExistingCases();
         }
 
         if (msg.type === 'PRESCRIPTION_ISSUED' && msg.data?.triageCaseId === activeCaseId) {
@@ -252,6 +265,7 @@ export default function AiDoctorPage() {
           setPendingCase(null);
           setFollowUpNotice(null);
           toast.success(`Prescription issued by ${msg.data.doctorName}. Download your script below.`);
+          void loadExistingCases();
         }
 
         if (msg.type === 'EMERGENCY_REFERRAL_ISSUED' && msg.data?.triageCaseId === activeCaseId) {
@@ -259,6 +273,7 @@ export default function AiDoctorPage() {
           setPendingCase(null);
           setFollowUpNotice(null);
           toast.error('Emergency referral issued. Please act immediately — see instructions below.');
+          void loadExistingCases();
         }
 
         if (msg.type === 'TRIAGE_FOLLOW_UP_REQUESTED' && msg.data?.triageCaseId === activeCaseId) {
@@ -272,15 +287,34 @@ export default function AiDoctorPage() {
             attachments: [],
           });
           toast.success('Your doctor requested more information before completing the review.');
+          void loadExistingCases();
+        }
+
+        if (msg.type === "TRIAGE_FOLLOW_UP_RECEIVED" && msg.data?.triageCaseId === activeCaseId) {
+          void loadExistingCases();
         }
       } catch { /* ignore parse errors */ }
+    };
+
+    ws.onerror = () => {
+      ws.close();
     };
 
     return () => {
       ws.close();
       wsRef.current = null;
     };
-  }, [followUpNotice?.id, pendingCase?.triageCaseId, toast]);
+  }, [followUpNotice?.id, loadExistingCases, pendingCase?.triageCaseId, toast]);
+
+  useEffect(() => {
+    if (!pendingCase && !followUpNotice) return;
+
+    const intervalId = window.setInterval(() => {
+      void loadExistingCases();
+    }, 15000);
+
+    return () => window.clearInterval(intervalId);
+  }, [followUpNotice, loadExistingCases, pendingCase]);
 
   useEffect(() => {
     loadExistingCases();
@@ -342,6 +376,7 @@ export default function AiDoctorPage() {
       const result = await patientApi.submitTriage(payload);
       if ((result.status === 'PENDING_REVIEW' || (result.success && result.triageCaseId)) && result.triageCaseId) {
         resetCaseState();
+        setShowNewSubmissionForm(false);
         setPendingCase({
           triageCaseId: result.triageCaseId,
           estimatedWaitMinutes: result.meta?.estimatedWaitMinutes ?? 60,
@@ -499,6 +534,15 @@ export default function AiDoctorPage() {
                   <p className="text-xs text-amber-600 font-medium">
                     If you are experiencing a medical emergency, call <strong>10177</strong> (ambulance) or <strong>112</strong> immediately.
                   </p>
+                  {!showNewSubmissionForm && (
+                    <button
+                      onClick={() => setShowNewSubmissionForm(true)}
+                      className="text-sm font-medium hover:underline"
+                      style={{ color: "var(--primary)" }}
+                    >
+                      Submit a different symptom check
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -581,8 +625,13 @@ export default function AiDoctorPage() {
               )}
 
               {/* Input form */}
-              {!triageResult && !pendingCase && !followUpNotice && (
+              {!triageResult && (!pendingCase || showNewSubmissionForm) && !followUpNotice && (
                 <div className="space-y-4">
+                  {pendingCase && showNewSubmissionForm && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                      You still have another case under doctor review. This form will submit a new symptom check for a separate issue.
+                    </div>
+                  )}
                   <textarea
                     id="triage-symptoms"
                     name="symptoms"
@@ -653,6 +702,15 @@ export default function AiDoctorPage() {
                   >
                     {loading ? "Submitting…" : "Submit for doctor review"}
                   </button>
+                  {pendingCase && showNewSubmissionForm && (
+                    <button
+                      onClick={() => setShowNewSubmissionForm(false)}
+                      className="text-sm font-medium w-full text-center hover:underline"
+                      style={{ color: "var(--primary)" }}
+                    >
+                      Return to the active case
+                    </button>
+                  )}
                 </div>
               )}
 

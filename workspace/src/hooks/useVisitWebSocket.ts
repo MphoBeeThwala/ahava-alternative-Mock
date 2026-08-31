@@ -1,33 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback, useState } from "react";
+import { getRealtimeWebSocketUrl } from "../lib/realtime";
 
 export type WsMessage = {
   type: string;
   data?: Record<string, unknown>;
   error?: string;
 };
-
-function getWsUrl(token: string): string | null {
-  const envUrl =
-    process.env.NEXT_PUBLIC_BACKEND_URL ||
-    (process.env.NEXT_PUBLIC_API_URL ?? '').replace(/\/api\/?$/, '');
-
-  const baseUrl =
-    envUrl ||
-    (typeof window !== 'undefined' &&
-    ['localhost', '127.0.0.1'].includes(window.location.hostname)
-      ? 'http://localhost:4000'
-      : null);
-
-  if (!baseUrl) return null;
-
-  const wsBase = baseUrl
-    .replace(/^https/, 'wss')
-    .replace(/^http/, 'ws')
-    .replace(/\/+$/, '');
-  return `${wsBase}/ws?token=${encodeURIComponent(token)}`;
-}
 
 export function useVisitWebSocket(token: string | null) {
   const wsRef = useRef<WebSocket | null>(null);
@@ -46,7 +26,7 @@ export function useVisitWebSocket(token: string | null) {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
     try {
-      const url = getWsUrl(token);
+      const url = getRealtimeWebSocketUrl(token);
       if (!url) return;
       const ws = new WebSocket(url);
       wsRef.current = ws;
