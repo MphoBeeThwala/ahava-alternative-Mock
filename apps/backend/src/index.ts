@@ -22,6 +22,7 @@ import adminRoutes from "./routes/admin";
 import webhookRoutes from "./routes/webhooks";
 import triageRoutes from "./routes/triage";
 import triageCasesRoutes from "./routes/triageCases";
+import triageCaseReviewRoutes from "./routes/triageCaseReview";
 import nurseRoutes from "./routes/nurse";
 import patientRoutes from "./routes/patient";
 import profileRoutes from "./routes/profile";
@@ -115,13 +116,13 @@ app.use(
 // Body parsing with raw body capture for webhook verification
 app.use(
   express.json({
-    limit: "10mb",
+    limit: "20mb",
     verify: (req: any, res, buf) => {
       req.rawBody = buf;
     },
   }),
 );
-app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "20mb" }));
 
 // Attach authenticated user ID for per-user rate limiting (non-blocking)
 app.use(attachRateLimitUserKey);
@@ -156,6 +157,7 @@ app.use("/api/payments", paymentRoutes);
 app.use("/api/admin", authMiddleware, adminRoutes);
 app.use("/api/triage", authMiddleware, triageRoutes);
 app.use("/api/triage-cases", authMiddleware, triageCasesRoutes);
+app.use("/api/triage-review", authMiddleware, triageCaseReviewRoutes);
 app.use("/api/nurse", authMiddleware, nurseRoutes);
 app.use("/api/patient", authMiddleware, patientRoutes);
 app.use("/api/profile", profileRoutes);

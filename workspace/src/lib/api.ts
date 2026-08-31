@@ -377,6 +377,10 @@ export interface RiskProfile {
 export interface TriageRequest {
   symptoms: string;
   imageBase64?: string;
+  labResultFiles?: {
+    fileName: string;
+    dataUrl: string;
+  }[];
 }
 
 export interface TriageResponse {
@@ -385,6 +389,7 @@ export interface TriageResponse {
   triageCaseId?: string;
   meta?: {
     estimatedWaitMinutes?: number;
+    attachmentCount?: number;
   };
   data?: {
     triageLevel: number;
@@ -392,6 +397,16 @@ export interface TriageResponse {
     possibleConditions: string[];
     reasoning: string;
   };
+}
+
+export interface TriageAttachment {
+  id: string;
+  kind: "symptom_image" | "lab_result";
+  fileName: string;
+  mimeType: string;
+  byteSize: number;
+  createdAt: string;
+  url: string;
 }
 
 export interface MonitoringSummary {
@@ -590,6 +605,7 @@ export interface TriageCase {
   aiModel: string | null;
   aiContextUsed: boolean;
   createdAt: string;
+  attachments?: TriageAttachment[];
   patient?: { id: string; firstName: string; lastName: string; email?: string; phone?: string | null };
 }
 

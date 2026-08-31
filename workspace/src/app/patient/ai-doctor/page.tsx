@@ -47,6 +47,11 @@ type ReferralNotice = {
   emergencyNumbers: { ems: string; national: string; poison: string };
 };
 
+type PendingLabResult = {
+  fileName: string;
+  dataUrl: string;
+};
+
 async function downloadPdf(relativeUrl: string, filename: string) {
   try {
     const res = await apiClient.get(relativeUrl, { responseType: 'blob' });
@@ -64,6 +69,21 @@ async function downloadPdf(relativeUrl: string, filename: string) {
   }
 }
 
+async function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+      } else {
+        reject(new Error("Failed to read file"));
+      }
+    };
+    reader.onerror = () => reject(new Error("Failed to read file"));
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function AiDoctorPage() {
   const toast = useToast();
   const [symptoms, setSymptoms] = useState("");
@@ -71,10 +91,15 @@ export default function AiDoctorPage() {
   const [pendingCase, setPendingCase] = useState<PendingCase | null>(null);
   const [loading, setLoading] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [labResults, setLabResults] = useState<PendingLabResult[]>([]);
   const [showConsentModal, setShowConsentModal] = useState(false);
   const [consentChecked, setConsentChecked] = useState(false);
   const [givingConsent, setGivingConsent] = useState(false);
-  const [pendingSymptoms, setPendingSymptoms] = useState<{ symptoms: string; imageBase64?: string } | null>(null);
+  const [pendingSymptoms, setPendingSymptoms] = useState<{
+    symptoms: string;
+    imageBase64?: string;
+    labResultFiles?: PendingLabResult[];
+  } | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const [prescriptionNotice, setPrescriptionNotice] = useState<PrescriptionNotice | null>(null);
   const [referralNotice, setReferralNotice] = useState<ReferralNotice | null>(null);
@@ -140,19 +165,40 @@ export default function AiDoctorPage() {
     };
   }, [pendingCase, toast]);
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64 = (reader.result as string).split(",")[1];
-        setSelectedImage(base64);
-      };
-      reader.readAsDataURL(file);
+      try {
+        const dataUrl = await readFileAsDataUrl(file);
+        setSelectedImage(dataUrl);
+      } catch {
+        toast.error("Failed to read the image attachment.");
+      }
     }
   };
 
-  const runTriage = async (payload: { symptoms: string; imageBase64?: string }) => {
+  const handleLabResultsUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []).slice(0, 3);
+    if (files.length === 0) return;
+
+    try {
+      const nextFiles = await Promise.all(
+        files.map(async (file) => ({
+          fileName: file.name,
+          dataUrl: await readFileAsDataUrl(file),
+        })),
+      );
+      setLabResults(nextFiles);
+    } catch {
+      toast.error("Failed to read one or more lab-result attachments.");
+    }
+  };
+
+  const runTriage = async (payload: {
+    symptoms: string;
+    imageBase64?: string;
+    labResultFiles?: PendingLabResult[];
+  }) => {
     setLoading(true);
     try {
       const result = await patientApi.submitTriage(payload);
@@ -178,7 +224,12 @@ export default function AiDoctorPage() {
     }
   };
 
-  const handleTriage = () => runTriage({ symptoms, imageBase64: selectedImage || undefined });
+  const handleTriage = () =>
+    runTriage({
+      symptoms,
+      imageBase64: selectedImage || undefined,
+      labResultFiles: labResults.length > 0 ? labResults : undefined,
+    });
 
   const handleGiveConsent = async () => {
     if (!consentChecked) return;
@@ -260,7 +311,7 @@ export default function AiDoctorPage() {
             </div>
 
             <p className="text-sm text-[var(--muted)] mb-6">
-              Describe your symptoms and optionally attach a photo. This is a decision-support tool only — not a medical diagnosis. Always follow clinical advice.
+              Describe your symptoms and optionally attach a photo plus lab results. This is a decision-support tool only — not a medical diagnosis. Always follow clinical advice.
             </p>
 
             <Card>
@@ -318,6 +369,41 @@ export default function AiDoctorPage() {
                     </div>
                   </div>
 
+                  <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:border-blue-500 transition cursor-pointer relative">
+                    <input
+                      id="triage-lab-results"
+                      name="triageLabResults"
+                      type="file"
+                      accept="image/*,application/pdf"
+                      multiple
+                      onChange={handleLabResultsUpload}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                      aria-label="Upload lab results for triage"
+                    />
+                    <div className="space-y-2">
+                      <span className="text-3xl" aria-hidden>🧪</span>
+                      <p className="text-sm font-medium text-slate-600">
+                        {labResults.length > 0
+                          ? `${labResults.length} lab result${labResults.length > 1 ? "s" : ""} attached`
+                          : "Attach lab results or investigation reports (optional)"}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        PDF or image, up to 3 files. These are sent to the reviewing doctor with your case.
+                      </p>
+                    </div>
+                  </div>
+
+                  {labResults.length > 0 && (
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                      <p className="mb-2 font-medium text-slate-800">Attached lab results</p>
+                      <ul className="space-y-1">
+                        {labResults.map((file) => (
+                          <li key={file.fileName}>{file.fileName}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
                   <button
                     onClick={handleTriage}
                     disabled={loading || !symptoms}
@@ -367,7 +453,7 @@ export default function AiDoctorPage() {
                   )}
                   <p className="text-xs text-center text-slate-500 italic">This result was reviewed and released by a licensed doctor. It is decision support — always follow clinical advice.</p>
                   <button
-                    onClick={() => { setTriageResult(null); setPendingCase(null); setSymptoms(""); setSelectedImage(null); }}
+                    onClick={() => { setTriageResult(null); setPendingCase(null); setSymptoms(""); setSelectedImage(null); setLabResults([]); }}
                     className="text-sm font-medium w-full text-center hover:underline"
                     style={{ color: "var(--primary)" }}
                   >
@@ -403,7 +489,7 @@ export default function AiDoctorPage() {
                   </div>
                   <p className="text-xs text-center text-slate-500 italic">Prescription issued by a licensed doctor via Ahava Healthcare Platform.</p>
                   <button
-                    onClick={() => { setPrescriptionNotice(null); setSymptoms(""); setSelectedImage(null); }}
+                    onClick={() => { setPrescriptionNotice(null); setSymptoms(""); setSelectedImage(null); setLabResults([]); }}
                     className="text-sm font-medium w-full text-center hover:underline"
                     style={{ color: "var(--primary)" }}
                   >
@@ -453,7 +539,7 @@ export default function AiDoctorPage() {
                     ))}
                   </div>
                   <button
-                    onClick={() => { setReferralNotice(null); setSymptoms(""); setSelectedImage(null); }}
+                    onClick={() => { setReferralNotice(null); setSymptoms(""); setSelectedImage(null); setLabResults([]); }}
                     className="text-sm font-medium w-full text-center hover:underline"
                     style={{ color: "var(--primary)" }}
                   >

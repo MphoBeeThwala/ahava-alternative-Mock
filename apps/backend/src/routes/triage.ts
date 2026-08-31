@@ -10,6 +10,12 @@ import prisma from "../lib/prisma";
 import { randomUUID } from "crypto";
 import { hashValue, writeClinicalAudit } from "../services/clinicalAudit";
 import { sanitizeDataUrlImage } from "../utils/imageUtils";
+import {
+  assertLabAttachmentCount,
+  persistTriageAttachment,
+  serializeTriageAttachmentManifest,
+  type StoredTriageAttachment,
+} from "../services/triageAttachments";
 
 const router: Router = Router();
 
@@ -24,6 +30,9 @@ router.post(
     try {
       const { symptoms } = req.body;
       let { imageBase64 } = req.body;
+      const labResultFiles = Array.isArray(req.body?.labResultFiles)
+        ? req.body.labResultFiles
+        : [];
       const patientId = req.user?.id;
       const caseId = randomUUID();
 
@@ -36,6 +45,12 @@ router.post(
         return res.status(401).json({ error: "Not authenticated" });
       }
 
+      try {
+        assertLabAttachmentCount(labResultFiles.length);
+      } catch (attachmentErr) {
+        return res.status(400).json({ error: (attachmentErr as Error).message });
+      }
+
       // ── Privacy: strip EXIF/GPS metadata from the photo before it reaches
       // any AI provider. If the image cannot be processed, drop it rather
       // than forwarding unstripped PHI.
@@ -43,14 +58,49 @@ router.post(
         try {
           imageBase64 = await sanitizeDataUrlImage(imageBase64);
           if (!imageBase64) {
-            console.warn(
-              "[triage] Image dropped: could not be sanitized (EXIF strip failed)",
-            );
+            return res
+              .status(400)
+              .json({ error: "Attached symptom image could not be processed" });
           }
         } catch (imgErr) {
-          console.warn("[triage] Image sanitization failed, dropping image:", imgErr);
-          imageBase64 = undefined;
+          console.warn("[triage] Image sanitization failed:", imgErr);
+          return res
+            .status(400)
+            .json({ error: "Attached symptom image could not be processed" });
         }
+      }
+
+      const storedAttachments: StoredTriageAttachment[] = [];
+      try {
+        if (imageBase64) {
+          storedAttachments.push(
+            await persistTriageAttachment({
+              kind: "symptom_image",
+              dataUrl: imageBase64,
+              fileName: "symptom-photo.jpg",
+            }),
+          );
+        }
+
+        for (const labFile of labResultFiles) {
+          if (
+            !labFile ||
+            typeof labFile.dataUrl !== "string" ||
+            typeof labFile.fileName !== "string"
+          ) {
+            return res.status(400).json({ error: "Invalid lab result attachment" });
+          }
+
+          storedAttachments.push(
+            await persistTriageAttachment({
+              kind: "lab_result",
+              dataUrl: labFile.dataUrl,
+              fileName: labFile.fileName,
+            }),
+          );
+        }
+      } catch (attachmentErr) {
+        return res.status(400).json({ error: (attachmentErr as Error).message });
       }
 
       // ── Enrich AI prompt with patient's real health data ──────────────────
@@ -210,7 +260,13 @@ router.post(
         data: {
           patientId,
           symptoms,
-          imageStorageRef: undefined,
+          imageStorageRef:
+            storedAttachments.length > 0
+              ? serializeTriageAttachmentManifest({
+                  version: 1,
+                  attachments: storedAttachments,
+                })
+              : undefined,
           aiTriageLevel: result.triageLevel,
           aiRecommendedAction: result.recommendedAction,
           aiPossibleConditions: result.possibleConditions,
@@ -237,8 +293,8 @@ router.post(
           uncertaintyFlags: result.uncertaintyFlags,
           evidenceSources: result.evidenceSources,
           aiContextUsed: !!patientContext,
-    
-      statPearlsUsed: result.evidenceSources.includes("StatPearls/NCBI"),
+          statPearlsUsed: result.evidenceSources.includes("StatPearls/NCBI"),
+          attachmentCount: storedAttachments.length,
           symptomsHash: hashValue(symptoms),
         },
       });
@@ -259,6 +315,7 @@ router.post(
                 triageLevel: result.triageLevel,
                 slaDeadline: slaDeadline.toISOString(),
                 symptoms: symptoms.slice(0, 100),
+                attachmentCount: storedAttachments.length,
                 createdAt: new Date().toISOString(),
               },
             },
@@ -285,6 +342,7 @@ router.post(
           estimatedWaitMinutes: { 1: 5, 2: 15, 3: 60, 4: 240, 5: 480 }[
             result.triageLevel
           ],
+          attachmentCount: storedAttachments.length,
           disclaimer:
             "Not a medical diagnosis. Tool for decision support only. Sent to doctor for review.",
           satsLevel: result.triageLevel,

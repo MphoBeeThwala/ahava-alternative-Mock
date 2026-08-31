@@ -370,6 +370,25 @@ export default function DoctorDashboard() {
                                     <p className="text-slate-600 text-sm mb-2"><strong>AI recommendation:</strong> {tc.aiRecommendedAction}</p>
                                     <p className="text-slate-500 text-sm mb-2"><strong>Possible conditions:</strong> {(tc.aiPossibleConditions || []).join(', ')}</p>
                                     <p className="text-slate-500 text-sm mb-2"><strong>AI reasoning:</strong> {tc.aiReasoning}</p>
+                                    {tc.attachments && tc.attachments.length > 0 && (
+                                        <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                                            <p className="mb-2 text-sm font-semibold text-slate-800">Clinical attachments</p>
+                                            <div className="flex flex-wrap gap-2">
+                                                {tc.attachments.map((attachment) => (
+                                                    <a
+                                                        key={attachment.id}
+                                                        href={attachment.url}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:border-blue-400 hover:text-blue-700"
+                                                    >
+                                                        <span>{attachment.kind === 'symptom_image' ? '📸' : '🧪'}</span>
+                                                        <span>{attachment.fileName}</span>
+                                                    </a>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
                                     {tc.aiModel && (
                                         <p className="text-xs text-slate-400 mb-4">AI model: {tc.aiModel}</p>
                                     )}
