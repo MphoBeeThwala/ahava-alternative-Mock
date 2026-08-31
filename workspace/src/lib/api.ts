@@ -401,12 +401,30 @@ export interface TriageResponse {
 
 export interface TriageAttachment {
   id: string;
-  kind: "symptom_image" | "lab_result";
+  kind: "symptom_image" | "lab_result" | "follow_up_file";
   fileName: string;
   mimeType: string;
   byteSize: number;
   createdAt: string;
   url: string;
+}
+
+export interface MedicalPassportSummary {
+  allergies: string[];
+  chronicConditions: string[];
+  currentMedications: string[];
+  bloodType: string | null;
+  emergencyContactName: string | null;
+  emergencyContactPhone: string | null;
+  pregnancy: boolean | null;
+  missingFields: string[];
+}
+
+export interface SafetySummary {
+  canPrescribe: boolean;
+  blockers: string[];
+  warnings: string[];
+  missingFields: string[];
 }
 
 export interface MonitoringSummary {
@@ -464,6 +482,24 @@ export const patientApi = {
   },
   submitTriage: async (data: TriageRequest): Promise<TriageResponse> => {
     const res = await apiClient.post('/triage', data);
+    return res.data;
+  },
+  getMyTriageCases: async () => {
+    const res = await apiClient.get('/triage/my-cases');
+    const data = res.data ?? {};
+    return {
+      ...data,
+      cases: Array.isArray(data.cases) ? data.cases : [],
+    };
+  },
+  submitTriageFollowUp: async (caseId: string, payload: {
+    responseText?: string;
+    followUpFiles?: {
+      fileName: string;
+      dataUrl: string;
+    }[];
+  }) => {
+    const res = await apiClient.post(`/triage/${caseId}/follow-up-response`, payload);
     return res.data;
   },
 };
@@ -605,8 +641,58 @@ export interface TriageCase {
   aiModel: string | null;
   aiContextUsed: boolean;
   createdAt: string;
+  followUpRequestType?: string | null;
+  followUpRequestMessage?: string | null;
+  followUpQuestions?: string[];
+  requestedInvestigations?: string[];
+  followUpRequestedAt?: string | null;
+  patientFollowUpResponse?: string | null;
+  patientRespondedAt?: string | null;
   attachments?: TriageAttachment[];
+  medicalPassport?: MedicalPassportSummary | null;
+  reviewSafety?: SafetySummary | null;
   patient?: { id: string; firstName: string; lastName: string; email?: string; phone?: string | null };
+}
+
+export interface PatientTriageCase {
+  id: string;
+  status: string;
+  createdAt: string;
+  slaDeadline?: string | null;
+  aiTriageLevel: number;
+  aiRecommendedAction: string;
+  aiPossibleConditions: string[];
+  doctorNotes?: string | null;
+  doctorDiagnosis?: string | null;
+  doctorRecommendations?: string | null;
+  finalTriageLevel?: number | null;
+  releasedAt?: string | null;
+  followUpRequestType?: string | null;
+  followUpRequestMessage?: string | null;
+  followUpQuestions?: string[];
+  requestedInvestigations?: string[];
+  followUpRequestedAt?: string | null;
+  patientFollowUpResponse?: string | null;
+  patientRespondedAt?: string | null;
+  doctorName?: string | null;
+  attachments: TriageAttachment[];
+  prescription?: {
+    id: string;
+    diagnosis: string;
+    medicationCount: number;
+    issuedAt: string;
+    downloadUrl: string;
+    doctorName: string;
+  } | null;
+  referral?: {
+    id: string;
+    referralType: string;
+    provisionalDiagnosis: string;
+    recommendedFacility: string;
+    issuedAt: string;
+    downloadUrl: string;
+    doctorName: string;
+  } | null;
 }
 
 export const doctorApi = {
@@ -672,6 +758,15 @@ export const doctorApi = {
     doctorNotes?: string;
   }) => {
     const res = await apiClient.post(`/triage-review/${caseId}/prescription`, payload);
+    return res.data;
+  },
+  requestTriageFollowUp: async (caseId: string, payload: {
+    requestType: 'MORE_INFO' | 'INVESTIGATION';
+    message?: string;
+    questions?: string[];
+    requestedInvestigations?: string[];
+  }) => {
+    const res = await apiClient.post(`/triage-review/${caseId}/request-follow-up`, payload);
     return res.data;
   },
   issueEmergencyReferral: async (caseId: string, payload: {

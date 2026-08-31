@@ -1,9 +1,13 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import RoleGuard, { UserRole } from "../../../components/RoleGuard";
-import apiClient, { patientApi, consentApi } from "../../../lib/api";
+import apiClient, {
+  patientApi,
+  consentApi,
+  type PatientTriageCase,
+} from "../../../lib/api";
 import { useToast } from "../../../contexts/ToastContext";
 import DashboardLayout from "../../../components/DashboardLayout";
 import { Card, CardHeader, CardTitle } from "../../../components/ui/Card";
@@ -50,6 +54,15 @@ type ReferralNotice = {
 type PendingLabResult = {
   fileName: string;
   dataUrl: string;
+};
+
+type FollowUpNotice = {
+  id: string;
+  followUpRequestType?: string | null;
+  followUpRequestMessage?: string | null;
+  followUpQuestions?: string[];
+  requestedInvestigations?: string[];
+  attachments?: { id: string; fileName: string; url: string; kind: string }[];
 };
 
 async function downloadPdf(relativeUrl: string, filename: string) {
@@ -103,10 +116,98 @@ export default function AiDoctorPage() {
   const wsRef = useRef<WebSocket | null>(null);
   const [prescriptionNotice, setPrescriptionNotice] = useState<PrescriptionNotice | null>(null);
   const [referralNotice, setReferralNotice] = useState<ReferralNotice | null>(null);
+  const [followUpNotice, setFollowUpNotice] = useState<FollowUpNotice | null>(null);
+  const [followUpResponse, setFollowUpResponse] = useState("");
+  const [followUpFiles, setFollowUpFiles] = useState<PendingLabResult[]>([]);
+  const [submittingFollowUp, setSubmittingFollowUp] = useState(false);
+
+  const resetCaseState = useCallback(() => {
+    setPendingCase(null);
+    setTriageResult(null);
+    setPrescriptionNotice(null);
+    setReferralNotice(null);
+    setFollowUpNotice(null);
+  }, []);
+
+  const hydrateCase = useCallback((triageCase: PatientTriageCase | null) => {
+    resetCaseState();
+    if (!triageCase) return;
+
+    if (triageCase.prescription) {
+      setPrescriptionNotice({
+        triageCaseId: triageCase.id,
+        prescriptionId: triageCase.prescription.id,
+        diagnosis: triageCase.prescription.diagnosis,
+        doctorName: triageCase.prescription.doctorName,
+        medicationCount: triageCase.prescription.medicationCount,
+        issuedAt: triageCase.prescription.issuedAt,
+        downloadUrl: triageCase.prescription.downloadUrl,
+      });
+      return;
+    }
+
+    if (triageCase.referral) {
+      setReferralNotice({
+        triageCaseId: triageCase.id,
+        referralId: triageCase.referral.id,
+        referralType: triageCase.referral.referralType,
+        provisionalDiagnosis: triageCase.referral.provisionalDiagnosis,
+        recommendedFacility: triageCase.referral.recommendedFacility,
+        doctorName: triageCase.referral.doctorName,
+        issuedAt: triageCase.referral.issuedAt,
+        downloadUrl: triageCase.referral.downloadUrl,
+        emergencyNumbers: { ems: '10177', national: '112', poison: '0861 555 777' },
+      });
+      return;
+    }
+
+    if (triageCase.status === 'AWAITING_PATIENT_RESPONSE') {
+      setFollowUpNotice({
+        id: triageCase.id,
+        followUpRequestType: triageCase.followUpRequestType,
+        followUpRequestMessage: triageCase.followUpRequestMessage,
+        followUpQuestions: triageCase.followUpQuestions,
+        requestedInvestigations: triageCase.requestedInvestigations,
+        attachments: triageCase.attachments?.filter((item) => item.kind === 'lab_result' || item.kind === 'follow_up_file'),
+      });
+      return;
+    }
+
+    if (triageCase.releasedAt) {
+      setTriageResult({
+        triageLevel: triageCase.finalTriageLevel ?? triageCase.aiTriageLevel,
+        recommendedAction: triageCase.aiRecommendedAction,
+        possibleConditions: triageCase.aiPossibleConditions,
+        reasoning: '',
+        doctorNotes: triageCase.doctorNotes ?? undefined,
+        doctorDiagnosis: triageCase.doctorDiagnosis ?? undefined,
+        doctorRecommendations: triageCase.doctorRecommendations ?? undefined,
+        wasOverridden: triageCase.finalTriageLevel != null && triageCase.finalTriageLevel !== triageCase.aiTriageLevel,
+        releasedAt: triageCase.releasedAt ?? undefined,
+      });
+      return;
+    }
+
+    setPendingCase({
+      triageCaseId: triageCase.id,
+      estimatedWaitMinutes: 60,
+    });
+  }, [resetCaseState]);
+
+  const loadExistingCases = useCallback(async () => {
+    try {
+      const data = await patientApi.getMyTriageCases();
+      const latest = (data.cases as PatientTriageCase[])[0] ?? null;
+      hydrateCase(latest);
+    } catch {
+      // keep page usable even if history load fails
+    }
+  }, [hydrateCase]);
 
   // WebSocket listener — fires when doctor releases result, prescription, or emergency referral
   useEffect(() => {
-    if (!pendingCase) return;
+    const activeCaseId = pendingCase?.triageCaseId ?? followUpNotice?.id;
+    if (!activeCaseId) return;
 
     const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
     if (!token) return;
@@ -129,7 +230,7 @@ export default function AiDoctorPage() {
       try {
         const msg = JSON.parse(event.data);
 
-        if (msg.type === 'TRIAGE_RESULT_RELEASED' && msg.data?.triageCaseId === pendingCase.triageCaseId) {
+        if (msg.type === 'TRIAGE_RESULT_RELEASED' && msg.data?.triageCaseId === activeCaseId) {
           setTriageResult({
             triageLevel: msg.data.triageLevel,
             recommendedAction: msg.data.recommendedAction,
@@ -142,19 +243,35 @@ export default function AiDoctorPage() {
             releasedAt: msg.data.releasedAt,
           });
           setPendingCase(null);
+          setFollowUpNotice(null);
           toast.success('Your triage result has been released by a doctor.');
         }
 
-        if (msg.type === 'PRESCRIPTION_ISSUED' && msg.data?.triageCaseId === pendingCase.triageCaseId) {
+        if (msg.type === 'PRESCRIPTION_ISSUED' && msg.data?.triageCaseId === activeCaseId) {
           setPrescriptionNotice(msg.data as PrescriptionNotice);
           setPendingCase(null);
+          setFollowUpNotice(null);
           toast.success(`Prescription issued by ${msg.data.doctorName}. Download your script below.`);
         }
 
-        if (msg.type === 'EMERGENCY_REFERRAL_ISSUED' && msg.data?.triageCaseId === pendingCase.triageCaseId) {
+        if (msg.type === 'EMERGENCY_REFERRAL_ISSUED' && msg.data?.triageCaseId === activeCaseId) {
           setReferralNotice(msg.data as ReferralNotice);
           setPendingCase(null);
+          setFollowUpNotice(null);
           toast.error('Emergency referral issued. Please act immediately — see instructions below.');
+        }
+
+        if (msg.type === 'TRIAGE_FOLLOW_UP_REQUESTED' && msg.data?.triageCaseId === activeCaseId) {
+          setPendingCase(null);
+          setFollowUpNotice({
+            id: msg.data.triageCaseId,
+            followUpRequestType: msg.data.requestType,
+            followUpRequestMessage: msg.data.message,
+            followUpQuestions: Array.isArray(msg.data.questions) ? msg.data.questions : [],
+            requestedInvestigations: Array.isArray(msg.data.requestedInvestigations) ? msg.data.requestedInvestigations : [],
+            attachments: [],
+          });
+          toast.success('Your doctor requested more information before completing the review.');
         }
       } catch { /* ignore parse errors */ }
     };
@@ -163,7 +280,11 @@ export default function AiDoctorPage() {
       ws.close();
       wsRef.current = null;
     };
-  }, [pendingCase, toast]);
+  }, [followUpNotice?.id, pendingCase?.triageCaseId, toast]);
+
+  useEffect(() => {
+    loadExistingCases();
+  }, [loadExistingCases]);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -194,6 +315,23 @@ export default function AiDoctorPage() {
     }
   };
 
+  const handleFollowUpFilesUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []).slice(0, 3);
+    if (files.length === 0) return;
+
+    try {
+      const nextFiles = await Promise.all(
+        files.map(async (file) => ({
+          fileName: file.name,
+          dataUrl: await readFileAsDataUrl(file),
+        })),
+      );
+      setFollowUpFiles(nextFiles);
+    } catch {
+      toast.error("Failed to read one or more follow-up attachments.");
+    }
+  };
+
   const runTriage = async (payload: {
     symptoms: string;
     imageBase64?: string;
@@ -203,6 +341,7 @@ export default function AiDoctorPage() {
     try {
       const result = await patientApi.submitTriage(payload);
       if ((result.status === 'PENDING_REVIEW' || (result.success && result.triageCaseId)) && result.triageCaseId) {
+        resetCaseState();
         setPendingCase({
           triageCaseId: result.triageCaseId,
           estimatedWaitMinutes: result.meta?.estimatedWaitMinutes ?? 60,
@@ -244,6 +383,31 @@ export default function AiDoctorPage() {
     } finally {
       setGivingConsent(false);
       setPendingSymptoms(null);
+    }
+  };
+
+  const handleSubmitFollowUp = async () => {
+    if (!followUpNotice) return;
+    if (!followUpResponse.trim() && followUpFiles.length === 0) {
+      toast.error('Please answer the doctor or attach the requested results.');
+      return;
+    }
+
+    setSubmittingFollowUp(true);
+    try {
+      await patientApi.submitTriageFollowUp(followUpNotice.id, {
+        responseText: followUpResponse || undefined,
+        followUpFiles: followUpFiles.length > 0 ? followUpFiles : undefined,
+      });
+      toast.success('Your response was sent to the reviewing doctor.');
+      setFollowUpResponse('');
+      setFollowUpFiles([]);
+      await loadExistingCases();
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { error?: string } } };
+      toast.error(err.response?.data?.error || 'Failed to send follow-up response.');
+    } finally {
+      setSubmittingFollowUp(false);
     }
   };
 
@@ -320,7 +484,7 @@ export default function AiDoctorPage() {
               </CardHeader>
 
               {/* Waiting state — case submitted, doctor not yet released */}
-              {pendingCase && !triageResult && (
+              {pendingCase && !triageResult && !followUpNotice && (
                 <div className="space-y-4 text-center py-6">
                   <div className="flex items-center justify-center mb-4">
                     <div style={{ width: 48, height: 48, borderRadius: '50%', background: 'rgba(37,99,235,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>⏳</div>
@@ -338,8 +502,86 @@ export default function AiDoctorPage() {
                 </div>
               )}
 
+              {followUpNotice && (
+                <div className="space-y-4 py-2">
+                  <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+                    <h3 className="font-bold text-blue-900">Doctor requested {followUpNotice.followUpRequestType === 'INVESTIGATION' ? 'investigations' : 'more information'}</h3>
+                    {followUpNotice.followUpRequestMessage && (
+                      <p className="mt-2 text-sm text-blue-800">{followUpNotice.followUpRequestMessage}</p>
+                    )}
+                    {!!followUpNotice.followUpQuestions?.length && (
+                      <div className="mt-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Questions</p>
+                        <ul className="mt-1 space-y-1 text-sm text-blue-800">
+                          {followUpNotice.followUpQuestions.map((question, idx) => (
+                            <li key={idx}>• {question}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {!!followUpNotice.requestedInvestigations?.length && (
+                      <div className="mt-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Requested investigations</p>
+                        <ul className="mt-1 space-y-1 text-sm text-blue-800">
+                          {followUpNotice.requestedInvestigations.map((item, idx) => (
+                            <li key={idx}>• {item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+
+                  <textarea
+                    className="w-full p-4 border border-slate-300 rounded-lg text-slate-900 placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+                    rows={4}
+                    placeholder="Reply to your doctor here..."
+                    value={followUpResponse}
+                    onChange={(e) => setFollowUpResponse(e.target.value)}
+                  />
+
+                  <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:border-blue-500 transition cursor-pointer relative">
+                    <input
+                      type="file"
+                      accept="image/*,application/pdf"
+                      multiple
+                      onChange={handleFollowUpFilesUpload}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                      aria-label="Upload follow-up files"
+                    />
+                    <div className="space-y-2">
+                      <span className="text-3xl" aria-hidden>📎</span>
+                      <p className="text-sm font-medium text-slate-600">
+                        {followUpFiles.length > 0
+                          ? `${followUpFiles.length} follow-up file${followUpFiles.length > 1 ? 's' : ''} attached`
+                          : 'Attach requested results or supporting documents'}
+                      </p>
+                      <p className="text-xs text-slate-500">PDF or image, up to 3 files.</p>
+                    </div>
+                  </div>
+
+                  {followUpFiles.length > 0 && (
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                      <p className="mb-2 font-medium text-slate-800">Files ready to send</p>
+                      <ul className="space-y-1">
+                        {followUpFiles.map((file) => (
+                          <li key={file.fileName}>{file.fileName}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleSubmitFollowUp}
+                    disabled={submittingFollowUp}
+                    className="btn-primary w-full py-3 rounded-xl font-semibold disabled:opacity-50"
+                  >
+                    {submittingFollowUp ? 'Sending…' : 'Send follow-up response'}
+                  </button>
+                </div>
+              )}
+
               {/* Input form */}
-              {!triageResult && !pendingCase && (
+              {!triageResult && !pendingCase && !followUpNotice && (
                 <div className="space-y-4">
                   <textarea
                     id="triage-symptoms"

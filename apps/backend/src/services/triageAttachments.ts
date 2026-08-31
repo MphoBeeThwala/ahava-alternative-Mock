@@ -1,7 +1,10 @@
 import { randomUUID } from "crypto";
 import { sanitizeDataUrlImage } from "../utils/imageUtils";
 
-export type TriageAttachmentKind = "symptom_image" | "lab_result";
+export type TriageAttachmentKind =
+  | "symptom_image"
+  | "lab_result"
+  | "follow_up_file";
 
 export interface StoredTriageAttachment {
   id: string;
@@ -93,7 +96,8 @@ function normalizeManifestAttachment(
 
   if (
     attachment.kind !== "symptom_image" &&
-    attachment.kind !== "lab_result"
+    attachment.kind !== "lab_result" &&
+    attachment.kind !== "follow_up_file"
   ) {
     return null;
   }
@@ -179,4 +183,3 @@ export function buildTriageAttachmentUrl(caseId: string, attachmentId: string) {
 export function materializeTriageAttachment(attachment: StoredTriageAttachment) {
   return parseDataUrl(attachment.dataUrl);
 }
-

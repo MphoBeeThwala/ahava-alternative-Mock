@@ -20,6 +20,11 @@ import {
   materializeTriageAttachment,
   parseTriageAttachmentManifest,
 } from "../services/triageAttachments";
+import {
+  buildPrescriptionSafetySummary,
+  buildReviewSafetySummary,
+  extractMedicalPassportData,
+} from "../services/triageSafetyChecks";
 
 const router: Router = Router();
 
@@ -32,6 +37,8 @@ const triageCaseInclude = {
       email: true,
       phone: true,
       dateOfBirth: true,
+      gender: true,
+      riskProfile: true,
     },
   },
   doctor: {
@@ -53,9 +60,30 @@ function decorateTriageCase<T extends { id: string; imageStorageRef?: string | n
   triageCase: T,
 ) {
   const manifest = parseTriageAttachmentManifest(triageCase.imageStorageRef);
+  const patient = (triageCase as any).patient;
+  const medicalPassport = patient
+    ? extractMedicalPassportData({
+        riskProfile: patient.riskProfile,
+        dateOfBirth: patient.dateOfBirth,
+        gender: patient.gender,
+      })
+    : null;
+  const reviewSafety = patient
+    ? buildReviewSafetySummary({
+        riskProfile: patient.riskProfile,
+        dateOfBirth: patient.dateOfBirth,
+        gender: patient.gender,
+      })
+    : null;
 
   return {
     ...triageCase,
+    followUpQuestions: asStringArray((triageCase as any).followUpQuestions),
+    requestedInvestigations: asStringArray(
+      (triageCase as any).requestedInvestigations,
+    ),
+    medicalPassport,
+    reviewSafety,
     attachments: manifest.attachments.map((attachment) => ({
       id: attachment.id,
       kind: attachment.kind,
@@ -91,7 +119,13 @@ function getQueueWhere(
         { status: TriageCaseStatus.PENDING_REVIEW, doctorId: null },
         {
           doctorId: userId,
-          status: { in: [TriageCaseStatus.ASSIGNED, TriageCaseStatus.REVIEWED] },
+          status: {
+            in: [
+              TriageCaseStatus.ASSIGNED,
+              TriageCaseStatus.AWAITING_PATIENT_RESPONSE,
+              TriageCaseStatus.REVIEWED,
+            ],
+          },
         },
       ],
     };
@@ -103,6 +137,7 @@ function getQueueWhere(
       status: {
         in: [
           TriageCaseStatus.ASSIGNED,
+          TriageCaseStatus.AWAITING_PATIENT_RESPONSE,
           TriageCaseStatus.REVIEWED,
           TriageCaseStatus.RELEASED,
           TriageCaseStatus.PRESCRIPTION_ISSUED,
@@ -116,12 +151,17 @@ function getQueueWhere(
     return { status: TriageCaseStatus.PENDING_REVIEW, doctorId: null };
   }
 
-  if (status === "ASSIGNED" || status === "REVIEWED") {
+  if (
+    status === "ASSIGNED" ||
+    status === "REVIEWED" ||
+    status === "AWAITING_PATIENT_RESPONSE"
+  ) {
     return {
-      status:
-        status === "ASSIGNED"
-          ? TriageCaseStatus.ASSIGNED
-          : TriageCaseStatus.REVIEWED,
+      status: (() => {
+        if (status === "ASSIGNED") return TriageCaseStatus.ASSIGNED;
+        if (status === "REVIEWED") return TriageCaseStatus.REVIEWED;
+        return TriageCaseStatus.AWAITING_PATIENT_RESPONSE;
+      })(),
       doctorId: userId,
     };
   }
@@ -234,6 +274,88 @@ router.post(
           oldStatus: triageCase.status,
           newStatus: "ASSIGNED",
           doctorId: req.user!.id,
+        },
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent"),
+      });
+
+      res.json({ success: true, triageCase: decorateTriageCase(updated) });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.post(
+  "/:id/request-follow-up",
+  requireDoctor,
+  async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const { id } = req.params;
+      const requestType = String(req.body?.requestType ?? "MORE_INFO").trim().toUpperCase();
+      const message = String(req.body?.message ?? "").trim();
+      const questions = asStringArray(req.body?.questions);
+      const investigations = asStringArray(req.body?.requestedInvestigations);
+
+      if (!["MORE_INFO", "INVESTIGATION"].includes(requestType)) {
+        return res.status(400).json({ error: "Invalid follow-up request type" });
+      }
+      if (!message && questions.length === 0 && investigations.length === 0) {
+        return res.status(400).json({
+          error: "Provide a patient-facing message, question, or requested investigation",
+        });
+      }
+
+      const triageCase = await prisma.triageCase.findUnique({
+        where: { id },
+        include: triageCaseInclude,
+      });
+      if (!triageCase) {
+        return res.status(404).json({ error: "Triage case not found" });
+      }
+      if (triageCase.doctorId && triageCase.doctorId !== req.user!.id) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+
+      const updated = await prisma.triageCase.update({
+        where: { id },
+        data: {
+          doctorId: req.user!.id,
+          status: TriageCaseStatus.AWAITING_PATIENT_RESPONSE,
+          followUpRequestType: requestType,
+          followUpRequestMessage: message || null,
+          followUpQuestions: questions,
+          requestedInvestigations: investigations,
+          followUpRequestedAt: new Date(),
+          patientFollowUpResponse: null,
+          patientRespondedAt: null,
+        },
+        include: triageCaseInclude,
+      });
+
+      sendToUser(updated.patientId, {
+        type: "TRIAGE_FOLLOW_UP_REQUESTED",
+        data: {
+          triageCaseId: updated.id,
+          requestType,
+          message,
+          questions,
+          requestedInvestigations: investigations,
+          requestedAt: updated.followUpRequestedAt?.toISOString(),
+        },
+      });
+
+      await createAuditLog({
+        userId: req.user!.id,
+        userRole: req.user!.role,
+        action: "UPDATE",
+        resource: "TriageCaseReview",
+        resourceId: id,
+        metadata: {
+          actionType: "FOLLOW_UP_REQUESTED",
+          requestType,
+          questionCount: questions.length,
+          investigationCount: investigations.length,
         },
         ipAddress: req.ip,
         userAgent: req.get("User-Agent"),
@@ -492,6 +614,19 @@ router.post(
         return res.status(404).json({ error: "Doctor profile not found" });
       }
 
+      const safetySummary = buildPrescriptionSafetySummary({
+        riskProfile: triageCase.patient?.riskProfile,
+        dateOfBirth: triageCase.patient?.dateOfBirth,
+        gender: triageCase.patient?.gender,
+        medications: Array.isArray(medications) ? medications : [],
+      });
+      if (!safetySummary.canPrescribe) {
+        return res.status(400).json({
+          error: "Medical-passport safety checks blocked prescription issuance",
+          safetySummary,
+        });
+      }
+
       const [prescription] = await prisma.$transaction([
         prisma.prescription.upsert({
           where: { triageCaseId: id },
@@ -561,7 +696,7 @@ router.post(
         userAgent: req.get("User-Agent"),
       });
 
-      res.json({ success: true, prescription, downloadUrl });
+      res.json({ success: true, prescription, downloadUrl, safetySummary });
     } catch (error) {
       next(error);
     }

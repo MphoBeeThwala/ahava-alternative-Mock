@@ -74,6 +74,14 @@ type ReferralModal = {
     recommendedFacility: string;
 };
 
+type FollowUpModal = {
+    caseId: string;
+    requestType: 'MORE_INFO' | 'INVESTIGATION';
+    message: string;
+    questionsText: string;
+    investigationsText: string;
+};
+
 export default function DoctorDashboard() {
     const { user } = useAuth();
     const toast = useToast();
@@ -84,6 +92,7 @@ export default function DoctorDashboard() {
     const [releasing, setReleasing] = useState<string | null>(null);
     const [prescriptionModal, setPrescriptionModal] = useState<PrescriptionModal | null>(null);
     const [referralModal, setReferralModal] = useState<ReferralModal | null>(null);
+    const [followUpModal, setFollowUpModal] = useState<FollowUpModal | null>(null);
     const [submittingDoc, setSubmittingDoc] = useState(false);
     const [hcpsaStatus, setHcpsaStatus] = useState<{ hcpsaNumber: string | null; hcpsaVerified: boolean } | null>(null);
     const [hcpsaInput, setHcpsaInput] = useState('');
@@ -232,8 +241,9 @@ export default function DoctorDashboard() {
             setPrescriptionModal(null);
             loadTriageCases();
         } catch (error: unknown) {
-            const err = error as { response?: { data?: { error?: string } } };
-            toast.error(err.response?.data?.error || 'Failed to issue prescription.');
+            const err = error as { response?: { data?: { error?: string; safetySummary?: { blockers?: string[] } } } };
+            const blockers = err.response?.data?.safetySummary?.blockers || [];
+            toast.error(blockers.length > 0 ? blockers.join(' ') : err.response?.data?.error || 'Failed to issue prescription.');
         } finally {
             setSubmittingDoc(false);
         }
@@ -259,6 +269,41 @@ export default function DoctorDashboard() {
         } catch (error: unknown) {
             const err = error as { response?: { data?: { error?: string } } };
             toast.error(err.response?.data?.error || 'Failed to issue referral.');
+        } finally {
+            setSubmittingDoc(false);
+        }
+    };
+
+    const handleRequestFollowUp = async () => {
+        if (!followUpModal) return;
+        const questions = followUpModal.questionsText
+            .split('\n')
+            .map((item) => item.trim())
+            .filter(Boolean);
+        const requestedInvestigations = followUpModal.investigationsText
+            .split('\n')
+            .map((item) => item.trim())
+            .filter(Boolean);
+
+        if (!followUpModal.message.trim() && questions.length === 0 && requestedInvestigations.length === 0) {
+            toast.error('Add a message, question, or requested investigation for the patient.');
+            return;
+        }
+
+        setSubmittingDoc(true);
+        try {
+            await doctorApi.requestTriageFollowUp(followUpModal.caseId, {
+                requestType: followUpModal.requestType,
+                message: followUpModal.message || undefined,
+                questions,
+                requestedInvestigations,
+            });
+            toast.success('Patient follow-up request sent.');
+            setFollowUpModal(null);
+            loadTriageCases();
+        } catch (error: unknown) {
+            const err = error as { response?: { data?: { error?: string } } };
+            toast.error(err.response?.data?.error || 'Failed to send follow-up request.');
         } finally {
             setSubmittingDoc(false);
         }
@@ -382,11 +427,68 @@ export default function DoctorDashboard() {
                                                         rel="noreferrer"
                                                         className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:border-blue-400 hover:text-blue-700"
                                                     >
-                                                        <span>{attachment.kind === 'symptom_image' ? '📸' : '🧪'}</span>
+                                                        <span>{attachment.kind === 'symptom_image' ? '📸' : attachment.kind === 'lab_result' ? '🧪' : '📎'}</span>
                                                         <span>{attachment.fileName}</span>
                                                     </a>
                                                 ))}
                                             </div>
+                                        </div>
+                                    )}
+                                    {(tc.medicalPassport || tc.reviewSafety) && (
+                                        <div className="mb-4 grid gap-3 md:grid-cols-2">
+                                            <div className="rounded-lg border border-slate-200 bg-white p-3">
+                                                <p className="mb-2 text-sm font-semibold text-slate-800">Medical passport</p>
+                                                <div className="space-y-1 text-xs text-slate-600">
+                                                    <p><strong>Allergies:</strong> {tc.medicalPassport?.allergies?.length ? tc.medicalPassport.allergies.join(', ') : 'Not recorded'}</p>
+                                                    <p><strong>Current meds:</strong> {tc.medicalPassport?.currentMedications?.length ? tc.medicalPassport.currentMedications.join(', ') : 'Not recorded'}</p>
+                                                    <p><strong>Chronic conditions:</strong> {tc.medicalPassport?.chronicConditions?.length ? tc.medicalPassport.chronicConditions.join(', ') : 'Not recorded'}</p>
+                                                    <p><strong>Blood type:</strong> {tc.medicalPassport?.bloodType || 'Not recorded'}</p>
+                                                    <p><strong>Pregnancy:</strong> {tc.medicalPassport?.pregnancy === null || tc.medicalPassport?.pregnancy === undefined ? 'Not recorded' : tc.medicalPassport?.pregnancy ? 'Yes' : 'No'}</p>
+                                                </div>
+                                            </div>
+                                            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                                                <p className="mb-2 text-sm font-semibold text-amber-900">Safety review</p>
+                                                {tc.reviewSafety?.warnings?.length ? (
+                                                    <ul className="space-y-1 text-xs text-amber-800">
+                                                        {tc.reviewSafety.warnings.map((warning, idx) => (
+                                                            <li key={idx}>• {warning}</li>
+                                                        ))}
+                                                    </ul>
+                                                ) : (
+                                                    <p className="text-xs text-emerald-700">Medical-passport review checks are complete.</p>
+                                                )}
+                                                {!!tc.medicalPassport?.missingFields?.length && (
+                                                    <p className="mt-2 text-xs text-amber-700">
+                                                        Missing: {tc.medicalPassport.missingFields.join(', ')}
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {tc.followUpRequestedAt && (
+                                        <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm">
+                                            <p className="font-semibold text-blue-900">
+                                                {tc.status === 'AWAITING_PATIENT_RESPONSE' ? 'Awaiting patient response' : 'Most recent follow-up request'}
+                                            </p>
+                                            {tc.followUpRequestMessage && (
+                                                <p className="mt-1 text-blue-800">{tc.followUpRequestMessage}</p>
+                                            )}
+                                            {!!tc.followUpQuestions?.length && (
+                                                <p className="mt-2 text-xs text-blue-700">
+                                                    Questions: {tc.followUpQuestions.join(' | ')}
+                                                </p>
+                                            )}
+                                            {!!tc.requestedInvestigations?.length && (
+                                                <p className="mt-1 text-xs text-blue-700">
+                                                    Investigations: {tc.requestedInvestigations.join(' | ')}
+                                                </p>
+                                            )}
+                                            {tc.patientFollowUpResponse && (
+                                                <div className="mt-3 rounded-md bg-white p-3 text-slate-700">
+                                                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Patient response</p>
+                                                    <p className="mt-1 text-sm">{tc.patientFollowUpResponse}</p>
+                                                </div>
+                                            )}
                                         </div>
                                     )}
                                     {tc.aiModel && (
@@ -409,6 +511,21 @@ export default function DoctorDashboard() {
                                                 style={{ backgroundColor: '#ff9800' }}
                                             >
                                                 ✎ Write review
+                                            </button>
+                                        )}
+                                        {(tc.status === 'ASSIGNED' || tc.status === 'REVIEWED') && (
+                                            <button
+                                                onClick={() => setFollowUpModal({
+                                                    caseId: tc.id,
+                                                    requestType: 'MORE_INFO',
+                                                    message: tc.followUpRequestMessage || '',
+                                                    questionsText: (tc.followUpQuestions || []).join('\n'),
+                                                    investigationsText: (tc.requestedInvestigations || []).join('\n'),
+                                                })}
+                                                className="px-4 py-2 rounded-lg font-medium text-white transition"
+                                                style={{ backgroundColor: '#2563eb' }}
+                                            >
+                                                Request more info
                                             </button>
                                         )}
                                         {tc.status === 'REVIEWED' && (<>
@@ -628,6 +745,65 @@ export default function DoctorDashboard() {
                             />
                         </div>
                         <p className="text-xs text-[var(--muted)]">The patient will receive a real-time notification and a downloadable PDF prescription. Valid for 30 days from issue (Schedule 0–4).</p>
+                    </div>
+                </Modal>
+
+                <Modal
+                    open={!!followUpModal}
+                    onClose={() => setFollowUpModal(null)}
+                    title="Request more information"
+                    primaryLabel={submittingDoc ? 'Sending…' : 'Send request'}
+                    onPrimary={handleRequestFollowUp}
+                    primaryDisabled={submittingDoc}
+                    secondaryLabel="Cancel"
+                    onSecondary={() => setFollowUpModal(null)}
+                >
+                    <div className="space-y-4">
+                        <div>
+                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Request type</label>
+                            <select
+                                className="w-full rounded-lg border px-4 py-2.5 text-sm"
+                                style={{ borderColor: 'var(--border)' }}
+                                value={followUpModal?.requestType ?? 'MORE_INFO'}
+                                onChange={(e) => followUpModal && setFollowUpModal({ ...followUpModal, requestType: e.target.value as 'MORE_INFO' | 'INVESTIGATION' })}
+                            >
+                                <option value="MORE_INFO">More information</option>
+                                <option value="INVESTIGATION">Investigation / results request</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Patient-facing message</label>
+                            <textarea
+                                rows={3}
+                                className="w-full rounded-lg border px-4 py-2.5 text-sm"
+                                style={{ borderColor: 'var(--border)' }}
+                                value={followUpModal?.message ?? ''}
+                                onChange={(e) => followUpModal && setFollowUpModal({ ...followUpModal, message: e.target.value })}
+                                placeholder="Explain what you still need from the patient."
+                            />
+                        </div>
+                        <div>
+                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Questions</label>
+                            <textarea
+                                rows={4}
+                                className="w-full rounded-lg border px-4 py-2.5 text-sm"
+                                style={{ borderColor: 'var(--border)' }}
+                                value={followUpModal?.questionsText ?? ''}
+                                onChange={(e) => followUpModal && setFollowUpModal({ ...followUpModal, questionsText: e.target.value })}
+                                placeholder={"One question per line\nHow long have you had the fever?\nHave you started any new medication?"}
+                            />
+                        </div>
+                        <div>
+                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Requested investigations</label>
+                            <textarea
+                                rows={4}
+                                className="w-full rounded-lg border px-4 py-2.5 text-sm"
+                                style={{ borderColor: 'var(--border)' }}
+                                value={followUpModal?.investigationsText ?? ''}
+                                onChange={(e) => followUpModal && setFollowUpModal({ ...followUpModal, investigationsText: e.target.value })}
+                                placeholder={"One item per line\nUpload latest glucose log\nAttach chest X-ray report"}
+                            />
+                        </div>
                     </div>
                 </Modal>
 
