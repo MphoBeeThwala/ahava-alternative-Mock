@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900" viewBox="0 0 1200 900" role="img" aria-label="Synthetic throat image for triage testing">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f8d8d8"/>
+      <stop offset="100%" stop-color="#f2b9bf"/>
+    </linearGradient>
+    <linearGradient id="tongue" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#d46a7e"/>
+      <stop offset="100%" stop-color="#b14a67"/>
+    </linearGradient>
+    <radialGradient id="throat" cx="50%" cy="40%" r="50%">
+      <stop offset="0%" stop-color="#8b0d1d"/>
+      <stop offset="100%" stop-color="#55101a"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1200" height="900" fill="#1d0d12"/>
+  <rect x="70" y="70" width="1060" height="760" rx="44" fill="#111"/>
+  <rect x="95" y="95" width="1010" height="710" rx="32" fill="url(#bg)"/>
+
+  <ellipse cx="600" cy="480" rx="360" ry="250" fill="#cc7280"/>
+  <ellipse cx="600" cy="450" rx="280" ry="195" fill="#f3aab3"/>
+  <ellipse cx="600" cy="410" rx="190" ry="150" fill="url(#throat)"/>
+
+  <path d="M440 300 C470 420 470 520 450 620 C420 590 400 530 398 455 C397 390 413 340 440 300Z" fill="#c43345"/>
+  <path d="M760 300 C787 340 803 390 802 455 C800 530 780 590 750 620 C730 520 730 420 760 300Z" fill="#c43345"/>
+
+  <g fill="#f4f0de" opacity="0.96">
+    <ellipse cx="452" cy="415" rx="38" ry="26"/>
+    <ellipse cx="446" cy="470" rx="28" ry="18"/>
+    <ellipse cx="762" cy="415" rx="40" ry="25"/>
+    <ellipse cx="754" cy="472" rx="29" ry="18"/>
+    <ellipse cx="604" cy="365" rx="18" ry="10" opacity="0.6"/>
+  </g>
+
+  <path d="M430 615 C485 575 550 558 602 558 C660 558 718 575 770 615 C732 694 678 746 601 746 C519 746 468 697 430 615Z" fill="url(#tongue)"/>
+
+  <g fill="none" stroke="#8e2438" stroke-width="8" stroke-linecap="round" opacity="0.5">
+    <path d="M470 388 C500 372 532 364 562 363"/>
+    <path d="M640 363 C676 364 707 372 736 388"/>
+    <path d="M488 505 C520 497 551 492 580 491"/>
+    <path d="M623 491 C655 492 685 497 718 505"/>
+  </g>
+
+  <text x="110" y="145" font-family="Arial, sans-serif" font-size="34" font-weight="700" fill="#ffffff">Synthetic Triage Demo Image</text>
+  <text x="110" y="188" font-family="Arial, sans-serif" font-size="22" fill="#f4d7d7">Simulated inflamed throat with bilateral tonsillar exudate for product testing only</text>
+  <text x="110" y="785" font-family="Arial, sans-serif" font-size="20" fill="#fff7f7">Upload as the symptom image in the AI Doctor flow.</text>
+</svg>

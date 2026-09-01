@@ -66,15 +66,40 @@ type FollowUpNotice = {
   attachments?: { id: string; fileName: string; url: string; kind: string }[];
 };
 
+const ACTIVE_TRIAGE_STATUSES = new Set([
+  "PENDING_REVIEW",
+  "ASSIGNED",
+  "REVIEWED",
+  "AWAITING_PATIENT_RESPONSE",
+]);
+
+function isFreshTerminalCase(triageCase: PatientTriageCase): boolean {
+  const completedAt = triageCase.releasedAt ?? triageCase.createdAt;
+  if (!completedAt) return false;
+
+  const ageMs = Date.now() - new Date(completedAt).getTime();
+  return ageMs >= 0 && ageMs <= 2 * 60 * 60 * 1000;
+}
+
 function pickCaseToDisplay(cases: PatientTriageCase[]): PatientTriageCase | null {
-  return (
+  const activeCase =
     cases.find((triageCase) => triageCase.status === "AWAITING_PATIENT_RESPONSE") ??
-    cases.find((triageCase) =>
-      ["PENDING_REVIEW", "ASSIGNED", "REVIEWED"].includes(triageCase.status),
-    ) ??
-    cases[0] ??
-    null
-  );
+    cases.find((triageCase) => ACTIVE_TRIAGE_STATUSES.has(triageCase.status));
+
+  if (activeCase) {
+    return activeCase;
+  }
+
+  const recentCompletedCase = cases.find((triageCase) => {
+    const hasPatientVisibleOutcome =
+      Boolean(triageCase.releasedAt) ||
+      Boolean(triageCase.prescription) ||
+      Boolean(triageCase.referral);
+
+    return hasPatientVisibleOutcome && isFreshTerminalCase(triageCase);
+  });
+
+  return recentCompletedCase ?? null;
 }
 
 async function downloadPdf(relativeUrl: string, filename: string) {

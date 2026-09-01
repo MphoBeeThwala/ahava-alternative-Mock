@@ -389,6 +389,8 @@ export default function DoctorDashboard() {
                         <div className="grid gap-6">
                             {triageCases.map((tc) => {
                               const { level, color, hoursAgo, label } = getUrgencyLevel(tc.createdAt);
+                              const provisionalImpression =
+                                (tc.aiPossibleConditions || []).find(Boolean) || 'No clear provisional impression';
                               
                               return (
                                 <Card key={tc.id} style={{ borderLeft: `4px solid ${color}` }}>
@@ -412,6 +414,7 @@ export default function DoctorDashboard() {
                                         </div>
                                     </div>
                                     <p className="text-slate-700 mb-2"><strong>Symptoms:</strong> {tc.symptoms}</p>
+                                    <p className="text-slate-700 text-sm mb-2"><strong>AI provisional impression:</strong> {provisionalImpression}</p>
                                     <p className="text-slate-600 text-sm mb-2"><strong>AI recommendation:</strong> {tc.aiRecommendedAction}</p>
                                     <p className="text-slate-500 text-sm mb-2"><strong>Possible conditions:</strong> {(tc.aiPossibleConditions || []).join(', ')}</p>
                                     <p className="text-slate-500 text-sm mb-2"><strong>AI reasoning:</strong> {tc.aiReasoning}</p>

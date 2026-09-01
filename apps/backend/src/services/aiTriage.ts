@@ -153,12 +153,124 @@ function sanitizeEvidenceSources(raw: unknown): string[] {
     return filtered.length > 0 ? filtered : ['Local Clinical Rules'];
 }
 
-function conservativeFallback(reason: string): TriageResult {
+function includesAnySymptom(text: string, terms: string[]): boolean {
+    return terms.some((term) => text.includes(term));
+}
+
+function deriveFallbackOpinion(symptoms: string): Pick<TriageResult, 'triageLevel' | 'possibleConditions' | 'recommendedAction' | 'reasoning'> {
+    const text = symptoms.toLowerCase();
+
+    if (includesAnySymptom(text, ['chest pain', 'shortness of breath', 'can\'t breathe', 'difficulty breathing', 'one-sided weakness', 'slurred speech', 'seizure', 'unconscious'])) {
+        return {
+            triageLevel: 1,
+            possibleConditions: ['Acute cardiopulmonary emergency', 'Stroke or neurological emergency', 'Severe asthma exacerbation or pulmonary process'],
+            recommendedAction: 'Arrange immediate emergency assessment and do not delay referral to emergency care.',
+            reasoning: 'Red-flag cardiopulmonary or neurological symptoms were detected, so the fallback opinion treats this as an emergency presentation.',
+        };
+    }
+
+    if (includesAnySymptom(text, ['sore throat', 'tonsil', 'painful swallowing', 'swallowing']) && includesAnySymptom(text, ['fever', 'white patch', 'white patches', 'swollen glands', 'neck glands'])) {
+        return {
+            triageLevel: 3,
+            possibleConditions: ['Acute bacterial tonsillitis or streptococcal pharyngitis', 'Viral pharyngitis', 'Early peritonsillar infection'],
+            recommendedAction: 'Doctor should review for throat infection, hydration status, airway compromise, and antibiotic suitability after allergy check.',
+            reasoning: 'The symptom pattern fits an acute throat infection with inflammatory features, making tonsillitis or streptococcal pharyngitis the leading provisional impression.',
+        };
+    }
+
+    if (includesAnySymptom(text, ['cough', 'fever']) && includesAnySymptom(text, ['shortness of breath', 'breathless', 'chest'])) {
+        return {
+            triageLevel: 2,
+            possibleConditions: ['Community-acquired pneumonia', 'Viral lower respiratory tract infection', 'Pulmonary tuberculosis'],
+            recommendedAction: 'Urgent same-day clinical assessment is advised with oxygenation and chest findings reviewed promptly.',
+            reasoning: 'Cough with fever and respiratory symptoms raises concern for lower respiratory infection and, in South Africa, TB remains part of the differential.',
+        };
+    }
+
+    if (includesAnySymptom(text, ['burning urine', 'pain urinating', 'dysuria', 'flank pain', 'back pain']) && includesAnySymptom(text, ['fever', 'chills'])) {
+        return {
+            triageLevel: 3,
+            possibleConditions: ['Urinary tract infection', 'Pyelonephritis', 'Renal colic with superimposed infection'],
+            recommendedAction: 'Doctor should review for urinary infection severity, hydration, pregnancy status, and whether antibiotics or referral are needed.',
+            reasoning: 'Urinary symptoms with fever suggest infection, with pyelonephritis remaining an important rule-out.',
+        };
+    }
+
+    if (includesAnySymptom(text, ['right lower abdomen', 'right lower quadrant', 'abdominal pain']) && includesAnySymptom(text, ['fever', 'vomiting', 'nausea'])) {
+        return {
+            triageLevel: 2,
+            possibleConditions: ['Appendicitis', 'Acute gastroenteritis', 'Pelvic or abdominal inflammatory process'],
+            recommendedAction: 'Urgent same-day clinical examination is advised to exclude a surgical abdomen.',
+            reasoning: 'Abdominal pain with fever and gastrointestinal symptoms needs prompt review because appendicitis cannot be excluded safely.',
+        };
+    }
+
+    if (includesAnySymptom(text, ['headache', 'neck stiffness', 'stiff neck']) && includesAnySymptom(text, ['fever', 'photophobia', 'confusion'])) {
+        return {
+            triageLevel: 1,
+            possibleConditions: ['Meningitis or meningoencephalitis', 'Severe systemic infection', 'Intracranial inflammatory process'],
+            recommendedAction: 'Immediate emergency assessment is required due to possible central nervous system infection.',
+            reasoning: 'Headache with fever and meningeal features is treated as an emergency because meningitis must be excluded.',
+        };
+    }
+
+    if (includesAnySymptom(text, ['rash', 'itching', 'hives', 'swelling'])) {
+        return {
+            triageLevel: 4,
+            possibleConditions: ['Allergic reaction', 'Dermatitis', 'Viral exanthem'],
+            recommendedAction: 'Doctor should review exposure history, airway symptoms, and whether this is allergic, infectious, or inflammatory.',
+            reasoning: 'Skin symptoms suggest an allergic or inflammatory presentation, with severity depending on airway involvement and systemic features.',
+        };
+    }
+
+    if (includesAnySymptom(text, ['fever', 'body aches', 'fatigue', 'runny nose', 'cough'])) {
+        return {
+            triageLevel: 4,
+            possibleConditions: ['Viral upper respiratory infection', 'Influenza-like illness', 'Early bacterial infection'],
+            recommendedAction: 'Doctor should correlate duration, respiratory severity, hydration, and comorbidities before deciding on treatment.',
+            reasoning: 'The presentation is most consistent with an infectious syndrome, likely viral, though early bacterial disease remains possible.',
+        };
+    }
+
     return {
-        triageLevel: 2,
-        possibleConditions: ['Undifferentiated acute presentation'],
-        recommendedAction: 'Seek urgent same-day clinical assessment. If symptoms worsen, go to emergency care immediately.',
-        reasoning: `Conservative safety fallback was used: ${reason}`,
+        triageLevel: 3,
+        possibleConditions: ['Acute undifferentiated illness', 'Infective or inflammatory presentation', 'Condition requiring clinician correlation'],
+        recommendedAction: 'Doctor should review the presentation directly and document a provisional diagnosis after correlation with history, exam, and attachments.',
+        reasoning: 'Symptoms do not map cleanly to a single fallback pattern, so a cautious clinician-reviewed provisional impression is required.',
+    };
+}
+
+function hasOnlyGenericConditions(conditions: string[]): boolean {
+    if (conditions.length === 0) return true;
+
+    return conditions.every((condition) =>
+        /undifferentiated|unclear|unspecified|unknown|presentation|condition requiring/i.test(condition),
+    );
+}
+
+function enrichWithFallbackOpinion(candidate: TriageResult, request: TriageRequest): TriageResult {
+    if (!hasOnlyGenericConditions(candidate.possibleConditions) && candidate.reasoning.trim().length >= 60) {
+        return candidate;
+    }
+
+    const fallbackOpinion = deriveFallbackOpinion(request.symptoms);
+    return {
+        ...candidate,
+        triageLevel: Math.min(candidate.triageLevel, fallbackOpinion.triageLevel) as 1 | 2 | 3 | 4 | 5,
+        possibleConditions: fallbackOpinion.possibleConditions,
+        recommendedAction: fallbackOpinion.recommendedAction,
+        reasoning: `${candidate.reasoning} Provisional fallback impression: ${fallbackOpinion.reasoning}`.trim(),
+        uncertaintyFlags: [...new Set([...candidate.uncertaintyFlags, 'HEURISTIC_PROVISIONAL_OPINION'])],
+    };
+}
+
+function conservativeFallback(reason: string, symptoms: string): TriageResult {
+    const fallbackOpinion = deriveFallbackOpinion(symptoms);
+    return {
+        triageLevel: fallbackOpinion.triageLevel,
+        possibleConditions: fallbackOpinion.possibleConditions,
+        recommendedAction: fallbackOpinion.recommendedAction,
+        reasoning: `${fallbackOpinion.reasoning} Conservative safety fallback was used: ${reason}`,
         confidence: 0,
         uncertaintyFlags: ['AI_PROVIDER_FAILURE', 'FALLBACK_USED'],
         evidenceSources: ['Local Clinical Rules'],
@@ -167,13 +279,14 @@ function conservativeFallback(reason: string): TriageResult {
 }
 
 function mergeGuardrails(candidate: TriageResult, request: TriageRequest): TriageResult {
+    const enrichedCandidate = enrichWithFallbackOpinion(candidate, request);
     const risk = assessDeterministicRisk(request.symptoms, request.vitalsSnapshot);
     const confidence = Number.
-isFinite(candidate.confidence) ? Math.max(0, Math.
-min(1, candidate.confidence)) : 0;
-    const uncertaintyFlags = [...new Set(candidate.uncertaintyFlags.filter(Boolean))];
+isFinite(enrichedCandidate.confidence) ? Math.max(0, Math.
+min(1, enrichedCandidate.confidence)) : 0;
+    const uncertaintyFlags = [...new Set(enrichedCandidate.uncertaintyFlags.filter(Boolean))];
 
-    const mergedLevel = Math.min(candidate.triageLevel, risk.minTriageLevel) as 1 | 2 | 3 | 4 | 5;
+    const mergedLevel = Math.min(enrichedCandidate.triageLevel, risk.minTriageLevel) as 1 | 2 | 3 | 4 | 5;
     const combinedFlags = [...new Set([
         ...uncertaintyFlags,
         ...risk.hardFlags,
@@ -183,7 +296,7 @@ min(1, candidate.confidence)) : 0;
     if (confidence < 0.55) {
         combinedFlags.push('LOW_MODEL_CONFIDENCE');
     }
-    if (candidate.evidenceSources.length === 0) {
+    if (enrichedCandidate.evidenceSources.length === 0) {
         combinedFlags.push('NO_ALLOWED_EVIDENCE_SOURCE');
     }
 
@@ -193,12 +306,12 @@ min(1, candidate.confidence)) : 0;
         : 'Proceed with standard doctor review workflow.';
 
     return {
-        ...candidate,
+        ...enrichedCandidate,
         triageLevel: mergedLevel,
         uncertaintyFlags: [...new Set(combinedFlags)],
         requiresDoctorReview,
-        recommendedAction: `${actionPrefix} ${candidate.recommendedAction}`.trim(),
-        reasoning: `${candidate.reasoning} | Guardrails applied: min triage ${risk.minTriageLevel}, confidence ${confidence.toFixed(2)}.`,
+        recommendedAction: `${actionPrefix} ${enrichedCandidate.recommendedAction}`.trim(),
+        reasoning: `${enrichedCandidate.reasoning} | Guardrails applied: min triage ${risk.minTriageLevel}, confidence ${confidence.toFixed(2)}.`,
     };
 }
 
@@ -490,6 +603,8 @@ export async function analyzeSymptoms(request: TriageRequest): Promise<TriageRes
                 !ANTHROPIC_API_KEY && !genAI
                     ? 'No AI provider configured'
                     : 'All configured AI providers failed'
+                ,
+                normalizedRequest.symptoms,
             );
             const guardedFallback = mergeGuardrails(fallback, normalizedRequest);
             guardedFallback.uncertaintyFlags = [...new Set([

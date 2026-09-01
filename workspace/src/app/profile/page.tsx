@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import RoleGuard, { UserRole } from "../../components/RoleGuard";
 import DashboardLayout from "../../components/DashboardLayout";
 import { authApi, patientApi, RiskProfile } from "../../lib/api";
@@ -33,6 +33,7 @@ type MedicalPassport = {
 
 export default function ProfilePage() {
   const { user, refreshUser } = useAuth();
+  const lastHydratedUserSignature = useRef<string | null>(null);
   const [form, setForm] = useState({
     firstName: "",
     lastName: "",
@@ -63,6 +64,7 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState("");
   const [error, setError] = useState("");
+  const [profileDirty, setProfileDirty] = useState(false);
   const [passport, setPassport] = useState<MedicalPassport>({
     emergencyContactName: "",
     emergencyContactPhone: "",
@@ -74,6 +76,8 @@ export default function ProfilePage() {
   const [passportAllergiesInput, setPassportAllergiesInput] = useState("");
   const [passportConditionsInput, setPassportConditionsInput] = useState("");
   const [passportMedsInput, setPassportMedsInput] = useState("");
+  const [passportDirty, setPassportDirty] = useState(false);
+  const [riskDirty, setRiskDirty] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     personal: true,
     passport: true,
@@ -116,6 +120,23 @@ export default function ProfilePage() {
   useEffect(() => {
     if (user) {
       const rpData = user.riskProfile as RiskProfile | undefined;
+      const userSignature = JSON.stringify({
+        firstName: user.firstName || "",
+        lastName: user.lastName || "",
+        phone: user.phone || "",
+        email: user.email || "",
+        dateOfBirth: user.dateOfBirth || "",
+        gender: user.gender || "",
+        preferredLanguage: user.preferredLanguage || "",
+        riskProfile: rpData ?? null,
+      });
+      const isSameServerSnapshot = userSignature === lastHydratedUserSignature.current;
+
+      if (isSameServerSnapshot && (profileDirty || passportDirty || riskDirty)) {
+        return;
+      }
+
+      lastHydratedUserSignature.current = userSignature;
       const isPersonalComplete = Boolean(user.firstName && user.lastName && user.phone);
       const isPassportComplete = (rpData?.passportCompletionPercent ?? 0) >= 100;
       const isHealthComplete = Boolean(rpData?.onboardingCompleted);
@@ -128,51 +149,58 @@ export default function ProfilePage() {
       });
 
       // Populate form values from user object
-      setForm({
-        firstName: user.firstName || "",
-        lastName: user.lastName || "",
-        phone: user.phone || "",
-        email: user.email || "",
-        dateOfBirth: user.dateOfBirth ? user.dateOfBirth.split("T")[0] : "",
-        gender: user.gender || "",
-        preferredLanguage: user.preferredLanguage || "",
-      });
+      if (!profileDirty || !isSameServerSnapshot) {
+        setForm({
+          firstName: user.firstName || "",
+          lastName: user.lastName || "",
+          phone: user.phone || "",
+          email: user.email || "",
+          dateOfBirth: user.dateOfBirth ? user.dateOfBirth.split("T")[0] : "",
+          gender: user.gender || "",
+          preferredLanguage: user.preferredLanguage || "",
+        });
+      }
 
       // Populate Passport values
       const mp = rpData?.medicalPassport || {};
-      setPassport({
-        emergencyContactName: mp.emergencyContactName || "",
-        emergencyContactPhone: mp.emergencyContactPhone || "",
-        bloodType: mp.bloodType || "",
-        allergies: mp.allergies || [],
-        chronicConditions: mp.chronicConditions || [],
-        currentMedications: mp.currentMedications || [],
-      });
-      setPassportAllergiesInput(Array.isArray(mp.allergies) ? mp.allergies.join(", ") : "");
-      setPassportConditionsInput(Array.isArray(mp.chronicConditions) ? mp.chronicConditions.join(", ") : "");
-      setPassportMedsInput(Array.isArray(mp.currentMedications) ? mp.currentMedications.join(", ") : "");
+      if (!passportDirty || !isSameServerSnapshot) {
+        setPassport({
+          emergencyContactName: mp.emergencyContactName || "",
+          emergencyContactPhone: mp.emergencyContactPhone || "",
+          bloodType: mp.bloodType || "",
+          allergies: mp.allergies || [],
+          chronicConditions: mp.chronicConditions || [],
+          currentMedications: mp.currentMedications || [],
+        });
+        setPassportAllergiesInput(Array.isArray(mp.allergies) ? mp.allergies.join(", ") : "");
+        setPassportConditionsInput(Array.isArray(mp.chronicConditions) ? mp.chronicConditions.join(", ") : "");
+        setPassportMedsInput(Array.isArray(mp.currentMedications) ? mp.currentMedications.join(", ") : "");
+      }
 
       // Populate Health values
-      setRiskProfile({
-        smoker: rpData?.smoker,
-        hypertension: rpData?.hypertension,
-        diabetes: rpData?.diabetes,
-        asthmaOrCopd: rpData?.asthmaOrCopd,
-        pregnancy: rpData?.pregnancy,
-        familyHistoryCvd: rpData?.familyHistoryCvd,
-        activityLevel: rpData?.activityLevel,
-        alcoholUse: rpData?.alcoholUse,
-        cholesterolKnown: rpData?.cholesterolKnown,
-        cholesterolValue: rpData?.cholesterolValue,
-        consentAcknowledged: rpData?.consentAcknowledged,
-        onboardingCompleted: rpData?.onboardingCompleted,
-        surveyVersion: rpData?.surveyVersion || 1,
-      });
+      if (!riskDirty || !isSameServerSnapshot) {
+        setRiskProfile({
+          smoker: rpData?.smoker,
+          hypertension: rpData?.hypertension,
+          diabetes: rpData?.diabetes,
+          asthmaOrCopd: rpData?.asthmaOrCopd,
+          pregnancy: rpData?.pregnancy,
+          familyHistoryCvd: rpData?.familyHistoryCvd,
+          activityLevel: rpData?.activityLevel,
+          alcoholUse: rpData?.alcoholUse,
+          cholesterolKnown: rpData?.cholesterolKnown,
+          cholesterolValue: rpData?.cholesterolValue,
+          consentAcknowledged: rpData?.consentAcknowledged,
+          onboardingCompleted: rpData?.onboardingCompleted,
+          surveyVersion: rpData?.surveyVersion || 1,
+        });
+      }
     }
-  }, [user]);
+  }, [passportDirty, profileDirty, riskDirty, user]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setForm((f) => ({ ...f, [e.target.name]: e.target.value }));
+    setProfileDirty(true);
     setSuccess("");
     setError("");
   };
@@ -207,8 +235,19 @@ export default function ProfilePage() {
           preferredLanguage: res.user.preferredLanguage ?? "",
         }));
       }
+      setProfileDirty(false);
       if (user?.role === "PATIENT") {
-        await patientApi.updateRiskProfile(buildMedicalPassportPayload());
+        const riskRes = await patientApi.updateRiskProfile(buildMedicalPassportPayload());
+        if (riskRes?.riskProfile && typeof window !== "undefined") {
+          const storedUser = localStorage.getItem("user");
+          if (storedUser) {
+            try {
+              const parsed = JSON.parse(storedUser);
+              localStorage.setItem("user", JSON.stringify({ ...parsed, riskProfile: riskRes.riskProfile }));
+            } catch {}
+          }
+        }
+        setPassportDirty(false);
       }
       if (res.emailChanged) {
         setSuccess("Profile saved. A verification email has been sent to your new address — please check your inbox.");
@@ -227,6 +266,7 @@ export default function ProfilePage() {
 
   const setRisk = (patch: Partial<RiskProfile>) => {
     setRiskProfile((rp) => ({ ...rp, ...patch }));
+    setRiskDirty(true);
     setRiskSuccess("");
     setRiskError("");
   };
@@ -255,9 +295,19 @@ export default function ProfilePage() {
     setRiskSuccess("");
     setRiskError("");
     try {
-      await patientApi.updateRiskProfile(buildMedicalPassportPayload());
+      const res = await patientApi.updateRiskProfile(buildMedicalPassportPayload());
+      setPassportDirty(false);
       setRiskSuccess("Medical passport updated successfully.");
       setExpandedSections(prev => ({ ...prev, passport: false }));
+      if (res?.riskProfile && typeof window !== "undefined") {
+        const storedUser = localStorage.getItem("user");
+        if (storedUser) {
+          try {
+            const parsed = JSON.parse(storedUser);
+            localStorage.setItem("user", JSON.stringify({ ...parsed, riskProfile: res.riskProfile }));
+          } catch {}
+        }
+      }
       if (refreshUser) await refreshUser();
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
@@ -283,6 +333,8 @@ export default function ProfilePage() {
         surveyVersion: riskProfile.surveyVersion ?? 1,
       };
       const res = await patientApi.updateRiskProfile(payload);
+      setRiskDirty(false);
+      setPassportDirty(false);
       setRiskSuccess("Health profile saved. You can now view Early Warning risk signals and choose whether to consult a clinician.");
       setExpandedSections(prev => ({ ...prev, health: false, passport: false }));
       if (refreshUser) await refreshUser();
@@ -440,27 +492,27 @@ export default function ProfilePage() {
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                           <div>
                             <label style={label}>Emergency contact name</label>
-                            <input value={passport.emergencyContactName ?? ""} onChange={(e) => setPassport((p) => ({ ...p, emergencyContactName: e.target.value }))} style={inp} />
+                            <input value={passport.emergencyContactName ?? ""} onChange={(e) => { setPassportDirty(true); setPassport((p) => ({ ...p, emergencyContactName: e.target.value })); }} style={inp} />
                           </div>
                           <div>
                             <label style={label}>Emergency contact phone</label>
-                            <input value={passport.emergencyContactPhone ?? ""} onChange={(e) => setPassport((p) => ({ ...p, emergencyContactPhone: e.target.value }))} style={inp} />
+                            <input value={passport.emergencyContactPhone ?? ""} onChange={(e) => { setPassportDirty(true); setPassport((p) => ({ ...p, emergencyContactPhone: e.target.value })); }} style={inp} />
                           </div>
                           <div>
                             <label style={label}>Blood type</label>
-                            <input value={passport.bloodType ?? ""} onChange={(e) => setPassport((p) => ({ ...p, bloodType: e.target.value }))} placeholder="A+, O-, Unknown" style={inp} />
+                            <input value={passport.bloodType ?? ""} onChange={(e) => { setPassportDirty(true); setPassport((p) => ({ ...p, bloodType: e.target.value })); }} placeholder="A+, O-, Unknown" style={inp} />
                           </div>
                           <div>
                             <label style={label}>Allergies (comma separated)</label>
-                            <input value={passportAllergiesInput} onChange={(e) => setPassportAllergiesInput(e.target.value)} placeholder="Penicillin, peanuts" style={inp} />
+                            <input value={passportAllergiesInput} onChange={(e) => { setPassportDirty(true); setPassportAllergiesInput(e.target.value); }} placeholder="Penicillin, peanuts" style={inp} />
                           </div>
                           <div>
                             <label style={label}>Chronic conditions (comma separated)</label>
-                            <input value={passportConditionsInput} onChange={(e) => setPassportConditionsInput(e.target.value)} placeholder="Hypertension, diabetes" style={inp} />
+                            <input value={passportConditionsInput} onChange={(e) => { setPassportDirty(true); setPassportConditionsInput(e.target.value); }} placeholder="Hypertension, diabetes" style={inp} />
                           </div>
                           <div>
                             <label style={label}>Current medications (comma separated)</label>
-                            <input value={passportMedsInput} onChange={(e) => setPassportMedsInput(e.target.value)} placeholder="Metformin, Amlodipine" style={inp} />
+                            <input value={passportMedsInput} onChange={(e) => { setPassportDirty(true); setPassportMedsInput(e.target.value); }} placeholder="Metformin, Amlodipine" style={inp} />
                           </div>
                         </div>
 

@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="1754" viewBox="0 0 1240 1754" role="img" aria-label="Synthetic lab report for triage testing">
+  <rect width="1240" height="1754" fill="#dfe5ea"/>
+  <rect x="82" y="72" width="1076" height="1610" rx="24" fill="#ffffff" stroke="#ccd4db" stroke-width="4"/>
+
+  <text x="140" y="160" font-family="Arial, sans-serif" font-size="42" font-weight="700" fill="#1b2c3a">AHAVA TEST LAB</text>
+  <text x="140" y="205" font-family="Arial, sans-serif" font-size="22" fill="#536271">Synthetic investigation report for demo use only</text>
+
+  <line x1="140" y1="245" x2="1100" y2="245" stroke="#d9e0e6" stroke-width="3"/>
+
+  <text x="140" y="320" font-family="Arial, sans-serif" font-size="25" font-weight="700" fill="#223344">Patient</text>
+  <text x="360" y="320" font-family="Arial, sans-serif" font-size="25" fill="#223344">Test Patient</text>
+  <text x="140" y="370" font-family="Arial, sans-serif" font-size="25" font-weight="700" fill="#223344">Date</text>
+  <text x="360" y="370" font-family="Arial, sans-serif" font-size="25" fill="#223344">2026-09-01</text>
+  <text x="140" y="420" font-family="Arial, sans-serif" font-size="25" font-weight="700" fill="#223344">Clinical Note</text>
+  <text x="360" y="420" font-family="Arial, sans-serif" font-size="25" fill="#223344">Sore throat, fever, white tonsillar patches</text>
+
+  <rect x="140" y="485" width="960" height="88" rx="12" fill="#f4f8fb" stroke="#d7e0e8" stroke-width="2"/>
+  <text x="170" y="540" font-family="Arial, sans-serif" font-size="30" font-weight="700" fill="#223344">Rapid Strep A Test</text>
+  <text x="980" y="540" font-family="Arial, sans-serif" font-size="30" font-weight="700" fill="#b51f2e" text-anchor="end">POSITIVE</text>
+
+  <text x="140" y="650" font-family="Arial, sans-serif" font-size="31" font-weight="700" fill="#223344">Full Blood Count</text>
+
+  <rect x="140" y="690" width="960" height="430" rx="16" fill="#fbfcfd" stroke="#d7dfe7" stroke-width="2"/>
+  <line x1="140" y1="770" x2="1100" y2="770" stroke="#d7dfe7" stroke-width="2"/>
+  <line x1="720" y1="690" x2="720" y2="1120" stroke="#d7dfe7" stroke-width="2"/>
+
+  <text x="170" y="740" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#445566">Test</text>
+  <text x="760" y="740" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#445566">Result</text>
+
+  <text x="170" y="835" font-family="Arial, sans-serif" font-size="25" fill="#223344">WBC</text>
+  <text x="760" y="835" font-family="Arial, sans-serif" font-size="25" fill="#b51f2e">13.8 x10^9/L  (High)</text>
+
+  <text x="170" y="905" font-family="Arial, sans-serif" font-size="25" fill="#223344">Neutrophils</text>
+  <text x="760" y="905" font-family="Arial, sans-serif" font-size="25" fill="#b51f2e">10.9 x10^9/L  (High)</text>
+
+  <text x="170" y="975" font-family="Arial, sans-serif" font-size="25" fill="#223344">Lymphocytes</text>
+  <text x="760" y="975" font-family="Arial, sans-serif" font-size="25" fill="#223344">1.8 x10^9/L</text>
+
+  <text x="170" y="1045" font-family="Arial, sans-serif" font-size="25" fill="#223344">Hemoglobin</text>
+  <text x="760" y="1045" font-family="Arial, sans-serif" font-size="25" fill="#223344">12.7 g/dL</text>
+
+  <text x="170" y="1115" font-family="Arial, sans-serif" font-size="25" fill="#223344">Platelets</text>
+  <text x="760" y="1115" font-family="Arial, sans-serif" font-size="25" fill="#223344">298 x10^9/L</text>
+
+  <rect x="140" y="1185" width="960" height="88" rx="12" fill="#fff5f5" stroke="#f0d2d2" stroke-width="2"/>
+  <text x="170" y="1240" font-family="Arial, sans-serif" font-size="30" font-weight="700" fill="#223344">CRP</text>
+  <text x="980" y="1240" font-family="Arial, sans-serif" font-size="30" font-weight="700" fill="#b51f2e" text-anchor="end">42 mg/L  (High)</text>
+
+  <text x="140" y="1355" font-family="Arial, sans-serif" font-size="31" font-weight="700" fill="#223344">Comment</text>
+  <foreignObject x="140" y="1390" width="960" height="180">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: Arial, sans-serif; font-size: 24px; color: #223344; line-height: 1.45;">
+      Findings support an acute bacterial upper respiratory or throat infection.
+      Clinical correlation advised. Review allergy history before prescribing.
+    </div>
+  </foreignObject>
+
+  <text x="140" y="1630" font-family="Arial, sans-serif" font-size="20" fill="#6c7b88">Use this file as the lab-result attachment in the triage demo.</text>
+</svg>
