@@ -1,7 +1,5 @@
-import { PrismaClient } from '@prisma/client';
 import 'dotenv/config';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma';
 
 async function targetedReset() {
   const keepEmail = 'themol581@gmail.com';

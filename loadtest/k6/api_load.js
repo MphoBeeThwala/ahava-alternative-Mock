@@ -56,6 +56,17 @@ function login(email) {
   return token || null;
 }
 
+function getWebSocketTicket(token) {
+  const res = http.post(`${BASE_URL}/api/auth/ws-ticket`, null, authHeaders(token));
+  const ok = check(res, {
+    'ws ticket status 200': (r) => r.status === 200,
+  });
+  if (!ok) return null;
+
+  const body = res.json();
+  return body && body.ticket ? body.ticket : null;
+}
+
 export const options = {
   scenarios: {
     api: {
@@ -132,9 +143,16 @@ export default function () {
   }
 
   if (rand() < WS_CONNECT_RATE) {
-    const url = `${WS_URL}?token=${token}`;
+    const ticket = getWebSocketTicket(token);
+    if (!ticket) {
+      sleep(parseFloat(__ENV.SLEEP_SECONDS || '1'));
+      return;
+    }
+
+    const url = `${WS_URL}/ws`;
     ws.connect(url, {}, function (socket) {
       socket.on('open', function () {
+        socket.send(JSON.stringify({ type: 'AUTH', data: { ticket } }));
         socket.close();
       });
     });

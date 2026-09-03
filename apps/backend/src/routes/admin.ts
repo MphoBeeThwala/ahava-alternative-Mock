@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { UserRole } from '@prisma/client';
 import { AuthenticatedRequest, authMiddleware, requireAdmin } from '../middleware/auth';
-import { createAuditLog } from '../services/auditLog';
+import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 import prisma from '../lib/prisma';
 
 const router: Router = Router();

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useCallback, useState } from "react";
 import { getRealtimeWebSocketUrl } from "../lib/realtime";
+import { authApi } from "../lib/api";
 
 export type WsMessage = {
   type: string;
@@ -25,23 +26,56 @@ export function useVisitWebSocket(token: string | null) {
     if (!token) return;
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
-    try {
-      const url = getRealtimeWebSocketUrl(token);
-      if (!url) return;
-      const ws = new WebSocket(url);
-      wsRef.current = ws;
+    void (async () => {
+      try {
+        const ticketResponse = await authApi.getWebSocketTicket();
+        const url = getRealtimeWebSocketUrl();
+        if (!url) return;
+        const ws = new WebSocket(url);
+        wsRef.current = ws;
 
-      ws.onopen = () => {
-        setConnected(true);
-        reconnectDelay.current = 3000;
-        retryCount.current = 0;
-        if (reconnectTimer.current) {
-          clearTimeout(reconnectTimer.current);
-          reconnectTimer.current = null;
-        }
-      };
+        ws.onopen = () => {
+          ws.send(
+            JSON.stringify({
+              type: "AUTH",
+              data: { ticket: ticketResponse.ticket },
+            }),
+          );
+        };
 
-      ws.onclose = () => {
+        ws.onclose = () => {
+          setConnected(false);
+          if (!intentionalClose.current && retryCount.current < MAX_RETRIES) {
+            retryCount.current += 1;
+            reconnectTimer.current = setTimeout(() => {
+              reconnectDelay.current = Math.min(reconnectDelay.current * 1.5, 30000);
+              connectRef.current?.();
+            }, reconnectDelay.current);
+          }
+        };
+
+        ws.onerror = () => ws.close();
+
+        ws.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data as string) as WsMessage;
+            if (msg.type === "AUTHENTICATED") {
+              setConnected(true);
+              reconnectDelay.current = 3000;
+              retryCount.current = 0;
+              if (reconnectTimer.current) {
+                clearTimeout(reconnectTimer.current);
+                reconnectTimer.current = null;
+              }
+              return;
+            }
+
+            setLastMessage(msg);
+          } catch {
+            /* ignore malformed messages */
+          }
+        };
+      } catch {
         setConnected(false);
         if (!intentionalClose.current && retryCount.current < MAX_RETRIES) {
           retryCount.current += 1;
@@ -50,21 +84,8 @@ export function useVisitWebSocket(token: string | null) {
             connectRef.current?.();
           }, reconnectDelay.current);
         }
-      };
-
-      ws.onerror = () => ws.close();
-
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data as string) as WsMessage;
-          setLastMessage(msg);
-        } catch {
-          /* ignore malformed messages */
-        }
-      };
-    } catch {
-      /* ignore connection errors — retry will happen via onclose */
-    }
+      }
+    })();
   }, [token]);
 
   useEffect(() => {
@@ -84,13 +105,13 @@ export function useVisitWebSocket(token: string | null) {
 
   const send = useCallback(
     (msg: object): boolean => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
+      if (connected && wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify(msg));
         return true;
       }
       return false;
     },
-    []
+    [connected]
   );
 
   const disconnect = useCallback(() => {

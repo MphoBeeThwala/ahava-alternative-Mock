@@ -531,7 +531,9 @@ export async function analyzeSymptoms(request: TriageRequest): Promise<TriageRes
         symptoms: normalizeSymptoms(request.symptoms),
     };
 
-    if (DEBUG) if (DEBUG) console.log(`[aiTriage] analyzeSymptoms called caseId=${normalizedRequest.caseId ?? 'n/a'} patientContext=${!!normalizedRequest.patientContext}`);
+    if (DEBUG) {
+        console.log(`[aiTriage] analyzeSymptoms called caseId=${normalizedRequest.caseId ?? 'n/a'} patientContext=${!!normalizedRequest.patientContext}`);
+    }
 
     const dedupeKey = buildInFlightKey(normalizedRequest);
     const existing = inFlightTriage.get(dedupeKey);

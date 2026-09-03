@@ -1,8 +1,10 @@
 import { Router } from 'express';
 import { UserRole, TriageCaseStatus } from '@prisma/client';
 import { AuthenticatedRequest, authMiddleware, requireDoctor } from '../middleware/auth';
-import { createAuditLog } from '../services/auditLog';
+import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 import prisma from '../lib/prisma';
+import { markCaseReviewed } from '../jobs/triageEscalation';
+import { resolveTriageOverride } from '../services/triageReviewValidation';
 
 const router: Router = Router();
 
@@ -39,10 +41,41 @@ router.patch('/:id/review', requireDoctor, async (req: AuthenticatedRequest, res
     const triageCase = await prisma.triageCase.findUnique({ where: { id } });
     if (!triageCase) return res.status(404).json({ error: 'Triage case not found' });
     if (triageCase.doctorId && triageCase.doctorId !== req.user!.id) return res.status(403).json({ error: 'Access denied' });
+
+    if (!doctorNotes?.trim() || !doctorDiagnosis?.trim()) {
+      return res.status(400).json({ error: 'Doctor notes and diagnosis are required' });
+    }
+
+    const {
+      chosenLevel,
+      normalizedOverrideReason,
+      error: overrideValidationError,
+    } = resolveTriageOverride({
+      aiTriageLevel: triageCase.aiTriageLevel,
+      finalTriageLevel,
+      overrideReason,
+    });
+
+    if (overrideValidationError) {
+      return res.status(400).json({ error: overrideValidationError });
+    }
+
     const updated = await prisma.triageCase.update({
       where: { id },
-      data: { doctorId: req.user!.id, doctorNotes, doctorDiagnosis, doctorRecommendations, finalTriageLevel, overrideReason, referredTo, status: TriageCaseStatus.REVIEWED, reviewedAt: new Date() }
+      data: {
+        doctorId: req.user!.id,
+        doctorNotes: doctorNotes.trim(),
+        doctorDiagnosis: doctorDiagnosis.trim(),
+        doctorRecommendations: doctorRecommendations?.trim() || null,
+        finalDiagnosis: doctorDiagnosis.trim(),
+        finalTriageLevel: chosenLevel,
+        overrideReason: chosenLevel !== triageCase.aiTriageLevel ? normalizedOverrideReason : null,
+        referredTo: referredTo?.trim() || null,
+        status: TriageCaseStatus.REVIEWED,
+        reviewedAt: new Date(),
+      }
     });
+    await markCaseReviewed(id, req.user!.id);
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'UPDATE', resource: 'TriageCase', resourceId: id, metadata: { oldStatus: triageCase.status, newStatus: 'REVIEWED', hasDiagnosis: !!doctorDiagnosis }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
     res.json({ success: true, triageCase: updated });
   } catch (error) { next(error); }

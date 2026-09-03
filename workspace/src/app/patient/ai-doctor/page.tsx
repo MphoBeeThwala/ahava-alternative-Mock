@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import RoleGuard, { UserRole } from "../../../components/RoleGuard";
 import apiClient, {
+  authApi,
   patientApi,
   consentApi,
   type PatientTriageCase,
@@ -254,79 +255,94 @@ export default function AiDoctorPage() {
     const activeCaseId = pendingCase?.triageCaseId ?? followUpNotice?.id;
     if (!activeCaseId) return;
 
-    const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
-    if (!token) return;
+    let cancelled = false;
 
-    const wsUrl = getRealtimeWebSocketUrl(token);
-    if (!wsUrl) return;
-
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-
-    ws.onmessage = (event) => {
+    void (async () => {
       try {
-        const msg = JSON.parse(event.data);
+        const { ticket } = await authApi.getWebSocketTicket();
+        const wsUrl = getRealtimeWebSocketUrl();
+        if (!wsUrl || cancelled) return;
 
-        if (msg.type === 'TRIAGE_RESULT_RELEASED' && msg.data?.triageCaseId === activeCaseId) {
-          setTriageResult({
-            triageLevel: msg.data.triageLevel,
-            recommendedAction: msg.data.recommendedAction,
-            possibleConditions: msg.data.possibleConditions,
-            reasoning: '',
-            doctorNotes: msg.data.doctorNotes,
-            doctorDiagnosis: msg.data.doctorDiagnosis,
-            doctorRecommendations: msg.data.doctorRecommendations,
-            wasOverridden: msg.data.wasOverridden,
-            releasedAt: msg.data.releasedAt,
-          });
-          setPendingCase(null);
-          setFollowUpNotice(null);
-          toast.success('Your triage result has been released by a doctor.');
-          void loadExistingCases();
-        }
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
 
-        if (msg.type === 'PRESCRIPTION_ISSUED' && msg.data?.triageCaseId === activeCaseId) {
-          setPrescriptionNotice(msg.data as PrescriptionNotice);
-          setPendingCase(null);
-          setFollowUpNotice(null);
-          toast.success(`Prescription issued by ${msg.data.doctorName}. Download your script below.`);
-          void loadExistingCases();
-        }
+        ws.onopen = () => {
+          ws.send(JSON.stringify({ type: "AUTH", data: { ticket } }));
+        };
 
-        if (msg.type === 'EMERGENCY_REFERRAL_ISSUED' && msg.data?.triageCaseId === activeCaseId) {
-          setReferralNotice(msg.data as ReferralNotice);
-          setPendingCase(null);
-          setFollowUpNotice(null);
-          toast.error('Emergency referral issued. Please act immediately — see instructions below.');
-          void loadExistingCases();
-        }
+        ws.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data);
 
-        if (msg.type === 'TRIAGE_FOLLOW_UP_REQUESTED' && msg.data?.triageCaseId === activeCaseId) {
-          setPendingCase(null);
-          setFollowUpNotice({
-            id: msg.data.triageCaseId,
-            followUpRequestType: msg.data.requestType,
-            followUpRequestMessage: msg.data.message,
-            followUpQuestions: Array.isArray(msg.data.questions) ? msg.data.questions : [],
-            requestedInvestigations: Array.isArray(msg.data.requestedInvestigations) ? msg.data.requestedInvestigations : [],
-            attachments: [],
-          });
-          toast.success('Your doctor requested more information before completing the review.');
-          void loadExistingCases();
-        }
+            if (msg.type === "AUTHENTICATED") {
+              return;
+            }
 
-        if (msg.type === "TRIAGE_FOLLOW_UP_RECEIVED" && msg.data?.triageCaseId === activeCaseId) {
-          void loadExistingCases();
-        }
-      } catch { /* ignore parse errors */ }
-    };
+            if (msg.type === 'TRIAGE_RESULT_RELEASED' && msg.data?.triageCaseId === activeCaseId) {
+              setTriageResult({
+                triageLevel: msg.data.triageLevel,
+                recommendedAction: msg.data.recommendedAction,
+                possibleConditions: msg.data.possibleConditions,
+                reasoning: '',
+                doctorNotes: msg.data.doctorNotes,
+                doctorDiagnosis: msg.data.doctorDiagnosis,
+                doctorRecommendations: msg.data.doctorRecommendations,
+                wasOverridden: msg.data.wasOverridden,
+                releasedAt: msg.data.releasedAt,
+              });
+              setPendingCase(null);
+              setFollowUpNotice(null);
+              toast.success('Your triage result has been released by a doctor.');
+              void loadExistingCases();
+            }
 
-    ws.onerror = () => {
-      ws.close();
-    };
+            if (msg.type === 'PRESCRIPTION_ISSUED' && msg.data?.triageCaseId === activeCaseId) {
+              setPrescriptionNotice(msg.data as PrescriptionNotice);
+              setPendingCase(null);
+              setFollowUpNotice(null);
+              toast.success(`Prescription issued by ${msg.data.doctorName}. Download your script below.`);
+              void loadExistingCases();
+            }
+
+            if (msg.type === 'EMERGENCY_REFERRAL_ISSUED' && msg.data?.triageCaseId === activeCaseId) {
+              setReferralNotice(msg.data as ReferralNotice);
+              setPendingCase(null);
+              setFollowUpNotice(null);
+              toast.error('Emergency referral issued. Please act immediately — see instructions below.');
+              void loadExistingCases();
+            }
+
+            if (msg.type === 'TRIAGE_FOLLOW_UP_REQUESTED' && msg.data?.triageCaseId === activeCaseId) {
+              setPendingCase(null);
+              setFollowUpNotice({
+                id: msg.data.triageCaseId,
+                followUpRequestType: msg.data.requestType,
+                followUpRequestMessage: msg.data.message,
+                followUpQuestions: Array.isArray(msg.data.questions) ? msg.data.questions : [],
+                requestedInvestigations: Array.isArray(msg.data.requestedInvestigations) ? msg.data.requestedInvestigations : [],
+                attachments: [],
+              });
+              toast.success('Your doctor requested more information before completing the review.');
+              void loadExistingCases();
+            }
+
+            if (msg.type === "TRIAGE_FOLLOW_UP_RECEIVED" && msg.data?.triageCaseId === activeCaseId) {
+              void loadExistingCases();
+            }
+          } catch { /* ignore parse errors */ }
+        };
+
+        ws.onerror = () => {
+          ws.close();
+        };
+      } catch {
+        // Keep polling active even when realtime auth fails.
+      }
+    })();
 
     return () => {
-      ws.close();
+      cancelled = true;
+      wsRef.current?.close();
       wsRef.current = null;
     };
   }, [followUpNotice?.id, loadExistingCases, pendingCase?.triageCaseId, toast]);
@@ -400,14 +416,14 @@ export default function AiDoctorPage() {
     try {
       const result = await patientApi.submitTriage(payload);
       if ((result.status === 'PENDING_REVIEW' || (result.success && result.triageCaseId)) && result.triageCaseId) {
+        // The POST /triage response is only an acknowledgement; the actual
+        // clinician-reviewed result arrives later via WebSocket or polling.
         resetCaseState();
         setShowNewSubmissionForm(false);
         setPendingCase({
           triageCaseId: result.triageCaseId,
           estimatedWaitMinutes: result.meta?.estimatedWaitMinutes ?? 60,
         });
-      } else if (result.data) {
-        setTriageResult(result.data);
       }
     } catch (error: unknown) {
       const e = error as { response?: { data?: { error?: string; consentType?: string }; status?: number } };

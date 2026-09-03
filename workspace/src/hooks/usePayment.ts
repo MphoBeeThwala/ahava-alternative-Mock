@@ -28,9 +28,9 @@ export function usePayment() {
     try {
       const response = await fetch('/api/payments/create', {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + localStorage.getItem('token'),
         },
         body: JSON.stringify(params),
       });
@@ -64,9 +64,7 @@ export function usePayment() {
   const checkPaymentStatus = async (paymentId: string) => {
     try {
       const response = await fetch('/api/payments/' + paymentId + '/status', {
-        headers: {
-          'Authorization': 'Bearer ' + localStorage.getItem('token'),
-        },
+        credentials: 'include',
       });
 
       if (!response.ok) {

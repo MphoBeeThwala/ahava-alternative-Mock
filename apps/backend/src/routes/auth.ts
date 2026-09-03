@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Request, Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
@@ -15,6 +15,12 @@ import { seedBaselineForUser } from "../services/baselineSeed";
 import { addEmailJob } from "../services/queue";
 import prisma from "../lib/prisma";
 import { getRedis } from "../services/redis";
+import {
+  clearAuthCookies,
+  createWebSocketTicket,
+  getRefreshTokenFromRequest,
+  setAuthCookies,
+} from "../services/authSession";
 
 const router: Router = Router();
 
@@ -134,6 +140,28 @@ const REFRESH_REPLAY_TTL_SECONDS = Math.max(
   1,
   parseInt(process.env.REFRESH_TOKEN_REPLAY_TTL_SECONDS ?? "30", 10) || 30,
 );
+
+function shouldExposeTokens(req: Request): boolean {
+  return req.get("X-Ahava-Auth-Mode") !== "cookie";
+}
+
+function buildAuthResponse<
+  TPayload extends Record<string, unknown>,
+>(
+  req: Request,
+  payload: TPayload,
+  tokens: { accessToken: string; refreshToken: string },
+): TPayload & Partial<{ accessToken: string; refreshToken: string }> {
+  if (!shouldExposeTokens(req)) {
+    return payload;
+  }
+
+  return {
+    ...payload,
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken,
+  };
+}
 
 function getRefreshReplayCacheKey(tokenHash: string): string {
   return `auth:refresh:replay:${tokenHash}`;
@@ -420,14 +448,20 @@ router.post("/register", authRateLimiter, async (req, res, next) => {
       }
     });
 
-    res.status(201).json({
-      success: true,
-      user,
-      accessToken,
-      refreshToken,
-      sancVerification:
-        role === "NURSE" && sancRegistrationNumber ? "PENDING" : undefined,
-    });
+    setAuthCookies(res, req, { accessToken, refreshToken });
+
+    res.status(201).json(
+      buildAuthResponse(
+        req,
+        {
+          success: true,
+          user,
+          sancVerification:
+            role === "NURSE" && sancRegistrationNumber ? "PENDING" : undefined,
+        },
+        { accessToken, refreshToken },
+      ),
+    );
   } catch (error) {
     next(error);
   }
@@ -485,21 +519,27 @@ router.post("/login", authRateLimiter, async (req, res, next) => {
       user.role,
     );
 
-    res.json({
-      success: true,
-      user: {
-        id: user.id,
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        role: user.role,
-        isActive: user.isActive,
-        isVerified: user.isVerified,
-        preferredLanguage: user.preferredLanguage,
-      },
-      accessToken,
-      refreshToken,
-    });
+    setAuthCookies(res, req, { accessToken, refreshToken });
+
+    res.json(
+      buildAuthResponse(
+        req,
+        {
+          success: true,
+          user: {
+            id: user.id,
+            email: user.email,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            role: user.role,
+            isActive: user.isActive,
+            isVerified: user.isVerified,
+            preferredLanguage: user.preferredLanguage,
+          },
+        },
+        { accessToken, refreshToken },
+      ),
+    );
   } catch (error) {
     next(error);
   }
@@ -508,12 +548,15 @@ router.post("/login", authRateLimiter, async (req, res, next) => {
 // Refresh token
 router.post("/refresh", async (req, res, next) => {
   try {
-    const { error, value } = refreshTokenSchema.validate(req.body);
-    if (error) {
-      return res.status(400).json({ error: error.details[0].message });
+    const refreshToken =
+      typeof req.body?.refreshToken === "string"
+        ? req.body.refreshToken
+        : getRefreshTokenFromRequest(req);
+    const { error } = refreshTokenSchema.validate({ refreshToken });
+    if (error || !refreshToken) {
+      clearAuthCookies(res, req);
+      return res.status(400).json({ error: "Refresh token is required" });
     }
-
-    const { refreshToken } = value;
 
     // Verify refresh token
     if (!process.env.JWT_SECRET) {
@@ -560,10 +603,16 @@ router.post("/refresh", async (req, res, next) => {
     if (!tokenRecord) {
       const replayTokens = await getRefreshReplayTokens(tokenHash);
       if (replayTokens) {
-        return res.json({
-          success: true,
-          ...replayTokens,
-        });
+        setAuthCookies(res, req, replayTokens);
+        return res.json(
+          buildAuthResponse(
+            req,
+            {
+              success: true,
+            },
+            replayTokens,
+          ),
+        );
       }
       return res
         .status(401)
@@ -589,10 +638,16 @@ router.post("/refresh", async (req, res, next) => {
     if (!rotatedTokens) {
       const replayTokens = await getRefreshReplayTokens(tokenHash);
       if (replayTokens) {
-        return res.json({
-          success: true,
-          ...replayTokens,
-        });
+        setAuthCookies(res, req, replayTokens);
+        return res.json(
+          buildAuthResponse(
+            req,
+            {
+              success: true,
+            },
+            replayTokens,
+          ),
+        );
       }
 
       return res
@@ -622,11 +677,23 @@ router.post("/refresh", async (req, res, next) => {
       refreshToken: rotatedTokens.refreshToken,
     });
 
-    res.json({
-      success: true,
+    setAuthCookies(res, req, {
       accessToken: rotatedTokens.accessToken,
       refreshToken: rotatedTokens.refreshToken,
     });
+
+    res.json(
+      buildAuthResponse(
+        req,
+        {
+          success: true,
+        },
+        {
+          accessToken: rotatedTokens.accessToken,
+          refreshToken: rotatedTokens.refreshToken,
+        },
+      ),
+    );
   } catch (error) {
     next(error);
   }
@@ -635,7 +702,10 @@ router.post("/refresh", async (req, res, next) => {
 // Logout (invalidate refresh token)
 router.post("/logout", async (req, res, next) => {
   try {
-    const { refreshToken } = req.body;
+    const refreshToken =
+      typeof req.body?.refreshToken === "string"
+        ? req.body.refreshToken
+        : getRefreshTokenFromRequest(req);
 
     if (refreshToken) {
       const tokenHash = hashRefreshToken(refreshToken);
@@ -645,11 +715,32 @@ router.post("/logout", async (req, res, next) => {
       }).catch(() => {});
     }
 
+    clearAuthCookies(res, req);
     res.json({ success: true, message: "Logged out successfully" });
   } catch (error) {
     next(error);
   }
 });
+
+router.post(
+  "/ws-ticket",
+  authMiddleware,
+  async (req: AuthenticatedRequest, res, next) => {
+    try {
+      const user = req.user;
+      if (!user) {
+        return res.status(401).json({ error: "Authentication required" });
+      }
+
+      res.json({
+        success: true,
+        ticket: createWebSocketTicket(user.id, user.role),
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
 
 // Get current user profile - uses authMiddleware cache (Redis + in-memory, 5m TTL)
 router.get("/me", authMiddleware, async (req: AuthenticatedRequest, res, next) => {

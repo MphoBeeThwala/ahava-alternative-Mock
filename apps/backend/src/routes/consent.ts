@@ -9,11 +9,16 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import Joi from 'joi';
 import prisma from '../lib/prisma';
-import { createAuditLog } from '../services/auditLog';
+import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 
 const router: Router = Router();
 
 const VALID_CONSENT_TYPES = ['AI_TRIAGE', 'BIOMETRIC_MONITORING', 'DATA_SHARING', 'MARKETING'] as const;
+type ValidConsentType = (typeof VALID_CONSENT_TYPES)[number];
+
+function isValidConsentType(value: string): value is ValidConsentType {
+  return VALID_CONSENT_TYPES.includes(value as ValidConsentType);
+}
 
 const giveConsentSchema = Joi.object({
   consentType: Joi.string().valid(...VALID_CONSENT_TYPES).required(),
@@ -31,7 +36,7 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
       ?? req.socket.remoteAddress ?? null;
     const userAgent = req.headers['user-agent'] ?? null;
 
-    const consent = await (prisma as any).patientConsent.upsert({
+    const consent = await prisma.patientConsent.upsert({
       where: {
         userId_consentType_version: {
           userId,
@@ -87,7 +92,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req as any).user.id;
 
-    const consents = await (prisma as any).patientConsent.findMany({
+    const consents = await prisma.patientConsent.findMany({
       where: { userId },
       select: {
         id: true,
@@ -112,11 +117,11 @@ router.delete('/:consentType', async (req: Request, res: Response, next: NextFun
     const userId      = (req as any).user.id;
     const consentType = req.params.consentType;
 
-    if (!VALID_CONSENT_TYPES.includes(consentType as any)) {
+    if (!isValidConsentType(consentType)) {
       return res.status(400).json({ success: false, error: 'Invalid consent type' });
     }
 
-    await (prisma as any).patientConsent.updateMany({
+    await prisma.patientConsent.updateMany({
       where: { userId, consentType, withdrawn: false },
       data: { withdrawn: true, withdrawnAt: new Date() },
     });

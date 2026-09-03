@@ -45,21 +45,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      const legacyAccessToken =
-        localStorage.getItem('ahava_access_token') ||
-        localStorage.getItem('accessToken');
-      const legacyRefreshToken =
-        localStorage.getItem('ahava_refresh_token') ||
-        localStorage.getItem('refresh_token');
-      if (!localStorage.getItem('token') && legacyAccessToken) {
-        localStorage.setItem('token', legacyAccessToken);
-      }
-      if (!localStorage.getItem('refreshToken') && legacyRefreshToken) {
-        localStorage.setItem('refreshToken', legacyRefreshToken);
-      }
-
-      const storedToken = localStorage.getItem('token');
-      if (!storedToken) {
+      const storedUser = localStorage.getItem('user');
+      if (!storedUser) {
         setUser(null);
         setToken(null);
         setLoading(false);
@@ -67,19 +54,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       try {
-        // Validate persisted session against backend. This prevents stale localStorage
-        // from granting temporary app access when the token/session is actually invalid.
         const data = await authApi.me();
         if (data?.user) {
           setUser(data.user as User);
-          setToken(localStorage.getItem('token'));
+          setToken('cookie-session');
           localStorage.setItem('user', JSON.stringify(data.user));
+          localStorage.removeItem('token');
+          localStorage.removeItem('refreshToken');
+          localStorage.removeItem('ahava_access_token');
+          localStorage.removeItem('ahava_refresh_token');
+          localStorage.removeItem('accessToken');
+          localStorage.removeItem('refresh_token');
         } else {
           throw new Error('Missing user in /auth/me response');
         }
       } catch {
         localStorage.removeItem('token');
         localStorage.removeItem('refreshToken');
+        localStorage.removeItem('ahava_access_token');
+        localStorage.removeItem('ahava_refresh_token');
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('refresh_token');
         localStorage.removeItem('user');
         setUser(null);
         setToken(null);
@@ -95,12 +90,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const response: AuthResponse = await authApi.login({ email, password });
     
     if (typeof window !== 'undefined') {
-      localStorage.setItem('token', response.accessToken);
-      localStorage.setItem('refreshToken', response.refreshToken);
       localStorage.setItem('user', JSON.stringify(response.user));
+      localStorage.removeItem('token');
+      localStorage.removeItem('refreshToken');
+      localStorage.removeItem('ahava_access_token');
+      localStorage.removeItem('ahava_refresh_token');
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refresh_token');
     }
     
-    setToken(response.accessToken);
+    setToken('cookie-session');
     setUser(response.user as User);
 
     // Hydrate complete user shape (includes riskProfile/onboarding state).
@@ -110,8 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(me.user as User);
         if (typeof window !== 'undefined') {
           localStorage.setItem('user', JSON.stringify(me.user));
-          const latestToken = localStorage.getItem('token');
-          setToken(latestToken);
+          setToken('cookie-session');
         }
       }
     } catch {
@@ -123,12 +121,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const response: AuthResponse = await authApi.register(data);
     
     if (typeof window !== 'undefined') {
-      localStorage.setItem('token', response.accessToken);
-      localStorage.setItem('refreshToken', response.refreshToken);
       localStorage.setItem('user', JSON.stringify(response.user));
+      localStorage.removeItem('token');
+      localStorage.removeItem('refreshToken');
+      localStorage.removeItem('ahava_access_token');
+      localStorage.removeItem('ahava_refresh_token');
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refresh_token');
     }
     
-    setToken(response.accessToken);
+    setToken('cookie-session');
     setUser(response.user as User);
 
     // Fetch server profile so persisted user includes riskProfile + full fields.
@@ -138,8 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(me.user as User);
         if (typeof window !== 'undefined') {
           localStorage.setItem('user', JSON.stringify(me.user));
-          const latestToken = localStorage.getItem('token');
-          setToken(latestToken);
+          setToken('cookie-session');
         }
       }
     } catch {
@@ -149,15 +150,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshUser = useCallback(async () => {
     try {
-      const storedToken = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-      if (!storedToken) return;
       const data = await authApi.me();
       if (data.user) {
         setUser(data.user as User);
         if (typeof window !== 'undefined') {
           localStorage.setItem('user', JSON.stringify(data.user));
-          const latestToken = localStorage.getItem('token');
-          setToken(latestToken);
+          setToken('cookie-session');
         }
       }
     } catch { /* non-fatal */ }
@@ -165,12 +163,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     try {
-      if (typeof window !== 'undefined') {
-        const refreshToken = localStorage.getItem('refreshToken');
-        if (refreshToken) {
-          await authApi.logout(refreshToken).catch(() => {});
-        }
-      }
+      await authApi.logout().catch(() => {});
     } catch (error) {
       console.warn('Server logout failed, clearing local storage anyway');
     }
@@ -178,6 +171,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('token');
       localStorage.removeItem('refreshToken');
+      localStorage.removeItem('ahava_access_token');
+      localStorage.removeItem('ahava_refresh_token');
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refresh_token');
       localStorage.removeItem('user');
     }
     

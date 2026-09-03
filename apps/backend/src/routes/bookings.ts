@@ -4,7 +4,7 @@ import { AuthenticatedRequest, authMiddleware, requirePatient } from '../middlew
 import { idempotencyMiddleware } from '../middleware/idempotency';
 import { notifyNearbyNurses } from '../services/websocket';
 import { encryptData, isEncryptedPayload } from '../utils/encryption';
-import { createAuditLog } from '../services/auditLog';
+import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 import Joi from 'joi';
 import prisma from '../lib/prisma';
 

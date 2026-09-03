@@ -22,7 +22,7 @@ export function requireConsent(consentType: ConsentType, version = '1.0') {
         return;
       }
 
-      const consent = await (prisma as any).patientConsent.findFirst({
+      const consent = await prisma.patientConsent.findFirst({
         where: {
           userId,
           consentType,

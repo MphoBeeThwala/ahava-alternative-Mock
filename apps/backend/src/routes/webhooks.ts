@@ -6,7 +6,7 @@ import { notifyPaymentReceipt } from "../services/notifications";
 import { handleTerraWebhook } from "./terra";
 import { handleRookWebhook } from "./rook";
 import { webhookRateLimiter } from "../middleware/rateLimiter";
-import { createAuditLog } from "../services/auditLog";
+import { writeRequestAudit as createAuditLog } from "../services/clinicalAudit";
 import prisma from "../lib/prisma";
 
 const router: Router = Router();

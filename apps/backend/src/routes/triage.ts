@@ -24,6 +24,7 @@ import {
 } from "../services/triageAttachments";
 
 const router: Router = Router();
+const SYMPTOM_PREVIEW_LENGTH = 280;
 
 const patientTriageCaseInclude = {
   doctor: {
@@ -72,6 +73,9 @@ function serializePatientTriageCase(triageCase: any) {
     doctorDiagnosis: triageCase.doctorDiagnosis,
     doctorRecommendations: triageCase.doctorRecommendations,
     finalTriageLevel: triageCase.finalTriageLevel,
+    wasOverridden:
+      triageCase.finalTriageLevel != null &&
+      triageCase.finalTriageLevel !== triageCase.aiTriageLevel,
     releasedAt: triageCase.releasedAt,
     followUpRequestType: triageCase.followUpRequestType,
     followUpRequestMessage: triageCase.followUpRequestMessage,
@@ -514,7 +518,7 @@ router.post(
           aiModel: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514",
           aiContextUsed: !!patientContext,
           statPearlsUsed: result.evidenceSources.includes("StatPearls/NCBI"),
-        } as any,
+        },
       });
 
       await writeClinicalAudit({
@@ -552,7 +556,7 @@ router.post(
                 triageCaseId: triageCase.id,
                 triageLevel: result.triageLevel,
                 slaDeadline: slaDeadline.toISOString(),
-                symptoms: symptoms.slice(0, 100),
+                symptoms: symptoms.slice(0, SYMPTOM_PREVIEW_LENGTH),
                 attachmentCount: storedAttachments.length,
                 createdAt: new Date().toISOString(),
               },

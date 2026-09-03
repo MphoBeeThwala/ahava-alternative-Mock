@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { UserRole } from '@prisma/client';
 import prisma from '../lib/prisma';
+import { getAccessTokenFromRequest } from '../services/authSession';
 
 export interface AuthenticatedRequest extends Request {
   user?: {
@@ -50,14 +51,10 @@ export const authMiddleware = async (
     if (req.user) return next();
 
     const authHeader = req.headers.authorization;
-
-    if (!authHeader) {
-      return res.status(401).json({ error: 'No token provided' });
-    }
-
-    const token = authHeader.split(' ')[1];
+    const bearerToken = authHeader?.split(' ')[1];
+    const token = bearerToken ?? getAccessTokenFromRequest(req);
     if (!token) {
-      return res.status(401).json({ error: 'Invalid token format' });
+      return res.status(401).json({ error: 'No token provided' });
     }
 
     let decoded: any;

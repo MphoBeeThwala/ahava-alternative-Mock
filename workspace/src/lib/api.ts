@@ -16,6 +16,10 @@ function isRefreshExcludedRequest(url?: string): boolean {
   ].some((path) => url.includes(path));
 }
 
+const COOKIE_AUTH_HEADERS = {
+  'X-Ahava-Auth-Mode': 'cookie',
+} as const;
+
 // Create axios instance with default config
 const apiClient: AxiosInstance = axios.create({
   baseURL: getApiBaseUrl(),
@@ -26,16 +30,11 @@ const apiClient: AxiosInstance = axios.create({
   },
 });
 
-// Request interceptor: ensure dev uses direct backend URL and token is always attached
+// Request interceptor: keep API calls same-origin and rely on httpOnly session cookies.
 apiClient.interceptors.request.use(
   (config) => {
     config.baseURL = getApiBaseUrl();
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
     const userJson = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
-    
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
 
     // Defensive check: Prevent Patients from calling Staff/Admin endpoints in the frontend
     if (userJson) {
@@ -60,16 +59,16 @@ apiClient.interceptors.request.use(
 // Track if we're already attempting refresh to avoid infinite loops
 let isRefreshing = false;
 let failedQueue: Array<{
-  onSuccess: (token: string) => void;
+  onSuccess: () => void;
   onFailure: (error: AxiosError) => void;
 }> = [];
 
-const processQueue = (error: AxiosError | null, token: string | null = null) => {
+const processQueue = (error: AxiosError | null) => {
   failedQueue.forEach((prom) => {
     if (error) {
       prom.onFailure(error);
     } else {
-      prom.onSuccess(token!);
+      prom.onSuccess();
     }
   });
   failedQueue = [];
@@ -84,9 +83,15 @@ apiClient.interceptors.response.use(
       originalRequest && typeof originalRequest.url === 'string'
         ? originalRequest.url
         : '';
+    const isBootstrapMeRequest = requestUrl.includes('/auth/me');
+    const hasCachedUser =
+      typeof window !== 'undefined' && Boolean(localStorage.getItem('user'));
 
     if (error.response?.status === 401 && originalRequest && !originalRequest._retry && typeof window !== 'undefined') {
       if (isRefreshExcludedRequest(requestUrl)) {
+        return Promise.reject(error);
+      }
+      if (isBootstrapMeRequest && !hasCachedUser) {
         return Promise.reject(error);
       }
 
@@ -106,69 +111,42 @@ apiClient.interceptors.response.use(
       // Prevent multiple simultaneous refresh attempts
       if (!isRefreshing) {
         isRefreshing = true;
-        const refreshToken = localStorage.getItem('refreshToken');
+        try {
+          console.log('[API] Attempting to refresh session...');
 
-        if (refreshToken) {
-          try {
-            console.log('[API] Attempting to refresh token...');
-            
-            // Attempt to refresh token
-            const response = await apiClient.post('/auth/refresh', { refreshToken });
-            const { accessToken, refreshToken: newRefreshToken } = response.data;
-            
-            console.log('[API] Token refreshed successfully');
-            
-            // Update stored tokens
-            localStorage.setItem('token', accessToken);
-            localStorage.setItem('refreshToken', newRefreshToken || refreshToken);
-            
-            // Update the original request with new token
-            if (originalRequest.headers) {
-              originalRequest.headers.Authorization = `Bearer ${accessToken}`;
-            }
-            
-            // Process queued requests with new token
-            processQueue(null, accessToken);
-            
-            // Retry original request with new token
-            return apiClient(originalRequest);
-          } catch (refreshError) {
-            console.error('[API] Token refresh failed:', refreshError);
-            
-            // Refresh failed, log out
-            localStorage.removeItem('token');
-            localStorage.removeItem('user');
-            localStorage.removeItem('refreshToken');
-            
-            processQueue(refreshError, null);
-            
-            // Redirect to login
-            window.location.href = '/auth/login';
-            return Promise.reject(refreshError);
-          } finally {
-            isRefreshing = false;
-          }
-        } else {
-          console.warn('[API] No refresh token available, logging out');
-          
-          // No refresh token available, log out
+          await apiClient.post('/auth/refresh', {}, {
+            headers: COOKIE_AUTH_HEADERS,
+          });
+
+          console.log('[API] Session refreshed successfully');
+
+          processQueue(null);
+
+          return apiClient(originalRequest);
+        } catch (refreshError) {
+          console.error('[API] Session refresh failed:', refreshError);
+
           localStorage.removeItem('token');
-          localStorage.removeItem('user');
           localStorage.removeItem('refreshToken');
+          localStorage.removeItem('user');
+
+          processQueue(refreshError as AxiosError);
+
+          if (isBootstrapMeRequest) {
+            return Promise.reject(refreshError);
+          }
+
           window.location.href = '/auth/login';
-          
-          return Promise.reject(error);
+          return Promise.reject(refreshError);
+        } finally {
+          isRefreshing = false;
         }
       }
 
       // If already refreshing, queue this request
-      return new Promise<string>((onSuccess, onFailure) => {
+      return new Promise<void>((onSuccess, onFailure) => {
         failedQueue.push({ onSuccess, onFailure });
-      }).then((newToken) => {
-        originalRequest.headers = {
-          ...(originalRequest.headers || {}),
-          Authorization: `Bearer ${newToken}`,
-        };
+      }).then(() => {
         return apiClient(originalRequest);
       });
     }
@@ -207,21 +185,27 @@ export interface AuthResponse {
     isVerified: boolean;
     preferredLanguage?: string;
   };
-  accessToken: string;
-  refreshToken: string;
+  accessToken?: string;
+  refreshToken?: string;
 }
 
 export const authApi = {
   register: async (data: RegisterData): Promise<AuthResponse> => {
-    const res = await apiClient.post('/auth/register', data);
+    const res = await apiClient.post('/auth/register', data, {
+      headers: COOKIE_AUTH_HEADERS,
+    });
     return res.data;
   },
   login: async (data: LoginData): Promise<AuthResponse> => {
-    const res = await apiClient.post('/auth/login', data);
+    const res = await apiClient.post('/auth/login', data, {
+      headers: COOKIE_AUTH_HEADERS,
+    });
     return res.data;
   },
-  refreshToken: async (refreshToken: string): Promise<AuthResponse> => {
-    const res = await apiClient.post('/auth/refresh', { refreshToken });
+  refreshToken: async (): Promise<AuthResponse> => {
+    const res = await apiClient.post('/auth/refresh', {}, {
+      headers: COOKIE_AUTH_HEADERS,
+    });
     return res.data;
   },
   forgotPassword: async (email: string) => {
@@ -246,8 +230,12 @@ export const authApi = {
     });
     return res.data;
   },
-  logout: async (refreshToken?: string | null) => {
-    const res = await apiClient.post('/auth/logout', { refreshToken: refreshToken ?? null });
+  logout: async () => {
+    const res = await apiClient.post('/auth/logout', {});
+    return res.data;
+  },
+  getWebSocketTicket: async (): Promise<{ success: boolean; ticket: string }> => {
+    const res = await apiClient.post('/auth/ws-ticket', {});
     return res.data;
   },
   resendVerification: async (email: string) => {

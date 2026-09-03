@@ -41,7 +41,7 @@ import { attachRequestId } from "./middleware/requestId";
 // Import services
 import { initializeRedis } from "./services/redis";
 import { initializeQueue } from "./services/queue";
-import { initializeWebSocket } from "./services/websocket";
+import { getWebSocketRedisHealth, initializeWebSocket } from "./services/websocket";
 
 const app = express();
 const server = createServer(app);
@@ -137,6 +137,10 @@ app.get("/health", (req, res) => {
     timestamp: new Date().toISOString(),
     timezone: process.env.TIMEZONE || "Africa/Johannesburg",
   });
+});
+
+app.get("/health/ws-redis", (req, res) => {
+  res.json(getWebSocketRedisHealth());
 });
 
 // Root: so opening backend URL in browser doesn't 404

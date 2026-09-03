@@ -1,5 +1,5 @@
 import { Router } from 'express';import { PayFastService } from '../services/payfast';
-import { createAuditLog } from '../services/auditLog';
+import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 import prisma from '../lib/prisma';
 import { UserRole } from '@prisma/client';
 import { AuthenticatedRequest, authMiddleware, requireAdmin } from '../middleware/auth';

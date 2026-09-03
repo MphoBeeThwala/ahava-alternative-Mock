@@ -47,5 +47,6 @@
 
 ## WebSockets
 - Backend accepts WebSocket upgrades on the same host/port as the API.
-- Clients connect to: `wss://<cloud-run-host>/ws?token=<jwt>`
+- Clients connect to: `wss://<cloud-run-host>/ws`
+- Browser clients should fetch a short-lived `/api/auth/ws-ticket` first, then send it in the initial WebSocket `AUTH` message instead of putting a bearer token in the URL.
 - If you run multiple Cloud Run instances and need cross-instance delivery, set `REDIS_URL`.

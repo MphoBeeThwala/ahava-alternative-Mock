@@ -85,7 +85,7 @@ export async function runEscalationCheck(): Promise<void> {
         data: {
           escalationLevel: newEscalationLevel,
           escalatedAt: now,
-        } as any,
+        },
       });
 
       // Notify admin about escalated case
@@ -191,7 +191,7 @@ export async function markCaseReviewed(
       doctorId,
       reviewedWithinSla,
       doctorFeeCents: feeCents,
-    } as any,
+    },
   });
 }
 

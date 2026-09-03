@@ -1,9 +1,7 @@
-import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import 'dotenv/config';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma';
 
 async function testRecoveryFlow() {
   const testEmail = 'themol581@gmail.com';

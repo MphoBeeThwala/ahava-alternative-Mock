@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { Prisma, TriageCaseStatus, UserRole } from "@prisma/client";
 import { AuthenticatedRequest, requireDoctor } from "../middleware/auth";
-import { createAuditLog } from "../services/auditLog";
+import { writeRequestAudit as createAuditLog } from "../services/clinicalAudit";
 import prisma from "../lib/prisma";
 import { markCaseReviewed } from "../jobs/triageEscalation";
 import { sendToUser } from "../services/websocket";
@@ -25,8 +25,20 @@ import {
   buildReviewSafetySummary,
   extractMedicalPassportData,
 } from "../services/triageSafetyChecks";
+import {
+  getReviewedStatusError,
+  resolveTriageOverride,
+} from "../services/triageReviewValidation";
 
 const router: Router = Router();
+const VALID_QUEUE_STATUSES = [
+  "ALL",
+  "MINE",
+  "PENDING_REVIEW",
+  "ASSIGNED",
+  "REVIEWED",
+  "AWAITING_PATIENT_RESPONSE",
+] as const;
 
 const triageCaseInclude = {
   patient: {
@@ -109,7 +121,7 @@ function canAccessCase(
 
 function getQueueWhere(
   userId: string,
-  rawStatus: string,
+  rawStatus: (typeof VALID_QUEUE_STATUSES)[number],
 ): Prisma.TriageCaseWhereInput {
   const status = rawStatus.toUpperCase();
 
@@ -184,7 +196,17 @@ async function getDoctorProfile(userId: string) {
 
 router.get("/", requireDoctor, async (req: AuthenticatedRequest, res, next) => {
   try {
-    const status = String(req.query.status ?? "PENDING_REVIEW");
+    const rawStatus = String(req.query.status ?? "PENDING_REVIEW").toUpperCase();
+    if (
+      req.query.status !== undefined &&
+      !VALID_QUEUE_STATUSES.includes(rawStatus as (typeof VALID_QUEUE_STATUSES)[number])
+    ) {
+      return res.status(400).json({
+        error: `Invalid status. Valid values: ${VALID_QUEUE_STATUSES.join(", ")}`,
+      });
+    }
+
+    const status = rawStatus as (typeof VALID_QUEUE_STATUSES)[number];
     const cases = await prisma.triageCase.findMany({
       where: getQueueWhere(req.user!.id, status),
       include: triageCaseInclude,
@@ -401,18 +423,20 @@ router.post(
         return res.status(403).json({ error: "Access denied" });
       }
 
-      const chosenLevel =
-        Number.isInteger(finalTriageLevel) && finalTriageLevel >= 1 && finalTriageLevel <= 5
-          ? finalTriageLevel
-          : triageCase.aiTriageLevel;
+      const {
+        chosenLevel,
+        normalizedOverrideReason,
+        error: overrideValidationError,
+      } = resolveTriageOverride({
+        aiTriageLevel: triageCase.aiTriageLevel,
+        finalTriageLevel,
+        overrideReason,
+      });
 
-      if (
-        chosenLevel !== triageCase.aiTriageLevel &&
-        typeof overrideReason !== "string"
-      ) {
+      if (overrideValidationError) {
         return res
           .status(400)
-          .json({ error: "Override reason is required when changing the AI triage level" });
+          .json({ error: overrideValidationError });
       }
 
       const updated = await prisma.triageCase.update({
@@ -425,7 +449,7 @@ router.post(
           finalDiagnosis: doctorDiagnosis.trim(),
           finalTriageLevel: chosenLevel,
           overrideReason:
-            chosenLevel !== triageCase.aiTriageLevel ? overrideReason.trim() : null,
+            chosenLevel !== triageCase.aiTriageLevel ? normalizedOverrideReason : null,
           status: TriageCaseStatus.REVIEWED,
           reviewedAt: new Date(),
         },
@@ -476,8 +500,21 @@ router.post(
         return res.status(403).json({ error: "Access denied" });
       }
 
-      if (triageCase.status !== TriageCaseStatus.REVIEWED) {
-        return res.status(400).json({ error: "Case must be reviewed before release" });
+      const reviewedStatusError = getReviewedStatusError(
+        triageCase.status,
+        "release",
+      );
+      if (reviewedStatusError) {
+        return res.status(400).json({ error: reviewedStatusError });
+      }
+
+      const { error: overrideValidationError } = resolveTriageOverride({
+        aiTriageLevel: triageCase.aiTriageLevel,
+        finalTriageLevel: triageCase.finalTriageLevel,
+        overrideReason: triageCase.overrideReason,
+      });
+      if (overrideValidationError) {
+        return res.status(400).json({ error: overrideValidationError });
       }
 
       const updated = await prisma.triageCase.update({
@@ -497,14 +534,16 @@ router.post(
           doctorDiagnosis: updated.doctorDiagnosis ?? updated.finalDiagnosis,
           doctorRecommendations: updated.doctorRecommendations,
           wasOverridden:
-            (updated.finalTriageLevel ?? updated.aiTriageLevel) !== updated.aiTriageLevel,
+            updated.finalTriageLevel != null &&
+            updated.finalTriageLevel !== updated.aiTriageLevel,
           releasedAt: updated.releasedAt?.toISOString(),
         },
       });
 
       if (updated.patient?.email) {
         const overridden =
-          (updated.finalTriageLevel ?? updated.aiTriageLevel) !== updated.aiTriageLevel;
+          updated.finalTriageLevel != null &&
+          updated.finalTriageLevel !== updated.aiTriageLevel;
         if (overridden) {
           await notifyTriageOverride({
             to: updated.patient.email,
@@ -607,6 +646,23 @@ router.post(
       }
       if (triageCase.doctorId && triageCase.doctorId !== req.user!.id) {
         return res.status(403).json({ error: "Access denied" });
+      }
+
+      const reviewedStatusError = getReviewedStatusError(
+        triageCase.status,
+        "issuing a prescription",
+      );
+      if (reviewedStatusError) {
+        return res.status(400).json({ error: reviewedStatusError });
+      }
+
+      const { error: overrideValidationError } = resolveTriageOverride({
+        aiTriageLevel: triageCase.aiTriageLevel,
+        finalTriageLevel: triageCase.finalTriageLevel,
+        overrideReason: triageCase.overrideReason,
+      });
+      if (overrideValidationError) {
+        return res.status(400).json({ error: overrideValidationError });
       }
 
       const doctor = await getDoctorProfile(req.user!.id);
@@ -806,6 +862,23 @@ router.post(
       }
       if (triageCase.doctorId && triageCase.doctorId !== req.user!.id) {
         return res.status(403).json({ error: "Access denied" });
+      }
+
+      const reviewedStatusError = getReviewedStatusError(
+        triageCase.status,
+        "issuing an emergency referral",
+      );
+      if (reviewedStatusError) {
+        return res.status(400).json({ error: reviewedStatusError });
+      }
+
+      const { error: overrideValidationError } = resolveTriageOverride({
+        aiTriageLevel: triageCase.aiTriageLevel,
+        finalTriageLevel: triageCase.finalTriageLevel,
+        overrideReason: triageCase.overrideReason,
+      });
+      if (overrideValidationError) {
+        return res.status(400).json({ error: overrideValidationError });
       }
 
       const doctor = await getDoctorProfile(req.user!.id);

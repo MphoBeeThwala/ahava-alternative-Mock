@@ -18,7 +18,7 @@ export function getRealtimeBackendBaseUrl(): string | null {
   return null;
 }
 
-export function getRealtimeWebSocketUrl(token: string): string | null {
+export function getRealtimeWebSocketUrl(): string | null {
   const baseUrl = getRealtimeBackendBaseUrl();
   if (!baseUrl) {
     return null;
@@ -29,5 +29,5 @@ export function getRealtimeWebSocketUrl(token: string): string | null {
     .replace(/^http/, "ws")
     .replace(/\/+$/, "");
 
-  return `${wsBase}/ws?token=${encodeURIComponent(token)}`;
+  return `${wsBase}/ws`;
 }

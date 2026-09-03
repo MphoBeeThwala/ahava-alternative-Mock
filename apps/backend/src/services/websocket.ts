@@ -1,13 +1,14 @@
 import { WebSocketServer, WebSocket } from 'ws';
-import jwt from 'jsonwebtoken';
 import Redis from 'ioredis';
 import crypto from 'crypto';
 import prisma from '../lib/prisma';
+import { verifyWebSocketTicket } from './authSession';
 
 interface AuthenticatedWebSocket extends WebSocket {
   userId?: string;
   userRole?: string;
   isAlive?: boolean;
+  authTimeout?: ReturnType<typeof setTimeout>;
 }
 
 const clients = new Map<string, AuthenticatedWebSocket>();
@@ -18,6 +19,7 @@ const WS_CHANNEL = process.env.WS_REDIS_CHANNEL ?? 'ws:events';
 let redisPub: Redis | null = null;
 let redisSub: Redis | null = null;
 let redisReady = false;
+let warnedPublishFallback = false;
 
 type WsEvent =
   | { instanceId: string; type: 'sendToUser'; userId: string; message: any }
@@ -40,7 +42,13 @@ type WsEvent =
   | { instanceId: string; type: 'bookingTaken'; bookingId: string; acceptedByNurseId: string };
 
 const publishEvent = (event: WsEvent) => {
-  if (!redisReady || !redisPub) return;
+  if (!redisReady || !redisPub) {
+    if (!warnedPublishFallback) {
+      warnedPublishFallback = true;
+      console.warn('[ws] Redis pub/sub unavailable; cross-instance WebSocket delivery is disabled and clients on other replicas will rely on polling');
+    }
+    return;
+  }
   redisPub.publish(WS_CHANNEL, JSON.stringify(event)).catch((err) => {
     console.warn('[ws] redis publish failed:', (err as Error)?.message ?? err);
   });
@@ -67,7 +75,11 @@ const ensureRedisPubSub = async () => {
   const url = normalizeRedisUrl(process.env.REDIS_URL);
   if (!url) {
     const raw = process.env.REDIS_URL;
-    if (raw) console.warn('[ws] invalid REDIS_URL; disabling redis pub/sub');
+    if (raw) {
+      console.error('[ws] CRITICAL: invalid REDIS_URL; WebSocket cross-instance pub/sub is disabled');
+    } else {
+      console.warn('[ws] WARNING: REDIS_URL not set; WebSocket cross-instance delivery is disabled and multi-replica deployments will fall back to polling');
+    }
     return;
   }
   const pub = new Redis(url, { connectTimeout: 3000, maxRetriesPerRequest: null, lazyConnect: true });
@@ -117,12 +129,25 @@ const ensureRedisPubSub = async () => {
   redisPub = pub;
   redisSub = sub;
   redisReady = true;
+  warnedPublishFallback = false;
   console.log('✅ WebSocket Redis pub/sub enabled');
 };
 
+export function getWebSocketRedisHealth() {
+  return {
+    redisConfigured: Boolean(normalizeRedisUrl(process.env.REDIS_URL)),
+    redisReady,
+    redisPub: Boolean(redisPub && redisReady),
+    redisSub: Boolean(redisSub && redisReady),
+  };
+}
+
 export const initializeWebSocket = (wss: WebSocketServer) => {
   void ensureRedisPubSub().catch((err) => {
-    console.warn('[ws] redis pub/sub unavailable:', (err as Error)?.message ?? err);
+    console.error(
+      '[ws] CRITICAL: redis pub/sub unavailable; cross-instance WebSocket delivery is degraded:',
+      (err as Error)?.message ?? err,
+    );
   });
 
   wss.on('connection', (ws: AuthenticatedWebSocket, req) => {
@@ -134,35 +159,43 @@ export const initializeWebSocket = (wss: WebSocketServer) => {
       ws.isAlive = true;
     });
 
-    // Authenticate connection
-    const token = req.url?.split('token=')[1];
-
-    if (!token || !process.env.JWT_SECRET) {
-      ws.close(1008, 'Authentication required');
-      return;
-    }
-
-    try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET) as any;
-      ws.userId = decoded.userId;
-      ws.userRole = decoded.role;
-
-      // Store client connection
-      clients.set(ws.userId, ws);
-
-      console.log(`✅ WebSocket authenticated for user ${ws.userId}`);
-    } catch (error) {
-      console.error('❌ WebSocket authentication failed:', error);
-      ws.close(1008, 'Invalid token');
-      return;
-    }
+    ws.authTimeout = setTimeout(() => {
+      ws.close(1008, 'Authentication timeout');
+    }, 5000);
 
     // Handle messages
     ws.on('message', async (data) => {
       try {
         const message = JSON.parse(data.toString());
+        if (!ws.userId) {
+          const ticket =
+            typeof message?.data?.ticket === 'string' ? message.data.ticket : null;
+          if (message?.type !== 'AUTH' || !ticket) {
+            ws.close(1008, 'Authentication required');
+            return;
+          }
+
+          const decoded = verifyWebSocketTicket(ticket);
+          ws.userId = decoded.userId;
+          ws.userRole = decoded.role;
+          clients.set(ws.userId, ws);
+          if (ws.authTimeout) {
+            clearTimeout(ws.authTimeout);
+            ws.authTimeout = undefined;
+          }
+          ws.send(JSON.stringify({ type: 'AUTHENTICATED' }));
+          console.log(`✅ WebSocket authenticated for user ${ws.userId}`);
+          return;
+        }
+
         await handleWebSocketMessage(ws, message);
       } catch (error) {
+        if (!ws.userId) {
+          console.error('❌ WebSocket authentication failed:', error);
+          ws.close(1008, 'Invalid authentication');
+          return;
+        }
+
         console.error('❌ WebSocket message error:', error);
         ws.send(JSON.stringify({ error: 'Invalid message format' }));
       }
@@ -170,6 +203,10 @@ export const initializeWebSocket = (wss: WebSocketServer) => {
 
     // Handle disconnection
     ws.on('close', () => {
+      if (ws.authTimeout) {
+        clearTimeout(ws.authTimeout);
+        ws.authTimeout = undefined;
+      }
       if (ws.userId) {
         clients.delete(ws.userId);
         onlineNurses.delete(ws.userId); // Remove from online nurses
@@ -180,6 +217,10 @@ export const initializeWebSocket = (wss: WebSocketServer) => {
     // Handle errors
     ws.on('error', (error) => {
       console.error('❌ WebSocket error:', error);
+      if (ws.authTimeout) {
+        clearTimeout(ws.authTimeout);
+        ws.authTimeout = undefined;
+      }
       if (ws.userId) {
         clients.delete(ws.userId);
         onlineNurses.delete(ws.userId);

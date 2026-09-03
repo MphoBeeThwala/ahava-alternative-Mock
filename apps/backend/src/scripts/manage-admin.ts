@@ -1,8 +1,6 @@
-import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import 'dotenv/config';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma';
 
 async function manageAdmin() {
   const adminEmail = process.env.ADMIN_EMAIL || 'healthsysadmin@ahavaon88.co.za';
