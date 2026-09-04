@@ -239,17 +239,8 @@ export default function ProfilePage() {
       if (user?.role === "PATIENT") {
         const riskRes = await patientApi.updateRiskProfile(buildMedicalPassportPayload());
         if (riskRes?.riskProfile) {
-          updateCurrentUser({ riskProfile: riskRes.riskProfile as Record<string, unknown> });
+          syncSavedRiskProfileToUser(riskRes.riskProfile as RiskProfile);
           applySavedPassportSnapshot(riskRes.riskProfile as RiskProfile);
-        }
-        if (riskRes?.riskProfile && typeof window !== "undefined") {
-          const storedUser = localStorage.getItem("user");
-          if (storedUser) {
-            try {
-              const parsed = JSON.parse(storedUser);
-              localStorage.setItem("user", JSON.stringify({ ...parsed, riskProfile: riskRes.riskProfile }));
-            } catch {}
-          }
         }
         setPassportDirty(false);
       }
@@ -314,6 +305,20 @@ export default function ProfilePage() {
     }));
   };
 
+  const syncSavedRiskProfileToUser = (savedRiskProfile?: RiskProfile) => {
+    if (!savedRiskProfile) return;
+    updateCurrentUser({ riskProfile: savedRiskProfile as Record<string, unknown> });
+    if (typeof window !== "undefined") {
+      const storedUser = localStorage.getItem("user");
+      if (storedUser) {
+        try {
+          const parsed = JSON.parse(storedUser);
+          localStorage.setItem("user", JSON.stringify({ ...parsed, riskProfile: savedRiskProfile }));
+        } catch {}
+      }
+    }
+  };
+
   const handlePassportSubmit = async () => {
     setRiskSaving(true);
     setRiskSuccess("");
@@ -322,22 +327,12 @@ export default function ProfilePage() {
       const payload = buildMedicalPassportPayload();
       const res = await patientApi.updateRiskProfile(payload);
       if (res?.riskProfile) {
-        updateCurrentUser({ riskProfile: res.riskProfile as Record<string, unknown> });
+        syncSavedRiskProfileToUser(res.riskProfile as RiskProfile);
         applySavedPassportSnapshot(res.riskProfile as RiskProfile);
       }
       setPassportDirty(false);
       setRiskSuccess("Medical passport updated successfully.");
       setExpandedSections(prev => ({ ...prev, passport: false }));
-      if (res?.riskProfile && typeof window !== "undefined") {
-        const storedUser = localStorage.getItem("user");
-        if (storedUser) {
-          try {
-            const parsed = JSON.parse(storedUser);
-            localStorage.setItem("user", JSON.stringify({ ...parsed, riskProfile: res.riskProfile }));
-          } catch {}
-        }
-      }
-      if (refreshUser) await refreshUser();
     } catch (err: unknown) {
       const e = err as { response?: { status?: number; data?: { error?: string } } };
       setRiskError(e.response?.data?.error || "Failed to update medical passport.");
@@ -363,7 +358,7 @@ export default function ProfilePage() {
       };
       const res = await patientApi.updateRiskProfile(payload);
       if (res?.riskProfile) {
-        updateCurrentUser({ riskProfile: res.riskProfile as Record<string, unknown> });
+        syncSavedRiskProfileToUser(res.riskProfile as RiskProfile);
         applySavedPassportSnapshot(res.riskProfile as RiskProfile);
       }
       setRiskDirty(false);
@@ -371,15 +366,6 @@ export default function ProfilePage() {
       setRiskSuccess("Health profile saved. You can now view Early Warning risk signals and choose whether to consult a clinician.");
       setExpandedSections(prev => ({ ...prev, health: false, passport: false }));
       if (refreshUser) await refreshUser();
-      if (res?.riskProfile && typeof window !== "undefined") {
-        const storedUser = localStorage.getItem("user");
-        if (storedUser) {
-          try {
-            const parsed = JSON.parse(storedUser);
-            localStorage.setItem("user", JSON.stringify({ ...parsed, riskProfile: res.riskProfile }));
-          } catch {}
-        }
-      }
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
       setRiskError(msg ?? "Failed to save health profile. Please try again.");

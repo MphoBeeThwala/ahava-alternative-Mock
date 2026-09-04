@@ -33,6 +33,69 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function mergeRiskProfilePreservingPassport(
+  currentRiskProfile: unknown,
+  incomingRiskProfile: unknown,
+): Record<string, unknown> | null | undefined {
+  const incoming = asRecord(incomingRiskProfile);
+  if (!incoming) {
+    return incomingRiskProfile as Record<string, unknown> | null | undefined;
+  }
+
+  const current = asRecord(currentRiskProfile);
+  if (!current) {
+    return incoming;
+  }
+
+  const incomingHasPassportData =
+    Object.prototype.hasOwnProperty.call(incoming, 'medicalPassport') ||
+    Object.prototype.hasOwnProperty.call(incoming, 'passportCompletionPercent') ||
+    Object.prototype.hasOwnProperty.call(incoming, 'nextPassportQuestion');
+
+  if (incomingHasPassportData) {
+    return incoming;
+  }
+
+  const currentHasPassportData =
+    Object.prototype.hasOwnProperty.call(current, 'medicalPassport') ||
+    Object.prototype.hasOwnProperty.call(current, 'passportCompletionPercent') ||
+    Object.prototype.hasOwnProperty.call(current, 'nextPassportQuestion');
+
+  if (!currentHasPassportData) {
+    return incoming;
+  }
+
+  return {
+    ...incoming,
+    ...(Object.prototype.hasOwnProperty.call(current, 'medicalPassport')
+      ? { medicalPassport: current.medicalPassport }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(current, 'passportCompletionPercent')
+      ? { passportCompletionPercent: current.passportCompletionPercent }
+      : {}),
+    ...(Object.prototype.hasOwnProperty.call(current, 'nextPassportQuestion')
+      ? { nextPassportQuestion: current.nextPassportQuestion }
+      : {}),
+  };
+}
+
+function mergeUserPreservingPassport(currentUser: User | null, incomingUser: User): User {
+  return {
+    ...incomingUser,
+    riskProfile: mergeRiskProfilePreservingPassport(
+      currentUser?.riskProfile,
+      incomingUser.riskProfile,
+    ),
+  };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
@@ -42,7 +105,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const updateCurrentUser = useCallback((patch: Partial<User>) => {
     setUser((currentUser) => {
       if (!currentUser) return currentUser;
-      const nextUser = { ...currentUser, ...patch };
+      const nextUser = { ...currentUser, ...patch } as User;
+      if (Object.prototype.hasOwnProperty.call(patch, 'riskProfile')) {
+        nextUser.riskProfile = mergeRiskProfilePreservingPassport(
+          currentUser.riskProfile,
+          patch.riskProfile,
+        );
+      }
       if (typeof window !== 'undefined') {
         localStorage.setItem('user', JSON.stringify(nextUser));
       }
@@ -68,9 +137,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const data = await authApi.me();
         if (data?.user) {
-          setUser(data.user as User);
+          const parsedStoredUser = JSON.parse(storedUser) as User;
+          const mergedUser = mergeUserPreservingPassport(
+            parsedStoredUser,
+            data.user as User,
+          );
+          setUser(mergedUser);
           setToken('cookie-session');
-          localStorage.setItem('user', JSON.stringify(data.user));
+          localStorage.setItem('user', JSON.stringify(mergedUser));
           localStorage.removeItem('token');
           localStorage.removeItem('refreshToken');
           localStorage.removeItem('ahava_access_token');
@@ -118,9 +192,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const me = await authApi.me();
       if (me?.user) {
-        setUser(me.user as User);
+        const mergedUser = mergeUserPreservingPassport(response.user as User, me.user as User);
+        setUser(mergedUser);
         if (typeof window !== 'undefined') {
-          localStorage.setItem('user', JSON.stringify(me.user));
+          localStorage.setItem('user', JSON.stringify(mergedUser));
           setToken('cookie-session');
         }
       }
@@ -149,9 +224,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const me = await authApi.me();
       if (me?.user) {
-        setUser(me.user as User);
+        const mergedUser = mergeUserPreservingPassport(response.user as User, me.user as User);
+        setUser(mergedUser);
         if (typeof window !== 'undefined') {
-          localStorage.setItem('user', JSON.stringify(me.user));
+          localStorage.setItem('user', JSON.stringify(mergedUser));
           setToken('cookie-session');
         }
       }
@@ -164,11 +240,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const data = await authApi.me();
       if (data.user) {
-        setUser(data.user as User);
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('user', JSON.stringify(data.user));
-          setToken('cookie-session');
-        }
+        setUser((currentUser) => {
+          const mergedUser = mergeUserPreservingPassport(currentUser, data.user as User);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('user', JSON.stringify(mergedUser));
+            setToken('cookie-session');
+          }
+          return mergedUser;
+        });
       }
     } catch { /* non-fatal */ }
   }, []);
