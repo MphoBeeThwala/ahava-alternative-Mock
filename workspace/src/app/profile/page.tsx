@@ -32,7 +32,7 @@ type MedicalPassport = {
 };
 
 export default function ProfilePage() {
-  const { user, refreshUser } = useAuth();
+  const { user, refreshUser, updateCurrentUser } = useAuth();
   const lastHydratedUserSignature = useRef<string | null>(null);
   const [form, setForm] = useState({
     firstName: "",
@@ -238,6 +238,10 @@ export default function ProfilePage() {
       setProfileDirty(false);
       if (user?.role === "PATIENT") {
         const riskRes = await patientApi.updateRiskProfile(buildMedicalPassportPayload());
+        if (riskRes?.riskProfile) {
+          updateCurrentUser({ riskProfile: riskRes.riskProfile as Record<string, unknown> });
+          applySavedPassportSnapshot(riskRes.riskProfile as RiskProfile);
+        }
         if (riskRes?.riskProfile && typeof window !== "undefined") {
           const storedUser = localStorage.getItem("user");
           if (storedUser) {
@@ -290,12 +294,37 @@ export default function ProfilePage() {
     nextPassportQuestion: nextPassportQuestion ?? undefined,
   });
 
+  const applySavedPassportSnapshot = (savedRiskProfile?: RiskProfile) => {
+    if (!savedRiskProfile?.medicalPassport) return;
+    const savedPassport = savedRiskProfile.medicalPassport;
+    setPassport({
+      emergencyContactName: savedPassport.emergencyContactName || "",
+      emergencyContactPhone: savedPassport.emergencyContactPhone || "",
+      bloodType: savedPassport.bloodType || "",
+      allergies: savedPassport.allergies || [],
+      chronicConditions: savedPassport.chronicConditions || [],
+      currentMedications: savedPassport.currentMedications || [],
+    });
+    setPassportAllergiesInput(Array.isArray(savedPassport.allergies) ? savedPassport.allergies.join(", ") : "");
+    setPassportConditionsInput(Array.isArray(savedPassport.chronicConditions) ? savedPassport.chronicConditions.join(", ") : "");
+    setPassportMedsInput(Array.isArray(savedPassport.currentMedications) ? savedPassport.currentMedications.join(", ") : "");
+    setRiskProfile((currentRiskProfile) => ({
+      ...currentRiskProfile,
+      ...savedRiskProfile,
+    }));
+  };
+
   const handlePassportSubmit = async () => {
     setRiskSaving(true);
     setRiskSuccess("");
     setRiskError("");
     try {
-      const res = await patientApi.updateRiskProfile(buildMedicalPassportPayload());
+      const payload = buildMedicalPassportPayload();
+      const res = await patientApi.updateRiskProfile(payload);
+      if (res?.riskProfile) {
+        updateCurrentUser({ riskProfile: res.riskProfile as Record<string, unknown> });
+        applySavedPassportSnapshot(res.riskProfile as RiskProfile);
+      }
       setPassportDirty(false);
       setRiskSuccess("Medical passport updated successfully.");
       setExpandedSections(prev => ({ ...prev, passport: false }));
@@ -310,7 +339,7 @@ export default function ProfilePage() {
       }
       if (refreshUser) await refreshUser();
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { error?: string } } };
+      const e = err as { response?: { status?: number; data?: { error?: string } } };
       setRiskError(e.response?.data?.error || "Failed to update medical passport.");
     } finally {
       setRiskSaving(false);
@@ -333,6 +362,10 @@ export default function ProfilePage() {
         surveyVersion: riskProfile.surveyVersion ?? 1,
       };
       const res = await patientApi.updateRiskProfile(payload);
+      if (res?.riskProfile) {
+        updateCurrentUser({ riskProfile: res.riskProfile as Record<string, unknown> });
+        applySavedPassportSnapshot(res.riskProfile as RiskProfile);
+      }
       setRiskDirty(false);
       setPassportDirty(false);
       setRiskSuccess("Health profile saved. You can now view Early Warning risk signals and choose whether to consult a clinician.");
@@ -526,6 +559,12 @@ export default function ProfilePage() {
                             {riskSaving ? "Saving…" : "Save Medical Passport"}
                           </button>
                         </div>
+                        {riskError && (
+                          <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "12px 16px", marginTop: 14, color: "#dc2626", fontSize: 14 }}>{riskError}</div>
+                        )}
+                        {riskSuccess && (
+                          <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, padding: "12px 16px", marginTop: 14, color: "#166534", fontSize: 14 }}>{riskSuccess}</div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -664,7 +703,6 @@ export default function ProfilePage() {
                             </span>
                           </label>
                         </div>
-
                         {riskError && (
                           <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "12px 16px", marginTop: 14, color: "#dc2626", fontSize: 14 }}>{riskError}</div>
                         )}

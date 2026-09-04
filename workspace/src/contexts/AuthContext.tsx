@@ -27,6 +27,7 @@ interface AuthContextType {
   register: (data: RegisterData) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
+  updateCurrentUser: (patch: Partial<User>) => void;
   isAuthenticated: boolean;
 }
 
@@ -37,6 +38,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
+
+  const updateCurrentUser = useCallback((patch: Partial<User>) => {
+    setUser((currentUser) => {
+      if (!currentUser) return currentUser;
+      const nextUser = { ...currentUser, ...patch };
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('user', JSON.stringify(nextUser));
+      }
+      return nextUser;
+    });
+  }, []);
 
   useEffect(() => {
     const initializeAuth = async () => {
@@ -193,6 +205,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         register,
         logout,
         refreshUser,
+        updateCurrentUser,
         isAuthenticated: !!user && !!token,
       }}
     >

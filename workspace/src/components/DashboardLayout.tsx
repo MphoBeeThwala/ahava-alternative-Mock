@@ -69,7 +69,11 @@ export default function DashboardLayout({
     csvHasValue(medicalPassport["chronicConditions"]),
     csvHasValue(medicalPassport["currentMedications"]),
   ];
-  const passportCompletionPercent = Math.round((passportChecks.filter(Boolean).length / passportChecks.length) * 100);
+  const derivedPassportCompletionPercent = Math.round((passportChecks.filter(Boolean).length / passportChecks.length) * 100);
+  const storedPassportCompletionPercent = typeof profileObject["passportCompletionPercent"] === "number"
+    ? Math.max(0, Math.min(100, Math.round(profileObject["passportCompletionPercent"])))
+    : null;
+  const passportCompletionPercent = storedPassportCompletionPercent ?? derivedPassportCompletionPercent;
   const showOnboardingReminder = isAuthenticated && user?.role === "PATIENT" && passportCompletionPercent < 80;
 
   const getDashboardPath = () => {

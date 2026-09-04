@@ -776,18 +776,43 @@ router.patch(
         where: { id: userId },
         select: { dateOfBirth: true, gender: true, riskProfile: true },
       });
+      const currentRiskProfile =
+        ((current?.riskProfile as Record<string, unknown> | null) ?? {});
+      const incomingRiskProfile = value as Record<string, unknown>;
+      const currentMedicalPassport =
+        currentRiskProfile.medicalPassport &&
+        typeof currentRiskProfile.medicalPassport === "object"
+          ? (currentRiskProfile.medicalPassport as Record<string, unknown>)
+          : undefined;
+      const incomingMedicalPassport =
+        incomingRiskProfile.medicalPassport &&
+        typeof incomingRiskProfile.medicalPassport === "object"
+          ? (incomingRiskProfile.medicalPassport as Record<string, unknown>)
+          : undefined;
 
       const merged = {
-        ...((current?.riskProfile as Record<string, unknown> | null) ?? {}),
-        ...(value as Record<string, unknown>),
+        ...currentRiskProfile,
+        ...incomingRiskProfile,
+        ...(incomingMedicalPassport
+          ? {
+              medicalPassport: {
+                ...(currentMedicalPassport ?? {}),
+                ...incomingMedicalPassport,
+              },
+            }
+          : {}),
         updatedAt: new Date().toISOString(),
       };
 
-      await prisma.user.update({
+      const updatedUser = await prisma.user.update({
         where: { id: userId },
         data: { riskProfile: merged as object },
+        select: { riskProfile: true },
       });
       await invalidateCachedUser(userId);
+      const persistedRiskProfile =
+        ((updatedUser.riskProfile as Record<string, unknown> | null) ??
+          merged) as Record<string, unknown>;
 
       const ML_URL = (process.env.ML_SERVICE_URL ?? "").replace(/\/$/, "");
       const mlServiceAvailable = !!ML_URL && !ML_URL.includes("localhost");
@@ -800,10 +825,10 @@ router.patch(
           : 50;
         const context = {
           age: Math.max(18, Math.min(120, age)),
-          smoker: Boolean((merged as any).smoker),
-          hypertension: Boolean((merged as any).hypertension),
-          cholesterol_known: Boolean((merged as any).cholesterolKnown),
-          cholesterol_mmol_per_L: (merged as any).cholesterolValue ?? null,
+          smoker: Boolean((persistedRiskProfile as any).smoker),
+          hypertension: Boolean((persistedRiskProfile as any).hypertension),
+          cholesterol_known: Boolean((persistedRiskProfile as any).cholesterolKnown),
+          cholesterol_mmol_per_L: (persistedRiskProfile as any).cholesterolValue ?? null,
         };
         axios
           .put(
@@ -816,8 +841,7 @@ router.patch(
           )
           .catch(() => {});
       }
-
-      res.json({ success: true, riskProfile: merged });
+      res.json({ success: true, riskProfile: persistedRiskProfile });
     } catch (e) {
       next(e);
     }
