@@ -7,10 +7,19 @@ on:
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────
+  # 0. Quality gate — nothing below runs unless this passes.
+  #    Defined once in ci.yml so pull requests and deploys run the same checks.
+  # ─────────────────────────────────────────────────────────────────────────
+  quality:
+    name: Quality Gate
+    uses: ./.github/workflows/ci.yml
+
+  # ─────────────────────────────────────────────────────────────────────────
   # 1. Build & push Docker images to GitHub Container Registry
   # ─────────────────────────────────────────────────────────────────────────
   build-and-publish:
     name: Build & Push Docker Images
+    needs: quality
     runs-on: ubuntu-latest
     permissions:
       contents: read
