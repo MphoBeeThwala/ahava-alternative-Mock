@@ -35,8 +35,8 @@ import healthConnectRoutes from "./routes/healthConnect";
 import { errorHandler } from "./middleware/errorHandler";
 import { rateLimiter } from "./middleware/rateLimiter";
 import { authMiddleware } from "./middleware/auth";
-import { attachRateLimitUserKey } from "./middleware/rateLimitUserKey";
 import { attachRequestId } from "./middleware/requestId";
+import { originGuard } from "./middleware/originGuard";
 
 // Import services
 import { initializeRedis } from "./services/redis";
@@ -124,8 +124,8 @@ app.use(
 );
 app.use(express.urlencoded({ extended: true, limit: "20mb" }));
 
-// Attach authenticated user ID for per-user rate limiting (non-blocking)
-app.use(attachRateLimitUserKey);
+// Reject cross-site state-changing requests that authenticate by cookie
+app.use(originGuard(corsOrigins));
 
 // Rate limiting
 app.use(rateLimiter);

@@ -6,30 +6,66 @@ function getBackendBaseUrl(): string {
   return process.env.BACKEND_URL || "http://localhost:4000";
 }
 
-function stripHopByHopHeaders(headers: Headers): Headers {
-  const out = new Headers(headers);
-  [
-    "connection",
-    "keep-alive",
-    "proxy-authenticate",
-    "proxy-authorization",
-    "te",
-    "trailer",
-    "transfer-encoding",
-    "upgrade",
-    "host",
-    "content-length",
-    "accept-encoding",
-    "origin",
-  ].forEach((h) => out.delete(h));
+const UPSTREAM_TIMEOUT_MS = Number(process.env.BACKEND_TIMEOUT_MS ?? 30_000);
+
+/**
+ * Headers we are willing to pass upstream.
+ *
+ * This used to be a denylist, which forwarded anything a caller invented -
+ * including X-Forwarded-For, which the API keys rate limits on and records as
+ * the client IP on every audit log entry. An allowlist means a header reaches
+ * the API only because we decided it should.
+ */
+const FORWARDED_HEADERS = [
+  "accept",
+  "accept-language",
+  "authorization",
+  "content-type",
+  "cookie",
+  "idempotency-key",
+  "referer",
+  "user-agent",
+  "x-ahava-auth-mode",
+  "x-request-id",
+];
+
+function buildUpstreamHeaders(req: NextRequest): Headers {
+  const out = new Headers();
+  for (const name of FORWARDED_HEADERS) {
+    const value = req.headers.get(name);
+    if (value) out.set(name, value);
+  }
+
+  // The API's CSRF guard needs to know which page made this request. The raw
+  // Origin is not forwarded because it would confuse the API's CORS layer, so
+  // it travels under its own name.
+  const origin = req.headers.get("origin");
+  if (origin) out.set("x-forwarded-origin", origin);
+
   return out;
 }
 
-async function proxy(req: NextRequest, path: string[]) {
-  const baseUrl = getBackendBaseUrl().replace(/\/+$/, "");
-  const targetUrl = `${baseUrl}/api/${path.join("/")}${req.nextUrl.search}`;
+/** Reject traversal and absolute URLs smuggled through the catch-all segment. */
+function isSafePathSegment(segment: string): boolean {
+  return (
+    segment.length > 0 &&
+    segment !== "." &&
+    segment !== ".." &&
+    !segment.includes("/") &&
+    !segment.includes("\\")
+  );
+}
 
-  const headers = stripHopByHopHeaders(req.headers);
+async function proxy(req: NextRequest, path: string[]) {
+  if (!path.every(isSafePathSegment)) {
+    return NextResponse.json({ error: "Invalid path" }, { status: 400 });
+  }
+
+  const baseUrl = getBackendBaseUrl().replace(/\/+$/, "");
+  const targetPath = path.map(encodeURIComponent).join("/");
+  const targetUrl = `${baseUrl}/api/${targetPath}${req.nextUrl.search}`;
+
+  const headers = buildUpstreamHeaders(req);
 
   const body =
     req.method === "GET" || req.method === "HEAD"
@@ -42,6 +78,7 @@ async function proxy(req: NextRequest, path: string[]) {
       body,
       redirect: "manual",
       cache: "no-store",
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     });
 
     const resHeaders = new Headers(upstream.headers);
@@ -54,7 +91,16 @@ async function proxy(req: NextRequest, path: string[]) {
       headers: resHeaders,
     });
   } catch (error) {
-    throw error;
+    if (error instanceof Error && error.name === "TimeoutError") {
+      return NextResponse.json(
+        { error: "The service took too long to respond. Please try again." },
+        { status: 504 },
+      );
+    }
+    return NextResponse.json(
+      { error: "Could not reach the service. Please try again." },
+      { status: 502 },
+    );
   }
 }
 
