@@ -6,8 +6,8 @@ name: CI
 on:
   pull_request:
     branches: ["**"]
-  push:
-    branches: ["main"]
+  # Not `push: main` — deploy.yml runs on that and calls this workflow, so
+  # adding it here would run every check twice on each merge.
   workflow_call: # allows deploy.yml to depend on this exact definition
 
 concurrency:
