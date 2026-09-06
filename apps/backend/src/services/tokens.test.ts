@@ -75,11 +75,19 @@ describe("tokens", () => {
   });
 
   it("rejects an unsigned (alg=none) token", () => {
-    const unsigned = jwt.sign(
-      { userId: "user_1", role: "ADMIN", typ: "access" },
-      "",
-      { algorithm: "none", issuer: TOKEN_ISSUER, audience: TOKEN_AUDIENCE },
-    );
+    // Hand-built rather than signed, so the test does not depend on the
+    // library being willing to mint one.
+    const b64 = (value: object) =>
+      Buffer.from(JSON.stringify(value)).toString("base64url");
+    const unsigned = `${b64({ alg: "none", typ: "JWT" })}.${b64({
+      userId: "user_1",
+      role: "ADMIN",
+      typ: "access",
+      iss: TOKEN_ISSUER,
+      aud: TOKEN_AUDIENCE,
+      exp: Math.floor(Date.now() / 1000) + 60,
+    })}.`;
+
     expect(() => verifyToken(unsigned, "access")).toThrow(jwt.JsonWebTokenError);
   });
 

@@ -16,7 +16,7 @@ describe("assessDeterministicRisk", () => {
       ["not breathing", "the baby is not breathing"],
       ["anaphylaxis", "anaphylaxis after a bee sting"],
       ["suicidal", "I have been feeling suicidal"],
-    ])("escalates %s to level 1", (_label, narrative) => {
+    ])("escalates %s to level 1", (_label: string, narrative: string) => {
       const result = assessDeterministicRisk(narrative);
 
       expect(result.minTriageLevel).toBe(1);
@@ -27,7 +27,7 @@ describe("assessDeterministicRisk", () => {
       ["chest pain", "crushing chest pain for an hour"],
       ["shortness of breath", "shortness of breath when walking"],
       ["severe abdominal pain", "severe abdominal pain since last night"],
-    ])("escalates %s to at least level 2", (_label, narrative) => {
+    ])("escalates %s to at least level 2", (_label: string, narrative: string) => {
       const result = assessDeterministicRisk(narrative);
 
       expect(result.minTriageLevel).toBeLessThanOrEqual(2);

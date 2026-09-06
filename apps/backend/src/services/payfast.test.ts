@@ -27,8 +27,18 @@ function itnSignature(fields: Record<string, string>, passphrase: string): strin
   return crypto.createHash("md5").update(s).digest("hex");
 }
 
+const ENV_KEYS = [
+  "PAYFAST_MERCHANT_ID",
+  "PAYFAST_MERCHANT_KEY",
+  "PAYFAST_PASSPHRASE",
+  "PAYFAST_SANDBOX",
+  "APP_URL",
+  "API_PUBLIC_URL",
+] as const;
+
 describe("PayFastService", () => {
-  const original = { ...process.env };
+  const original: Record<string, string | undefined> = {};
+  for (const key of ENV_KEYS) original[key] = process.env[key];
 
   beforeEach(() => {
     process.env.PAYFAST_MERCHANT_ID = MERCHANT_ID;
@@ -40,7 +50,10 @@ describe("PayFastService", () => {
   });
 
   afterAll(() => {
-    process.env = original;
+    for (const key of ENV_KEYS) {
+      if (original[key] === undefined) delete process.env[key];
+      else process.env[key] = original[key];
+    }
   });
 
   describe("createPayment", () => {
