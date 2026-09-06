@@ -110,6 +110,81 @@ typing, PayFast signatures, the CSRF guard, and the clinical safety thresholds.
 | AH-23 | No API versioning | P2 |
 | AH-24 | Red-flag triage patterns are singular and `\b`-anchored — "seizures" does not match "seizure" | P1 (clinical) |
 | AH-34 | `demoStream` holds a `setInterval` per user in-process | P2 |
+| AH-35 | Every service is on Render `plan: starter` (0.5 vCPU). At 200 concurrent, bcrypt alone saturates it — this is the measured login bottleneck | P0 for scale |
+| AH-36 | Biometrics ingest runs anomaly detection and four sequential DB round-trips inline; slowest non-login endpoint in every load run | P0 for scale |
+| AH-37 | Load tests hit the Next.js proxy, so proxy and API latency are indistinguishable. Nobody knows which to fix | P0 — measure first |
+
+---
+
+## 3a. Measured capacity — what the load tests actually say
+
+Four load-test logs sit in the repository root, run against **production**
+(`https://app.ahavaon88.co.za`). They are the most useful evidence available and
+they change the capacity conversation from speculation to arithmetic.
+
+| Run | Mode | Concurrency | Flows/sec | p95 login | p95 worst non-login |
+|---|---|---|---|---|---|
+| `auth-heavy-final` | login per flow | 10 | 3.4 | 1.3 s | 0.6 s |
+| `auth-heavy-final` | login per flow | 200 | 7.0 | **16.5 s** | 10.8 s (biometrics) |
+| `auth-heavy-rerun` | login per flow | 200 | 3.6 | **21.5 s** | 22.8 s — **21% failed** |
+| `steady-final` | token reuse | 400 | 20.7 | n/a | 8.0 s (biometrics) |
+| `steady-600` | token reuse | 600 | 18.6 | n/a | **13.2 s (`/me`)** |
+
+Four conclusions:
+
+**1. Throughput is flat, and that is the whole story.** From 10 to 600
+concurrent — a 60× increase — throughput moves from ~3 to ~19 flows/sec. Roughly
+5×. Everything else went into queueing. A system whose throughput does not rise
+with concurrency has a serialization bottleneck, and adding users only adds
+waiting. At 600 concurrent and 18.6 flows/sec, Little's Law puts the average
+flow at 32 seconds; the harness measured the wave at 32.3 seconds. The model
+fits exactly.
+
+**2. `fail=0%` is not a pass.** At 600 concurrent, nothing failed and the p95 on
+`/me` was 13.2 seconds. Zero failures here means the client's timeout was
+generous, not that the system was healthy. The one run that did fail — 21% at
+200 concurrent — is what that queue looks like when it finally tips.
+
+**3. Login is the worst endpoint, and the cause is identifiable.**
+`BCRYPT_ROUNDS` defaults to 10, and every service in `render.yaml` is on
+`plan: starter` — 0.5 vCPU. bcrypt is deliberately CPU-hard, so on half a core
+200 concurrent logins queue on the CPU alone. That accounts for the 16.5 s
+login p95 without needing any other explanation.
+
+**4. But bcrypt is not the ceiling.** The `steady` runs skip login entirely and
+still top out at ~19 flows/sec. So there is a general per-request cost limit
+independent of hashing. Two contributors are visible in the code: the biometrics
+ingest at `routes/patient.ts:67` runs `processBiometricReading` and
+`detectEarlyWarningSigns` inline plus four sequential database round-trips —
+and it is the slowest non-login endpoint in every run — and the tests hit
+`app.ahavaon88.co.za`, which is the **Next.js proxy**, so every measurement is
+two 0.5-vCPU hops chained, not one.
+
+### What 5,000 concurrent actually requires
+
+Take 5,000 active users each completing a flow every 30–60 seconds: 83–167
+flows/sec. Against a measured ceiling of ~19, that is **4× to 9×**. Not a
+rewrite — but not reachable by tuning either, and definitely not on starter
+instances.
+
+If instead 5,000 means 5,000 flows genuinely in flight at once, the gap is two
+orders of magnitude and the answer is a different architecture. **Agree which
+of these the number means before promising it to anyone.**
+
+The encouraging part: the architecture is already built for horizontal scale —
+PgBouncer transaction pooling, Redis-backed sessions, WebSocket pub/sub across
+replicas. Two things currently prevent replicas from scaling cleanly, and both
+are already on the list: the in-process auth cache (AH-08) and the in-memory
+rate-limit store (AH-02b). Fix those, size the instances properly, move the two
+inline-compute paths off the request thread, and the same architecture should
+carry the target.
+
+### Measure this before anything else
+
+The single most valuable missing number: **run the same test against the API
+directly, bypassing the Next.js proxy.** Right now proxy time and API time are
+indistinguishable, so nobody knows which one to fix. That is one test run, and
+it decides where Phase 4 effort goes.
 
 ---
 
