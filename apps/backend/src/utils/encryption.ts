@@ -14,7 +14,7 @@ export function generateIVSalt(): string {
   return crypto.randomBytes(16).toString('hex');
 }
 
-function getEncryptionKey(key?: string): Buffer {
+export function getEncryptionKey(key?: string): Buffer {
   const encryptionKeyStr = key || process.env.ENCRYPTION_KEY;
   if (!encryptionKeyStr) {
     throw new Error('Encryption keys not configured');
@@ -47,6 +47,25 @@ export function isEncryptedPayload(value: string): boolean {
   }
 
   return false;
+}
+
+/**
+ * Validate ENCRYPTION_KEY at boot.
+ *
+ * Without this the key is only touched the first time something is encrypted -
+ * so a bad or missing key let the service start clean and then fail partway
+ * through a booking, at the point of encrypting the patient's address.
+ * Called from startServer().
+ */
+export function assertEncryptionKeyConfigured(): void {
+  try {
+    getEncryptionKey();
+  } catch (error) {
+    throw new Error(
+      `ENCRYPTION_KEY is missing or invalid: ${(error as Error).message}. ` +
+        'Generate one with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'base64\'))"',
+    );
+  }
 }
 
 export function encryptData(plaintext: string, key?: string): string {

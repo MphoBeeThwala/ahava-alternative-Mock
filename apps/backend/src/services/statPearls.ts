@@ -21,11 +21,20 @@ import * as cheerio from "cheerio";
 const NCBI_ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi";
 const MAX_CONTEXT_CHARS = 8000; // Keep prompt size reasonable
 const REQUEST_TIMEOUT_MS = 10000;
+const MAX_SEARCH_RESULTS = 3;
 
 interface SearchResult {
   title: string;
   url: string;
   description?: string;
+}
+
+/** Shape of an NCBI E-utilities esearch response with retmode=json. */
+interface NcbiSearchResponse {
+  esearchresult?: {
+    idlist?: string[];
+    count?: string;
+  };
 }
 
 interface ExtractedSection {
@@ -87,27 +96,33 @@ async function fetchFromStatPearlsService(
  */
 async function searchNcbiStatPearls(query: string): Promise<SearchResult[]> {
   const apiKey = process.env.NCBI_API_KEY ? `&api_key=${process.env.NCBI_API_KEY}` : '';
-  const searchUrl = `${NCBI_ESEARCH_URL}?db=books&term=${encodeURIComponent(query)}+AND+NBK430685[book]&retmode=json${apiKey}`;
+  const searchUrl = `${NCBI_ESEARCH_URL}?db=books&term=${encodeURIComponent(query)}+AND+NBK430685[book]&retmode=json&retmax=${MAX_SEARCH_RESULTS}${apiKey}`;
+
   const res = await fetch(searchUrl, {
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!res.ok) return [];
-  const html = await res.text();
-  const $ = cheerio.load(html);
-  const results: SearchResult[] = [];
-  $(".rslt").each((_, el) => {
-    const $el = $(el);
-    const $link = $el.find("a").first();
-    const title = $link.text().trim();
-    const href = $link.attr("href");
-    if (!title || !href) return;
-    const url = href.startsWith("http")
-      ? href
-      : new URL(href, "https://www.ncbi.nlm.nih.gov").toString();
-    const desc = $el.find("p").first().text().trim();
-    results.push({ title, url, description: desc || undefined });
-  });
-  return results;
+
+  // This asked for retmode=json and then parsed the response as HTML with
+  // cheerio, looking for `.rslt` elements that JSON never contains. The
+  // function therefore returned [] on every call, evidence was always
+  // considered insufficient, and every triage ran with
+  // NO_PEER_REVIEW_CONTEXT and a confidence cap of 0.5.
+  let payload: NcbiSearchResponse;
+  try {
+    payload = (await res.json()) as NcbiSearchResponse;
+  } catch {
+    return [];
+  }
+
+  const ids = payload?.esearchresult?.idlist;
+  if (!Array.isArray(ids) || ids.length === 0) return [];
+
+  return ids.slice(0, MAX_SEARCH_RESULTS).map((id) => ({
+    title: `StatPearls NBK${id}`,
+    url: `https://www.ncbi.nlm.nih.gov/books/NBK${id}/`,
+    description: undefined,
+  }));
 }
 
 /**

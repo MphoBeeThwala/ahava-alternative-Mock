@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import jwt from "jsonwebtoken";
+import { signToken, verifyToken } from "./tokens";
 
 export const ACCESS_TOKEN_COOKIE = "ahava_access_token";
 export const REFRESH_TOKEN_COOKIE = "ahava_refresh_token";
@@ -160,31 +160,16 @@ export function clearAuthCookies(
 }
 
 export function createWebSocketTicket(userId: string, role: string): string {
-  if (!process.env.JWT_SECRET) {
-    throw new Error("JWT_SECRET not configured");
-  }
-
-  return jwt.sign(
-    { userId, role, scope: "websocket" satisfies WebSocketTicketPayload["scope"] },
-    process.env.JWT_SECRET,
-    { expiresIn: WS_TICKET_EXPIRES_IN_SECONDS },
+  return signToken(
+    { userId, role, typ: "websocket" },
+    { expiresInSeconds: WS_TICKET_EXPIRES_IN_SECONDS },
   );
 }
 
 export function verifyWebSocketTicket(ticket: string): WebSocketTicketPayload {
-  if (!process.env.JWT_SECRET) {
-    throw new Error("JWT_SECRET not configured");
-  }
-
-  const decoded = jwt.verify(ticket, process.env.JWT_SECRET) as Partial<WebSocketTicketPayload>;
-  if (
-    !decoded ||
-    typeof decoded.userId !== "string" ||
-    typeof decoded.role !== "string" ||
-    decoded.scope !== "websocket"
-  ) {
-    throw new Error("Invalid websocket ticket");
-  }
+  // Only a ticket minted for the socket handshake is accepted — an access or
+  // refresh token presented here is rejected, and vice versa.
+  const decoded = verifyToken(ticket, "websocket");
 
   return {
     userId: decoded.userId,

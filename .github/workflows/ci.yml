@@ -1,0 +1,152 @@
+name: CI
+
+# Quality gate. Runs on every pull request and on pushes to main.
+# `deploy.yml` will not build or ship an image unless this workflow passes.
+
+on:
+  pull_request:
+    branches: ["**"]
+  # Not `push: main` — deploy.yml runs on that and calls this workflow, so
+  # adding it here would run every check twice on each merge.
+  workflow_call: # allows deploy.yml to depend on this exact definition
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Prisma needs a syntactically valid URL to generate the client.
+  # No database is contacted by generate/type-check/unit tests.
+  POOLED_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ahava_ci
+  DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ahava_ci
+
+jobs:
+  backend:
+    name: Backend — type-check, lint, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      # Not --frozen-lockfile yet. The cleanup commit removed the root
+      # dependencies for the deleted Vite app, so pnpm-lock.yaml is out of date
+      # until someone runs an install. Regenerating here means the branch can
+      # be pushed and verified without needing a working pnpm on a developer
+      # machine (the primary one is currently blocked by an Application Control
+      # policy - see AH-38).
+      # TIGHTEN THIS to --frozen-lockfile once a regenerated pnpm-lock.yaml has
+      # been committed, so CI catches dependency drift again.
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @ahava-healthcare/api prisma:generate
+
+      - name: Type-check
+        run: pnpm --filter @ahava-healthcare/api exec tsc --noEmit
+
+      - name: Lint
+        run: pnpm --filter @ahava-healthcare/api lint
+
+      - name: Unit tests
+        run: pnpm --filter @ahava-healthcare/api test
+
+      - name: Build
+        run: pnpm --filter @ahava-healthcare/api build
+
+  frontend:
+    name: Frontend — lint and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      # Not --frozen-lockfile yet. The cleanup commit removed the root
+      # dependencies for the deleted Vite app, so pnpm-lock.yaml is out of date
+      # until someone runs an install. Regenerating here means the branch can
+      # be pushed and verified without needing a working pnpm on a developer
+      # machine (the primary one is currently blocked by an Application Control
+      # policy - see AH-38).
+      # TIGHTEN THIS to --frozen-lockfile once a regenerated pnpm-lock.yaml has
+      # been committed, so CI catches dependency drift again.
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Lint
+        run: pnpm --filter workspace lint
+
+      - name: Build
+        env:
+          NEXT_OUTPUT_STANDALONE: "false"
+          BACKEND_URL: http://localhost:4000
+        run: pnpm --filter workspace build
+
+  migrations:
+    name: Migrations apply cleanly
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ahava_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      # Not --frozen-lockfile yet. The cleanup commit removed the root
+      # dependencies for the deleted Vite app, so pnpm-lock.yaml is out of date
+      # until someone runs an install. Regenerating here means the branch can
+      # be pushed and verified without needing a working pnpm on a developer
+      # machine (the primary one is currently blocked by an Application Control
+      # policy - see AH-38).
+      # TIGHTEN THIS to --frozen-lockfile once a regenerated pnpm-lock.yaml has
+      # been committed, so CI catches dependency drift again.
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      # Drift check first, while the database is still empty: replays the
+      # migration history into a shadow database and compares the result to
+      # schema.prisma. Exits non-zero if they disagree.
+      - name: Check schema matches migrations
+        run: |
+          pnpm --filter @ahava-healthcare/api exec prisma migrate diff \
+            --from-migrations prisma/migrations \
+            --to-schema-datamodel prisma/schema.prisma \
+            --shadow-database-url "$DATABASE_URL" \
+            --exit-code
+
+      # Proves the migration history replays from empty onto a real Postgres.
+      - name: Apply migrations
+        run: pnpm --filter @ahava-healthcare/api exec prisma migrate deploy

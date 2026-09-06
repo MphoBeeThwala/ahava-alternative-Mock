@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { UserRole } from '@prisma/client';
 import prisma from '../lib/prisma';
 import { getAccessTokenFromRequest } from '../services/authSession';
+import { verifyToken } from '../services/tokens';
 
 export interface AuthenticatedRequest extends Request {
   user?: {
@@ -57,18 +58,21 @@ export const authMiddleware = async (
       return res.status(401).json({ error: 'No token provided' });
     }
 
-    let decoded: any;
+    let decoded: { userId: string; role: string };
     try {
-      const secret = process.env.JWT_SECRET;
-      if (!secret || (process.env.NODE_ENV === 'production' && secret.length < 32)) {
-        return res.status(503).json({ error: 'Server configuration error' });
-      }
-      decoded = jwt.verify(token, secret) as any;
+      // Accepts ONLY access tokens. A refresh token or a WebSocket ticket
+      // verifies against the same secret but is rejected here, so neither can
+      // be used as an API credential.
+      decoded = verifyToken(token, 'access');
     } catch (error) {
       const errName = (error as { name?: string })?.name;
       if (errName === 'TokenExpiredError') {
         // Expected in normal access-token refresh flow; avoid noisy error logs.
         return res.status(401).json({ error: 'Token expired', code: 'TOKEN_EXPIRED' });
+      }
+      if (error instanceof Error && error.message.includes('JWT_SECRET')) {
+        console.error('[AuthMiddleware] JWT_SECRET misconfigured');
+        return res.status(503).json({ error: 'Server configuration error' });
       }
       console.warn('[AuthMiddleware] Token verification failed');
       return res.status(401).json({ error: 'Invalid token', code: 'TOKEN_INVALID' });
