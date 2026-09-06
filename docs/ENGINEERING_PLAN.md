@@ -113,6 +113,8 @@ typing, PayFast signatures, the CSRF guard, and the clinical safety thresholds.
 | AH-35 | Every service is on Render `plan: starter` (0.5 vCPU). At 200 concurrent, bcrypt alone saturates it — this is the measured login bottleneck | P0 for scale |
 | AH-36 | Biometrics ingest runs anomaly detection and four sequential DB round-trips inline; slowest non-login endpoint in every load run | P0 for scale |
 | AH-37 | Load tests hit the Next.js proxy, so proxy and API latency are indistinguishable. Nobody knows which to fix | P0 — measure first |
+| AH-38 | The primary dev machine's Application Control policy blocks `pnpm.exe`. `corepack pnpm` works around it, but a new engineer hits this on day one. Get pnpm allowlisted, or commit to builds happening only in CI and Docker | P1 — infrastructure |
+| AH-39 | CI installs with `--no-frozen-lockfile` so the branch can be verified without a working local pnpm. Tighten once a regenerated lockfile is committed | P2 — follow-up |
 
 ---
 
