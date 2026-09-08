@@ -762,6 +762,7 @@ const riskProfileSchema = Joi.object({
       .optional(),
   }).optional(),
 }).min(1);
+
 router.patch(
   "/risk-profile",
   authMiddleware,
@@ -789,16 +790,25 @@ router.patch(
         typeof incomingRiskProfile.medicalPassport === "object"
           ? (incomingRiskProfile.medicalPassport as Record<string, unknown>)
           : undefined;
+      const mergedMedicalPassport = incomingMedicalPassport
+        ? {
+            ...(currentMedicalPassport ?? {}),
+            ...incomingMedicalPassport,
+          }
+        : undefined;
 
       const merged = {
         ...currentRiskProfile,
         ...incomingRiskProfile,
-        ...(incomingMedicalPassport
+        ...(mergedMedicalPassport
           ? {
-              medicalPassport: {
-                ...(currentMedicalPassport ?? {}),
-                ...incomingMedicalPassport,
-              },
+              medicalPassport: mergedMedicalPassport,
+              ...(typeof incomingRiskProfile.passportCompletionPercent === "number"
+                ? {
+                    passportCompletionPercent:
+                      incomingRiskProfile.passportCompletionPercent,
+                  }
+                : {}),
             }
           : {}),
         updatedAt: new Date().toISOString(),
