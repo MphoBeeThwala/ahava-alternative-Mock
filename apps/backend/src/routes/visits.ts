@@ -15,8 +15,8 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res, next) => 
     else if (req.user!.role === UserRole.DOCTOR) where.doctorId = req.user!.id;
     const visits = await prisma.visit.findMany({ where, include: { booking: { select: { patientId: true, patient: { select: { id: true, firstName: true, lastName: true } } } }, nurse: { select: { id: true, firstName: true, lastName: true } } }, orderBy: { createdAt: 'desc' } });
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'LIST', resource: 'Visit', metadata: { count: visits.length, role: req.user!.role }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
-    res.json({ success: true, visits });
-  } catch (error) { next(error); }
+    return res.json({ success: true, visits });
+  } catch (error) { return next(error); }
 });
 
 // Get specific visit
@@ -28,8 +28,8 @@ router.get('/:id', authMiddleware, async (req: AuthenticatedRequest, res, next) 
     const isAuthorized = req.user!.role === UserRole.ADMIN || visit.booking.patientId === req.user!.id || visit.nurseId === req.user!.id || visit.doctorId === req.user!.id;
     if (!isAuthorized) return res.status(403).json({ error: 'Access denied' });
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'READ', resource: 'Visit', resourceId: visit.id, metadata: { patientId: visit.booking.patientId, nurseId: visit.nurseId, status: visit.status }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
-    res.json({ success: true, visit });
-  } catch (error) { next(error); }
+    return res.json({ success: true, visit });
+  } catch (error) { return next(error); }
 });
 
 // Update visit status (Nurse only)
@@ -42,8 +42,8 @@ router.patch('/:id/status', requireNurse, async (req: AuthenticatedRequest, res,
     if (visit.nurseId !== req.user!.id) return res.status(403).json({ error: 'Access denied' });
     const updated = await prisma.visit.update({ where: { id }, data: { status } });
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'UPDATE', resource: 'Visit', resourceId: id, metadata: { oldStatus: visit.status, newStatus: status }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
-    res.json({ success: true, visit: updated });
-  } catch (error) { next(error); }
+    return res.json({ success: true, visit: updated });
+  } catch (error) { return next(error); }
 });
 
 export default router;

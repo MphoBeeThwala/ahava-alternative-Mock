@@ -115,7 +115,7 @@ router.post("/setup", authMiddleware, authRateLimiter, async (req: Authenticated
       otpauthUrl: getTotpProvisioningUri(secret, user.email),
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -155,7 +155,7 @@ router.post("/verify-setup", authMiddleware, authRateLimiter, async (req: Authen
       backupCodes, // shown exactly once — the client must display these now
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -198,7 +198,7 @@ router.post("/disable", authMiddleware, authRateLimiter, async (req: Authenticat
 
     res.json({ success: true, message: "Two-factor authentication disabled" });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -266,7 +266,7 @@ router.post("/login-verify", authRateLimiter, async (req, res, next) => {
       ...(req.get("X-Ahava-Auth-Mode") !== "cookie" ? { accessToken, refreshToken } : {}),
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 

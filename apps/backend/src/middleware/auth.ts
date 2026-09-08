@@ -151,7 +151,7 @@ export const requireRole = (roles: UserRole[]) => {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
 
-    next();
+    return next();
   };
 };
 

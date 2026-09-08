@@ -112,7 +112,7 @@ router.post(
       };
       res.json({ success: true, url: data.url, sessionId: data.session_id });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   },
 );
@@ -156,7 +156,7 @@ router.post(
 
       res.json({ success: true });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   },
 );
@@ -182,7 +182,7 @@ router.get(
         devices: (user as any)?.connectedDevices ?? [],
       });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   },
 );
@@ -309,7 +309,7 @@ export async function handleTerraWebhook(
 
     res.status(200).json({ success: true });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 }
 

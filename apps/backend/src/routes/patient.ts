@@ -253,7 +253,7 @@ router.post(
         },
       });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   },
 );
@@ -337,7 +337,7 @@ router.get(
         },
       });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   },
 );
@@ -392,7 +392,7 @@ router.get(
         alerts,
       });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   },
 );
@@ -405,7 +405,7 @@ router.get(
     try {
       const userId = req.user!.id;
       const summary = await getMonitoringSummary(userId);
-      res.json({
+      return res.json({
         success: true,
         data: summary,
       });
@@ -704,7 +704,7 @@ router.get(
         },
       });
 
-      res.json({
+      return res.json({
         success: true,
         data: mlData,
         meta: {
@@ -734,7 +734,7 @@ router.get(
         });
       }
       // For other errors, return a generic response
-      res.status(500).json({
+      return res.status(500).json({
         success: false,
         error: "Failed to get early warning summary. Please try again.",
       });
@@ -984,9 +984,9 @@ router.patch(
           )
           .catch(() => {});
       }
-      res.json({ success: true, riskProfile: persistedRiskProfile });
+      return res.json({ success: true, riskProfile: persistedRiskProfile });
     } catch (e) {
-      next(e);
+      return next(e);
     }
   },
 );
@@ -1032,7 +1032,16 @@ router.post(
       });
 
       // If biometrics provided, enhance triage with biometric context
-      let biometricContext = null;
+      let biometricContext: {
+        vitalSigns: {
+          heartRate: any;
+          bloodPressure: any;
+          oxygenSaturation: any;
+          temperature: any;
+          respiratoryRate: any;
+        };
+        abnormal: string[];
+      } | null = null;
       if (biometrics) {
         // Analyze biometrics for additional context
         const biometricAnalysis = {
@@ -1107,7 +1116,7 @@ router.post(
         },
       });
 
-      res.json({
+      return res.json({
         success: true,
         data: {
           ...triageResult,
@@ -1119,7 +1128,7 @@ router.post(
         },
       });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   },
 );
@@ -1157,9 +1166,9 @@ router.get(
       const daysEstablished = Math.min(daysDiff, 14);
       const isComplete = daysEstablished >= 14;
 
-      res.json({ daysEstablished, daysRequired: 14, isComplete });
+      return res.json({ daysEstablished, daysRequired: 14, isComplete });
     } catch (e) {
-      res.status(500).json({ error: "Failed to get baseline info" });
+      return res.status(500).json({ error: "Failed to get baseline info" });
     }
   },
 );
@@ -1208,7 +1217,7 @@ router.get(
         const existing = dayMap.get(day);
 
         // Keep RED over YELLOW over GREEN
-        const alertPriority = { RED: 3, YELLOW: 2, GREEN: 1 };
+        const alertPriority: Record<string, number> = { RED: 3, YELLOW: 2, GREEN: 1 };
         if (
           !existing ||
           alertPriority[r.alertLevel || "GREEN"] >
@@ -1235,10 +1244,10 @@ router.get(
         (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
       );
 
-      res.json(timeline);
+      return res.json(timeline);
     } catch (e) {
       console.error("Error loading timeline:", e);
-      res.status(500).json({ error: "Failed to load timeline" });
+      return res.status(500).json({ error: "Failed to load timeline" });
     }
   },
 );
@@ -1272,7 +1281,7 @@ router.post("/demo/start-stream", async (req: AuthenticatedRequest, res) => {
       parseInt(intervalSeconds as string) || 30,
     );
 
-    res.json({
+    return res.json({
       success: true,
       message: "Demo biometric stream started",
       userId,
@@ -1282,7 +1291,7 @@ router.post("/demo/start-stream", async (req: AuthenticatedRequest, res) => {
     });
   } catch (e) {
     console.error("Error starting demo stream:", e);
-    res.status(500).json({ error: "Failed to start demo stream" });
+    return res.status(500).json({ error: "Failed to start demo stream" });
   }
 });
 

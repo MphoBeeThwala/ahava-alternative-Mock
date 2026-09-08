@@ -225,7 +225,7 @@ router.get("/", requireDoctor, async (req: AuthenticatedRequest, res, next) => {
 
     res.json({ success: true, cases: cases.map(decorateTriageCase) });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -252,7 +252,7 @@ router.get(
 
       res.json({ success: true, cases: cases.map(decorateTriageCase) });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   },
 );
@@ -303,7 +303,7 @@ router.post(
 
       res.json({ success: true, triageCase: decorateTriageCase(updated) });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   },
 );
@@ -385,7 +385,7 @@ router.post(
 
       res.json({ success: true, triageCase: decorateTriageCase(updated) });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   },
 );
@@ -476,7 +476,7 @@ router.post(
 
       res.json({ success: true, triageCase: decorateTriageCase(updated) });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   },
 );
@@ -577,7 +577,7 @@ router.post(
 
       res.json({ success: true, triageCase: decorateTriageCase(updated) });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   },
 );
@@ -618,7 +618,7 @@ router.get(
       );
       res.send(buffer);
     } catch (error) {
-      next(error);
+      return next(error);
     }
   },
 );
@@ -756,7 +756,7 @@ router.post(
 
       res.json({ success: true, prescription, downloadUrl, safetySummary });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   },
 );
@@ -825,7 +825,7 @@ router.get(
       );
       res.send(pdf);
     } catch (error) {
-      next(error);
+      return next(error);
     }
   },
 );
@@ -963,7 +963,7 @@ router.post(
 
       res.json({ success: true, referral, downloadUrl });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   },
 );
@@ -1029,7 +1029,7 @@ router.get("/:id/referral/pdf", async (req: AuthenticatedRequest, res, next) => 
     );
     res.send(pdf);
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -1051,7 +1051,7 @@ router.get(
         },
       });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   },
 );
@@ -1093,7 +1093,7 @@ router.patch(
 
       res.json({ success: true, hcpsa: updated });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   },
 );

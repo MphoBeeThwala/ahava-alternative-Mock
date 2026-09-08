@@ -447,7 +447,7 @@ router.post("/register", authRateLimiter, async (req, res, next) => {
 
     setAuthCookies(res, req, { accessToken, refreshToken });
 
-    res.status(201).json(
+    return res.status(201).json(
       buildAuthResponse(
         req,
         {
@@ -460,7 +460,7 @@ router.post("/register", authRateLimiter, async (req, res, next) => {
       ),
     );
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -555,7 +555,7 @@ router.post("/login", authRateLimiter, async (req, res, next) => {
       ),
     );
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -704,7 +704,7 @@ router.post("/refresh", async (req, res, next) => {
       ),
     );
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -727,7 +727,7 @@ router.post("/logout", async (req, res, next) => {
     clearAuthCookies(res, req);
     res.json({ success: true, message: "Logged out successfully" });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -746,7 +746,7 @@ router.post(
         ticket: createWebSocketTicket(user.id, user.role),
       });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   },
 );
@@ -791,7 +791,7 @@ router.get("/me", authMiddleware, async (req: AuthenticatedRequest, res, next) =
 
     res.json({ success: true, user });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -886,7 +886,7 @@ router.put(
 
       res.json({ success: true, user: updated, emailChanged });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   },
 );
@@ -931,7 +931,7 @@ router.post("/forgot-password", authRateLimiter, async (req, res, next) => {
       message: "If that email exists, a reset link has been sent.",
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -974,7 +974,7 @@ router.post("/reset-password", authRateLimiter, async (req, res, next) => {
       message: "Password updated successfully. You can now log in.",
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -1003,7 +1003,7 @@ router.get("/verify-email", async (req, res, next) => {
 
     res.json({ success: true, message: "Email verified successfully." });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -1044,7 +1044,7 @@ router.post("/resend-verification", authRateLimiter, async (req, res, next) => {
       message: "If applicable, a verification email has been sent.",
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -1070,9 +1070,9 @@ router.post(
         where: { id: userId },
         data: { isVerified: true, emailVerificationToken: null },
       });
-      res.json({ success: true, message: "Account manually verified." });
+      return res.json({ success: true, message: "Account manually verified." });
     } catch (error) {
-      res.status(500).json({ error: "Manual verification failed." });
+      return res.status(500).json({ error: "Manual verification failed." });
     }
   },
 );

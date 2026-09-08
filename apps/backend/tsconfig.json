@@ -15,11 +15,11 @@
     "declarationMap": true,
     "sourceMap": true,
     "removeComments": true,
-    "noImplicitAny": false,
-    "strictNullChecks": false,
-    "strictFunctionTypes": false,
-    "noImplicitReturns": false,
-    "noFallthroughCasesInSwitch": false,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
     "baseUrl": "./src",
     "paths": {
       "@/*": [

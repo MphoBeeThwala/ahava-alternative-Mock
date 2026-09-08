@@ -30,7 +30,7 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
     res.json({ success: true, events: [] });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 

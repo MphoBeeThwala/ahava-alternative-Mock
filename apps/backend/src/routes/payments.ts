@@ -87,10 +87,10 @@ router.post('/create', authMiddleware, async (req: AuthenticatedRequest, res) =>
       userAgent: req.get('User-Agent'),
     });
 
-    res.json({ success: true, payment: record, payfast: payfastResult });
+    return res.json({ success: true, payment: record, payfast: payfastResult });
   } catch (error) {
     console.error('[payments] Payment initialization failed:', error);
-    res.status(500).json({ error: 'Payment initialization failed' });
+    return res.status(500).json({ error: 'Payment initialization failed' });
   }
 });
 
@@ -207,10 +207,10 @@ router.post('/webhook', async (req, res) => {
       userAgent: req.get('User-Agent'),
     });
 
-    res.status(200).send('OK');
+    return res.status(200).send('OK');
   } catch (error) {
     console.error('[payments] Webhook processing failed:', error);
-    res.status(500).send('Webhook processing failed');
+    return res.status(500).send('Webhook processing failed');
   }
 });
 
@@ -249,10 +249,10 @@ router.get('/:id/status', authMiddleware, async (req: AuthenticatedRequest, res)
       userAgent: req.get('User-Agent'),
     });
 
-    res.json({ success: true, payment });
+    return res.json({ success: true, payment });
   } catch (error) {
     console.error('[payments] Status check failed:', error);
-    res.status(500).json({ error: 'Failed to check payment status' });
+    return res.status(500).json({ error: 'Failed to check payment status' });
   }
 });
 
@@ -288,10 +288,10 @@ router.post('/:id/refund', authMiddleware, requireAdmin, async (req: Authenticat
       userAgent: req.get('User-Agent'),
     });
 
-    res.json({ success: true, payment: updated });
+    return res.json({ success: true, payment: updated });
   } catch (error) {
     console.error('[payments] Refund failed:', error);
-    res.status(500).json({ error: 'Refund failed' });
+    return res.status(500).json({ error: 'Refund failed' });
   }
 });
 

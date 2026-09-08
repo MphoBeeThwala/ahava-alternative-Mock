@@ -42,8 +42,8 @@ router.patch('/users/:id/suspend', requireAdmin, async (req: AuthenticatedReques
     // replica that just handled this very request.
     await invalidateCachedUser(id);
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'UPDATE', resource: 'AdminAction', resourceId: id, metadata: { entity: 'User', oldStatus: 'active', newStatus: 'suspended' }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
-    res.json({ success: true, user: updated });
-  } catch (error) { next(error); }
+    return res.json({ success: true, user: updated });
+  } catch (error) { return next(error); }
 });
 
 export default router;

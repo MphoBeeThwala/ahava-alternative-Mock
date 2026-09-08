@@ -15,8 +15,8 @@ router.get('/profile', requireNurse, async (req: AuthenticatedRequest, res, next
     });
     if (!nurse) return res.status(404).json({ error: 'Nurse not found' });
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'READ', resource: 'Nurse', resourceId: nurse.id, metadata: { fields: Object.keys(nurse) }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
-    res.json({ success: true, nurse });
-  } catch (error) { next(error); }
+    return res.json({ success: true, nurse });
+  } catch (error) { return next(error); }
 });
 
 // Update availability

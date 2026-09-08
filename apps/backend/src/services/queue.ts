@@ -180,6 +180,7 @@ export const addEmailJob = async (data: {
   // No Redis: send directly so notifications still work (e.g. serverless or dev without Redis)
   const { sendEmail } = await import("./email");
   sendEmail(data).catch((e) => console.error("[email] direct send failed", e));
+  return undefined;
 };
 
 /**

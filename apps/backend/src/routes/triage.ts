@@ -147,7 +147,7 @@ router.get(
         cases: cases.map(serializePatientTriageCase),
       });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   },
 );
@@ -260,7 +260,7 @@ router.post(
         triageCase: serializePatientTriageCase(updated),
       });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   },
 );
@@ -579,7 +579,7 @@ router.post(
         },
       });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   },
 );

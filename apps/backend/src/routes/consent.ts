@@ -83,7 +83,7 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
       },
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -107,7 +107,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
 
     res.json({ success: true, consents });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -142,7 +142,7 @@ router.delete('/:consentType', async (req: Request, res: Response, next: NextFun
       message: `Consent for ${consentType} has been withdrawn. Your data will no longer be processed for this purpose.`,
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 

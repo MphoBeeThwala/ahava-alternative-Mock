@@ -75,11 +75,12 @@ router.post(
       const timestamp = body.syncedAt ?? new Date().toISOString();
 
       // ── 1. Forward to ML service for early warning analysis ──────────────────
-      let mlResult: {
+      interface MlIngestResult {
         alert_level?: string;
         anomalies?: string[];
         readiness_score?: number;
-      } = {};
+      }
+      let mlResult: MlIngestResult = {};
       try {
         const mlRes = await fetch(
           `${ML_SERVICE_URL}/ingest?user_id=${encodeURIComponent(userId)}`,
@@ -93,7 +94,11 @@ router.post(
             signal: AbortSignal.timeout(10000),
           },
         );
-        if (mlRes.ok) mlResult = await mlRes.json();
+        // fetch's .json() is typed as Promise<unknown> under strict mode —
+        // the ML service's response shape is trusted the same way it always
+        // was (this is a service we operate, already wrapped in try/catch
+        // and consumed defensively below), just now named instead of implicit.
+        if (mlRes.ok) mlResult = (await mlRes.json()) as MlIngestResult;
       } catch (mlErr) {
         console.warn(
           "[healthConnect] ML service unavailable, saving reading anyway:",
@@ -171,7 +176,7 @@ router.post(
           (body.heartRateSamples?.length ?? 0) + (body.steps ? 1 : 0),
       });
     } catch (error) {
-      next(error);
+      return next(error);
     }
   },
 );
