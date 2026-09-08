@@ -149,7 +149,7 @@ export function hasSufficientEvidence(combined: CombinedEvidence): boolean {
  * Get evidence summary for logging
  */
 export function getEvidenceSummary(combined: CombinedEvidence): string {
-  const parts = [];
+  const parts: string[] = [];
   
   if (combined.hasStructuralEvidence) {
     parts.push('structural');

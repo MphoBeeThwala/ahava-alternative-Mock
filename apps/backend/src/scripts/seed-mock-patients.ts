@@ -64,7 +64,16 @@ async function main() {
 
   for (let i = 0; i < COUNT; i += batchSize) {
     const batch = Math.min(batchSize, COUNT - i);
-    const users = [];
+    const users: {
+      email: string;
+      passwordHash: string;
+      firstName: string;
+      lastName: string;
+      role: 'PATIENT';
+      preferredLanguage: string;
+      dateOfBirth: Date;
+      gender: string;
+    }[] = [];
     for (let j = 0; j < batch; j++) {
       const n = i + j + 1;
       const email = `patient_${String(n).padStart(4, '0')}@mock.ahava.test`;

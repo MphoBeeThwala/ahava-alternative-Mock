@@ -112,7 +112,7 @@ router.post('/', requirePatient, idempotencyMiddleware({ scope: 'booking-create'
       notifiedNurses: notifiedCount,
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -163,7 +163,7 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res, next) => 
       userAgent: req.get('User-Agent'),
     });
 
-    res.json({ success: true, bookings });
+    return res.json({ success: true, bookings });
   } catch (error: any) {
     console.error('[Bookings] Failed to fetch:', error?.message || error);
     return res.status(503).json({ success: false, error: 'Unable to load bookings. Database may be unavailable.' });
@@ -209,7 +209,7 @@ router.get('/:id', authMiddleware, async (req: AuthenticatedRequest, res, next) 
 
     res.json({ success: true, booking });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -245,7 +245,7 @@ router.patch('/:id/cancel', requirePatient, async (req: AuthenticatedRequest, re
 
     res.json({ success: true, message: 'Booking cancelled successfully' });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 

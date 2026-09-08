@@ -139,7 +139,9 @@ async function searchPubMed(terms: string, baseUrl: string, apiKey: string, time
       return [];
     }
 
-    const data: PubMedSearchResult = await response.json();
+    // fetch's .json() is typed as Promise<unknown> under strict mode —
+    // NCBI's response shape is trusted the same way it always was here.
+    const data = (await response.json()) as PubMedSearchResult;
     const idList = data.esearchresult?.idlist || [];
     
     return idList;

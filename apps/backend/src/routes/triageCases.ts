@@ -16,8 +16,8 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res, next) => 
     else if (req.user!.role === UserRole.DOCTOR) where.doctorId = req.user!.id;
     const cases = await prisma.triageCase.findMany({ where, include: { patient: { select: { id: true, firstName: true, lastName: true } }, doctor: { select: { id: true, firstName: true, lastName: true } } }, orderBy: { createdAt: 'desc' } });
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'LIST', resource: 'TriageCase', metadata: { count: cases.length, role: req.user!.role }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
-    res.json({ success: true, cases });
-  } catch (error) { next(error); }
+    return res.json({ success: true, cases });
+  } catch (error) { return next(error); }
 });
 
 // Get specific triage case
@@ -29,8 +29,8 @@ router.get('/:id', authMiddleware, async (req: AuthenticatedRequest, res, next) 
     const isAuthorized = req.user!.role === UserRole.ADMIN || triageCase.patientId === req.user!.id || triageCase.doctorId === req.user!.id;
     if (!isAuthorized) return res.status(403).json({ error: 'Access denied' });
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'READ', resource: 'TriageCase', resourceId: triageCase.id, metadata: { patientId: triageCase.patientId, doctorId: triageCase.doctorId, status: triageCase.status }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
-    res.json({ success: true, triageCase });
-  } catch (error) { next(error); }
+    return res.json({ success: true, triageCase });
+  } catch (error) { return next(error); }
 });
 
 // Doctor reviews and updates triage case
@@ -77,8 +77,8 @@ router.patch('/:id/review', requireDoctor, async (req: AuthenticatedRequest, res
     });
     await markCaseReviewed(id, req.user!.id);
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'UPDATE', resource: 'TriageCase', resourceId: id, metadata: { oldStatus: triageCase.status, newStatus: 'REVIEWED', hasDiagnosis: !!doctorDiagnosis }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
-    res.json({ success: true, triageCase: updated });
-  } catch (error) { next(error); }
+    return res.json({ success: true, triageCase: updated });
+  } catch (error) { return next(error); }
 });
 
 export default router;

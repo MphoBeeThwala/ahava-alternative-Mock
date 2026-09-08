@@ -131,7 +131,10 @@ export function parseTriageAttachmentManifest(
     const attachments = Array.isArray(parsed?.attachments)
       ? parsed.attachments
           .map(normalizeManifestAttachment)
-          .filter((item): item is StoredTriageAttachment => Boolean(item))
+          .filter(
+            (item: StoredTriageAttachment | null): item is StoredTriageAttachment =>
+              Boolean(item),
+          )
       : [];
 
     return { version: 1, attachments };

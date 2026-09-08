@@ -58,7 +58,7 @@ found and fixed the same day (repo hygiene pass, see commit history).
 | 2 | Security blockers | Landed, verified 2026-09-08 |
 | 3 | Cleanup and operability | Landed, verified 2026-09-08 |
 | 4 | Throughput to 5,000 concurrent | Designed, not started |
-| 5 | Compliance and durability | In progress — AH-13, AH-29 landed 2026-09-08; AH-26, AH-15's purge job, AH-23 still open |
+| 5 | Compliance and durability | In progress — AH-13, AH-29, AH-23, AH-26 landed 2026-09-08; AH-15's purge job still open |
 
 ---
 
@@ -98,6 +98,7 @@ found and fixed the same day (repo hygiene pass, see commit history).
 | AH-23 | No API versioning — every route now lives under `/api/v1/*` except the PayFast webhook (see §5) | `index.ts` |
 | AH-07 | No integration/end-to-end tests — 11 now run against a real, disposable PostgreSQL for every PR (see below) | `apps/backend/src/testSetup/`, `*.integration.test.ts` |
 | AH-41 (new) | `routes/webhooks.ts` carried a second, unauthenticated "POST /payment" webhook from before the PayFast migration that marked payments `COMPLETED` with none of AH-04/05's checks — its signature check failed *open* whenever `NODE_ENV` wasn't exactly `"production"` and `PAYSTACK_SECRET_KEY` was unset (the deployed default). Removed; PayFast's ITN handler in `routes/payments.ts` is the only payment webhook now. | `routes/webhooks.ts` |
+| AH-26 | TypeScript strict mode enabled — `strictNullChecks`, `noImplicitAny`, `strictFunctionTypes`, `noImplicitReturns` and `noFallthroughCasesInSwitch` all now `true`; `tsc --noEmit` is clean (see below) | `tsconfig.json` |
 
 Unit coverage: nine suites covering token typing, PayFast signatures, the
 CSRF guard, clinical safety thresholds, encryption AAD/rotation, the 2FA
@@ -111,7 +112,6 @@ AH-07 (integration tests) — closed 2026-09-08, see below for the full writeup.
 |----|---------|----------|
 | AH-32 | AI triage moved off the request thread to a BullMQ worker — landed 2026-09-08, unit-verified only, still needs a staging load-test run (see §4) | P0 for scale — verify before trusting at scale |
 | AH-33 | Storage moved to S3-compatible object storage 2026-09-08 (with a graceful fallback when unconfigured); the base64-JSON wire format and synchronous `sharp` processing are deliberately unchanged — see below | P1 for scale — partially addressed |
-| AH-26 | TypeScript strict is off — five flags disabled, `strict` never set | P1 |
 | AH-03b | Double-submit CSRF token, for defence in depth beyond the origin check | P2 |
 | AH-15 | Cross-border PHI transfer to AI providers not named in the consent record | P2 |
 | AH-34 | `demoStream` holds a `setInterval` per user in-process | P2 |
@@ -430,6 +430,72 @@ actions have no integration coverage yet. The harness this session built
 (register-a-patient helper, agent-based cookie sessions, the real-DB
 setup) is reusable for extending it; doing so wasn't in scope for closing
 this specific finding.
+
+### AH-26 — TypeScript strict mode — closed 2026-09-08
+
+`tsconfig.json` had `strictNullChecks`, `noImplicitAny`, `strictFunctionTypes`,
+`noImplicitReturns` and `noFallthroughCasesInSwitch` all explicitly set to
+`false`, and `strict` was never set either — none of the type-safety net
+`strict: true` implies was actually on. Turning all five on at once, rather
+than staging them, was tractable here because the codebase turned out to
+already be close to compliant — the "five flags disabled" framing suggested
+a large migration, but three of the five were free:
+
+- `strictFunctionTypes` and `noFallthroughCasesInSwitch`: already clean,
+  0 errors.
+- `strictNullChecks`: 9 errors across 5 files — a `fetch().json()` result
+  used without a type (`routes/healthConnect.ts`,
+  `services/evidenceProvider/providers/pubmed.ts`), a couple of
+  contextually-typed object literals TypeScript couldn't widen on its own
+  (`routes/patient.ts`, `scripts/seed-mock-patients.ts`), and one
+  `const parts = []` needing an explicit `string[]`
+  (`services/evidenceProvider/combiner.ts`).
+- `noImplicitAny`: 4 errors across 2 files — a `Record<string, number>`
+  lookup table and a filter callback needing an explicit type guard
+  (`(item): item is StoredTriageAttachment => Boolean(item)` in
+  `services/triageAttachments.ts`, so the array narrows from `(T | null)[]`
+  to `T[]` and `noImplicitAny` isn't blocking downstream inference on the
+  `null` case it just checked for).
+
+`noImplicitReturns` (TS7030 — "not all code paths return a value") was the
+one flag that actually earned the "five flags disabled" framing: 62 errors
+across 20 files. Every Express route handler in this codebase follows the
+same shape — `try { ...; res.json(...) } catch (error) { next(error); }` —
+and `noImplicitReturns` treats a bare `res.json(...)` (which returns
+`Response`, not `void`) as a path that returns a value, so a sibling path
+ending in a bare `next(error)` (which returns `void`) is flagged as the one
+that *doesn't*. None of this is a real defect — Express ignores a route
+handler's return value entirely — but the fix is genuine and mechanical:
+prefix every terminal `res.json(...)` / `res.status(...).json(...)` /
+`next(error)` in every affected handler with `return`, so every path
+through the function returns the same thing. Fifty of the sixty-two
+occurrences were the exact same `next(error);` → `return next(error);`
+substitution inside a `catch` block, applied by script across
+`routes/{auth,bookings,consent,healthConnect,patient,rook,terra,triage,
+triageCaseReview,twoFactor,webhooks}.ts` (safe because `next` returns
+`void`, so wrapping it in `return` changes nothing observable). The
+remaining twelve needed the same `return` added by hand to a handler's
+non-catch success path — `middleware/{auth,requireRole}.ts`,
+`routes/{admin,bookings,messages,nurse,patient,payments,profile,
+triageCases,visits}.ts`, and `services/queue.ts`'s `addEmailJob` (its
+no-Redis fallback branch fell off the end of an `async` function after a
+fire-and-forget `sendEmail(...).catch(...)`, so it needed an explicit
+`return undefined;` rather than a wrapped statement).
+
+**Verified, not just compiled:** `tsc --noEmit` is clean (0 errors);
+`eslint src` reports 0 errors (185 pre-existing `no-explicit-any` /
+`no-unused-vars` warnings, none introduced by this change); the full unit
+suite (124 tests, 13 suites) and the full integration suite (11 tests, 3
+suites, against a real disposable PostgreSQL per AH-07) both pass unchanged
+— this was a type-level and control-flow-shape change only, with no
+behavioral edit to any handler.
+
+**Not done:** `strict: true` itself was deliberately not set — the flags
+enabled here are the five that were explicitly listed as `false`. `strict`
+also implies `noImplicitThis`, `alwaysStrict`, and `strictPropertyInitialization`,
+none of which were audited as part of this finding; flipping `strict: true`
+outright risks turning on flags nobody has checked for this codebase yet,
+which is a separate, smaller finding if it's wanted.
 
 ### Then measure
 

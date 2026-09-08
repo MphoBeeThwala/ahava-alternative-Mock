@@ -267,7 +267,7 @@ router.post('/connect', authMiddleware, async (req: Request, res: Response, next
     });
   } catch (error: any) {
     console.error('[rook] Connect failed:', error.response?.data || error.message);
-    next(error);
+    return next(error);
   }
 });
 
@@ -288,7 +288,7 @@ router.post('/disconnect', authMiddleware, async (req: Request, res: Response, n
 
     res.json({ success: true });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -309,7 +309,7 @@ router.get('/status', authMiddleware, async (req: Request, res: Response, next: 
       rookUserId: user?.rookUserId ?? null,
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 });
 
@@ -441,7 +441,7 @@ export async function handleRookWebhook(
     res.status(200).json({ success: true });
   } catch (error) {
     console.error('[rook] Webhook error:', error);
-    next(error);
+    return next(error);
   }
 }
 
