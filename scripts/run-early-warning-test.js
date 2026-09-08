@@ -1,6 +1,6 @@
 /**
  * Early warning test: send 14 days of normal readings + 1 anomalous reading per user via API
- * so ML service establishes baseline and then triggers an alert. Assert GET /api/patient/alerts.
+ * so ML service establishes baseline and then triggers an alert. Assert GET /api/v1/patient/alerts.
  *
  * Run after seeding mock patients. Ensure Backend + ML service are running.
  *
@@ -23,7 +23,7 @@ function pad(n) {
 }
 
 async function login(email) {
-  const res = await fetch(`${BASE_URL}/api/auth/login`, {
+  const res = await fetch(`${BASE_URL}/api/v1/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password: PASSWORD }),
@@ -34,7 +34,7 @@ async function login(email) {
 }
 
 async function submitBiometrics(token, payload) {
-  const res = await fetch(`${BASE_URL}/api/patient/biometrics`, {
+  const res = await fetch(`${BASE_URL}/api/v1/patient/biometrics`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -48,7 +48,7 @@ async function submitBiometrics(token, payload) {
 }
 
 async function getAlerts(token) {
-  const res = await fetch(`${BASE_URL}/api/patient/alerts`, {
+  const res = await fetch(`${BASE_URL}/api/v1/patient/alerts`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   const data = await res.json().catch(() => ({}));

@@ -95,6 +95,7 @@ found and fixed the same day (repo hygiene pass, see commit history).
 | AH-02b | Rate limiters used an in-memory store; limits were per-replica and reset on deploy | `middleware/rateLimiter.ts` |
 | AH-08 | Auth cache was per-replica; deactivation lagged up to 300s across the fleet — and the suspend endpoint never invalidated it at all, even locally | `middleware/auth.ts`, `routes/admin.ts` |
 | AH-39 | CI installed with `--no-frozen-lockfile`; tightened once the regenerated `pnpm-lock.yaml` landed in Phase 0 | `.github/workflows/ci.yml` |
+| AH-23 | No API versioning — every route now lives under `/api/v1/*` except the PayFast webhook (see §5) | `index.ts` |
 | AH-41 (new) | `routes/webhooks.ts` carried a second, unauthenticated "POST /payment" webhook from before the PayFast migration that marked payments `COMPLETED` with none of AH-04/05's checks — its signature check failed *open* whenever `NODE_ENV` wasn't exactly `"production"` and `PAYSTACK_SECRET_KEY` was unset (the deployed default). Removed; PayFast's ITN handler in `routes/payments.ts` is the only payment webhook now. | `routes/webhooks.ts` |
 
 Partial coverage also landed for AH-07 (tests): four unit suites covering token
@@ -111,7 +112,6 @@ plus new suites for the AH-13 encryption AAD/rotation and AH-29 2FA flow.
 | AH-07 | Integration and end-to-end tests still absent | P1 |
 | AH-03b | Double-submit CSRF token, for defence in depth beyond the origin check | P2 |
 | AH-15 | Cross-border PHI transfer to AI providers not named in the consent record | P2 |
-| AH-23 | No API versioning | P2 |
 | AH-34 | `demoStream` holds a `setInterval` per user in-process | P2 |
 | AH-35 | The Render `plan: starter` (0.5 vCPU) sizing this was measured against no longer applies — Render was removed in favour of Railway-only (§6). Re-measure against whatever Railway tier is actually deployed before assuming the bcrypt-saturation finding still holds at the same concurrency | P0 for scale — re-verify |
 | AH-36 | Biometrics ingest — partially addressed 2026-09-08, see below | P1 for scale (downgraded — see note) |
@@ -391,7 +391,24 @@ aspiration rather than a claim. Tune `PRISMA_CONNECTION_LIMIT` and
   `requireConsent`, and version the consent text so it names the offshore
   processors and the transfer. POPIA s72 applies to symptom narratives.
   Retention periods for the consent text to cite are now decided (§6 item 3).
-- **AH-23** Move to `/api/v1/*` before a mobile client is in the field.
+- ~~**AH-23** Move to `/api/v1/*` before a mobile client is in the field.~~
+  **Closed 2026-09-08.** Every route moved except `/api/payments/webhook`,
+  kept mounted at its original path too — PayFast's ITN URL is configured
+  in PayFast's own dashboard, outside this codebase, and renaming it here
+  would silently stop payment confirmations until someone updated that
+  dashboard by hand. The frontend's browser-facing surface is unchanged
+  (`/api/*`); only its proxy (`workspace/src/app/api/[...path]/route.ts`)
+  knows the backend is versioned. Caught two real bugs on the way: the
+  `middleware/originGuard.ts` webhook exemption list had two dead entries
+  (`/api/terra/webhook`, `/api/rook/webhook`) that matched no real
+  route — Terra/ROOK webhooks only ever land on `/webhooks/terra` and
+  `/webhooks/rook`, already covered by the `/webhooks` prefix — removed;
+  and `downloadUrl` for prescription/referral PDFs
+  (`routes/triage.ts`, `routes/triageCaseReview.ts`) included a leading
+  `/api` that, combined with `apiClient`'s own `/api` baseURL, meant every
+  prescription/referral PDF download was hitting `/api/api/...` and
+  404ing — fixed by dropping the prefix at the source (verified against
+  axios's actual `combineURLs` behaviour, not assumed).
 - **POPIA operations** Data export and erasure endpoints, a retention schedule,
   and a purge job. The `ExportJob` model already exists as a starting point.
   Retention periods decided (§6 item 3); the schedule/purge job itself is

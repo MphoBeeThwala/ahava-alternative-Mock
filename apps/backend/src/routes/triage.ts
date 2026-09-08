@@ -104,7 +104,11 @@ function serializePatientTriageCase(triageCase: any) {
             ? triageCase.prescription.medications.length
             : 0,
           issuedAt: triageCase.prescription.issuedAt,
-          downloadUrl: `/api/triage-review/${triageCase.id}/prescription/pdf`,
+          // No /api prefix: the frontend fetches this via apiClient, whose
+          // baseURL is already "/api" — see the sibling fix in
+          // routes/triageCaseReview.ts for the pre-existing double-prefix
+          // bug this avoids (was /api/api/... and 404ing).
+          downloadUrl: `/triage-review/${triageCase.id}/prescription/pdf`,
           doctorName: triageCase.doctor
             ? `Dr. ${triageCase.doctor.firstName} ${triageCase.doctor.lastName}`
             : "Assigned doctor",
@@ -117,7 +121,7 @@ function serializePatientTriageCase(triageCase: any) {
           provisionalDiagnosis: triageCase.referral.provisionalDiagnosis,
           recommendedFacility: triageCase.referral.recommendedFacility,
           issuedAt: triageCase.referral.issuedAt,
-          downloadUrl: `/api/triage-review/${triageCase.id}/referral/pdf`,
+          downloadUrl: `/triage-review/${triageCase.id}/referral/pdf`,
           doctorName: triageCase.doctor
             ? `Dr. ${triageCase.doctor.firstName} ${triageCase.doctor.lastName}`
             : "Assigned doctor",

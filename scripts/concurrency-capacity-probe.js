@@ -38,7 +38,7 @@ async function oneIteration() {
   const t = { login: 0, me: 0, bookings: 0, monitor: 0 };
   let r;
 
-  r = await req('/api/auth/login', {
+  r = await req('/api/v1/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email: EMAIL, password: PASSWORD })
@@ -50,15 +50,15 @@ async function oneIteration() {
   if (!token) return { ok:false, step:'login-token', status:200, t, detail:'missing token' };
   const h = { Authorization: `Bearer ${String(token).trim()}` };
 
-  r = await req(`/api/auth/me?t=${Date.now()}`, { headers: h });
+  r = await req(`/api/v1/auth/me?t=${Date.now()}`, { headers: h });
   t.me = r.ms;
   if (!r.ok) return { ok:false, step:'me', status:r.status, t, detail:r.body || r.error };
 
-  r = await req('/api/bookings?limit=10&offset=0', { headers: h });
+  r = await req('/api/v1/bookings?limit=10&offset=0', { headers: h });
   t.bookings = r.ms;
   if (!(r.ok || r.status === 304)) return { ok:false, step:'bookings', status:r.status, t, detail:r.body || r.error };
 
-  r = await req('/api/patient/monitoring/summary', { headers: h });
+  r = await req('/api/v1/patient/monitoring/summary', { headers: h });
   t.monitor = r.ms;
   if (!(r.ok || r.status === 304)) return { ok:false, step:'monitor', status:r.status, t, detail:r.body || r.error };
 

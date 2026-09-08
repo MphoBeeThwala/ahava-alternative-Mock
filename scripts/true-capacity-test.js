@@ -55,7 +55,7 @@ async function req(path, opts = {}) {
 async function ensureUser(i) {
   const email = emailFor(i);
   const xff = xffFor(i);
-  const reg = await req("/api/auth/register", {
+  const reg = await req("/api/v1/auth/register", {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Forwarded-For": xff },
     body: JSON.stringify({
@@ -88,7 +88,7 @@ async function ensureUser(i) {
     };
   }
 
-  const login = await req("/api/auth/login", {
+  const login = await req("/api/v1/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Forwarded-For": xff },
     body: JSON.stringify({ email, password: PASSWORD }),
@@ -112,7 +112,7 @@ async function runFlow(user, iterationIndex) {
   const t = { login: 0, me: 0, bookings: 0, monitor: 0, biometrics: 0 };
   let token = String(user.token || "").trim();
   if (LOGIN_EACH_FLOW) {
-    const login = await req("/api/auth/login", {
+    const login = await req("/api/v1/auth/login", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -144,7 +144,7 @@ async function runFlow(user, iterationIndex) {
     }
   }
   const relogin = async () => {
-    const login = await req("/api/auth/login", {
+    const login = await req("/api/v1/auth/login", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -162,7 +162,7 @@ async function runFlow(user, iterationIndex) {
 
   const h = { Authorization: `Bearer ${token}`, "X-Forwarded-For": user.xff };
 
-  let me = await req(`/api/auth/me?t=${Date.now()}_${iterationIndex}`, {
+  let me = await req(`/api/v1/auth/me?t=${Date.now()}_${iterationIndex}`, {
     headers: h,
   });
   if (!LOGIN_EACH_FLOW && me.status === 401) {
@@ -174,7 +174,7 @@ async function runFlow(user, iterationIndex) {
         Authorization: `Bearer ${token}`,
         "X-Forwarded-For": user.xff,
       };
-      me = await req(`/api/auth/me?t=${Date.now()}_${iterationIndex}_retry`, {
+      me = await req(`/api/v1/auth/me?t=${Date.now()}_${iterationIndex}_retry`, {
         headers: h2,
       });
     }
@@ -194,7 +194,7 @@ async function runFlow(user, iterationIndex) {
     "X-Forwarded-For": user.xff,
   };
 
-  const bookings = await req("/api/bookings?limit=10&offset=0", {
+  const bookings = await req("/api/v1/bookings?limit=10&offset=0", {
     headers: activeHeaders,
   });
   t.bookings = bookings.ms;
@@ -207,7 +207,7 @@ async function runFlow(user, iterationIndex) {
       detail: bookings.body || bookings.error,
     };
 
-  const monitor = await req("/api/patient/monitoring/summary", {
+  const monitor = await req("/api/v1/patient/monitoring/summary", {
     headers: activeHeaders,
   });
   t.monitor = monitor.ms;
@@ -220,7 +220,7 @@ async function runFlow(user, iterationIndex) {
       detail: monitor.body || monitor.error,
     };
 
-  const biometrics = await req("/api/patient/biometrics", {
+  const biometrics = await req("/api/v1/patient/biometrics", {
     method: "POST",
     headers: { ...activeHeaders, "Content-Type": "application/json" },
     body: JSON.stringify({

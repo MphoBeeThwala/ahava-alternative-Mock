@@ -29,13 +29,23 @@ import { NextFunction, Request, Response } from "express";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
-/** Signature-verified server-to-server callbacks: no Origin, not forgeable. */
+/**
+ * Signature-verified server-to-server callbacks: no Origin, not forgeable.
+ *
+ * AH-23: /api/payments/webhook is listed at both its original path (still
+ * mounted there — see index.ts, PayFast's dashboard points at it directly)
+ * and the new /api/v1 one, so either keeps working regardless of which the
+ * ITN is actually configured against. /api/terra/webhook and
+ * /api/rook/webhook never corresponded to real routes — Terra/ROOK webhooks
+ * only ever arrive at /webhooks/terra and /webhooks/rook (already covered
+ * by the /webhooks prefix below) — removed rather than carried forward
+ * versioned, since they exempted nothing.
+ */
 const EXEMPT_PATH_PREFIXES = [
   "/webhooks",
   "/api/payments/webhook",
-  "/api/terra/webhook",
-  "/api/rook/webhook",
-  "/api/biometrics/health-connect",
+  "/api/v1/payments/webhook",
+  "/api/v1/biometrics/health-connect",
 ];
 
 function normalizeOrigin(value: string): string | null {

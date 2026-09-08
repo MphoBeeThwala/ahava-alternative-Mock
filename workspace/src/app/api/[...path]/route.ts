@@ -63,7 +63,11 @@ async function proxy(req: NextRequest, path: string[]) {
 
   const baseUrl = getBackendBaseUrl().replace(/\/+$/, "");
   const targetPath = path.map(encodeURIComponent).join("/");
-  const targetUrl = `${baseUrl}/api/${targetPath}${req.nextUrl.search}`;
+  // AH-23: the browser-facing surface stays "/api/*" (this route's own
+  // path) — only the backend-facing target is versioned. Every browser
+  // call goes through this one proxy, so this is the only place that
+  // needs to know the API is versioned at all.
+  const targetUrl = `${baseUrl}/api/v1/${targetPath}${req.nextUrl.search}`;
 
   const headers = buildUpstreamHeaders(req);
 

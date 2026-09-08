@@ -191,28 +191,38 @@ app.get("/", (req, res) => {
   res.redirect(302, "/health");
 });
 
-// API routes
-app.use("/api/auth", authRoutes);
-app.use("/api/auth/2fa", twoFactorRoutes);
-app.use("/api/bookings", authMiddleware, bookingRoutes);
-app.use("/api/visits", authMiddleware, visitRoutes);
-app.use("/api/messages", authMiddleware, messageRoutes);
+// AH-23: versioned API. A mobile client can't be force-upgraded off an old
+// response shape the way a web deploy can, so the contract is pinned before
+// one exists (docs/ENGINEERING_PLAN.md). /api/v1/* is the real, current API.
+//
+// /api/payments is additionally kept mounted at its original, unversioned
+// path — deliberately, not as a migration shim. PayFast's ITN callback URL
+// is configured in PayFast's own merchant dashboard, outside this codebase;
+// renaming it here would silently stop payment confirmations from arriving
+// until someone manually updates that dashboard. Every other route moved.
+const API_V1 = "/api/v1";
+app.use(`${API_V1}/auth`, authRoutes);
+app.use(`${API_V1}/auth/2fa`, twoFactorRoutes);
+app.use(`${API_V1}/bookings`, authMiddleware, bookingRoutes);
+app.use(`${API_V1}/visits`, authMiddleware, visitRoutes);
+app.use(`${API_V1}/messages`, authMiddleware, messageRoutes);
 // NOTE: no app-level auth on payments - the PayFast ITN webhook is a
 // server-to-server callback that cannot present a JWT. It is protected by
 // PayFast signature verification instead; all other payment routes enforce
 // authMiddleware/requireAdmin inline.
-app.use("/api/payments", paymentRoutes);
-app.use("/api/admin", authMiddleware, adminRoutes);
-app.use("/api/triage", authMiddleware, triageRoutes);
-app.use("/api/triage-cases", authMiddleware, triageCasesRoutes);
-app.use("/api/triage-review", authMiddleware, triageCaseReviewRoutes);
-app.use("/api/nurse", authMiddleware, nurseRoutes);
-app.use("/api/patient", authMiddleware, patientRoutes);
-app.use("/api/profile", profileRoutes);
-app.use("/api/terra", terraRoutes);
-app.use("/api/rook", rookRoutes);
-app.use("/api/consent", authMiddleware, consentRoutes); // moved from /api/patient/consent to avoid prefix conflict
-app.use("/api/biometrics/health-connect", healthConnectRoutes);
+app.use("/api/payments", paymentRoutes); // unversioned: see comment above
+app.use(`${API_V1}/payments`, paymentRoutes);
+app.use(`${API_V1}/admin`, authMiddleware, adminRoutes);
+app.use(`${API_V1}/triage`, authMiddleware, triageRoutes);
+app.use(`${API_V1}/triage-cases`, authMiddleware, triageCasesRoutes);
+app.use(`${API_V1}/triage-review`, authMiddleware, triageCaseReviewRoutes);
+app.use(`${API_V1}/nurse`, authMiddleware, nurseRoutes);
+app.use(`${API_V1}/patient`, authMiddleware, patientRoutes);
+app.use(`${API_V1}/profile`, profileRoutes);
+app.use(`${API_V1}/terra`, terraRoutes);
+app.use(`${API_V1}/rook`, rookRoutes);
+app.use(`${API_V1}/consent`, authMiddleware, consentRoutes); // moved from /api/patient/consent to avoid prefix conflict
+app.use(`${API_V1}/biometrics/health-connect`, healthConnectRoutes);
 app.use("/webhooks", webhookRoutes);
 
 // WebSocket initialization
