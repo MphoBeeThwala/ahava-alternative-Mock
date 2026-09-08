@@ -28,7 +28,7 @@ function getDefaultJobOptions() {
   };
 }
 
-export const initializeQueue = async (connection: Redis) => {
+export const initializeQueue = async (connection: any) => {
   pdfExportQueue = new Queue(QUEUE_NAMES.PDF_EXPORT, {
     connection,
     defaultJobOptions: {
