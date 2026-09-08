@@ -733,6 +733,29 @@ router.get(
   },
 );
 
+function calculateMedicalPassportCompletion(
+  passport: Record<string, any> | undefined,
+): number {
+  if (!passport || typeof passport !== "object") return 0;
+  const fields = [
+    "emergencyContactName",
+    "emergencyContactPhone",
+    "bloodType",
+    "allergies",
+    "chronicConditions",
+    "currentMedications",
+  ];
+  const filledFields = fields.filter(
+    (f) =>
+      passport[f] !== null &&
+      passport[f] !== undefined &&
+      (Array.isArray(passport[f])
+        ? passport[f].length > 0
+        : String(passport[f]).trim().length > 0),
+  );
+  return Math.round((filledFields.length / fields.length) * 100);
+}
+
 const riskProfileSchema = Joi.object({
   smoker: Joi.boolean().optional(),
   hypertension: Joi.boolean().optional(),
@@ -790,23 +813,46 @@ router.patch(
           ? (incomingRiskProfile.medicalPassport as Record<string, unknown>)
           : undefined;
 
+      const mergedMedicalPassport = incomingMedicalPassport
+        ? {
+            ...(currentMedicalPassport ?? {}),
+            ...incomingMedicalPassport,
+          }
+        : undefined;
+
       const merged = {
         ...currentRiskProfile,
         ...incomingRiskProfile,
-        ...(incomingMedicalPassport
+        ...(mergedMedicalPassport
           ? {
-              medicalPassport: {
-                ...(currentMedicalPassport ?? {}),
-                ...incomingMedicalPassport,
-              },
+              medicalPassport: mergedMedicalPassport,
             }
           : {}),
         updatedAt: new Date().toISOString(),
       };
 
+      // Always keep passportCompletionPercent in sync with the actual
+      // merged medical passport data so it never goes stale/reverts.
+      if (mergedMedicalPassport) {
+        merged.passportCompletionPercent = calculateMedicalPassportCompletion(
+          mergedMedicalPassport,
+        );
+      }
+
       const updatedUser = await prisma.user.update({
         where: { id: userId },
-        data: { riskProfile: merged as object },
+        data: {
+          riskProfile: {
+            ...merged,
+            // Safety check: ensure completion % is never dropped during
+            // the write even if something upstream mutated `merged`.
+            passportCompletionPercent:
+              merged.passportCompletionPercent ??
+              (currentRiskProfile as Record<string, unknown>)
+                .passportCompletionPercent ??
+              0,
+          } as object,
+        },
         select: { riskProfile: true },
       });
       await invalidateCachedUser(userId);
