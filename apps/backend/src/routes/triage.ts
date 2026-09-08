@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { analyzeSymptoms } from "../services/aiTriage";
+import { assessDeterministicRisk } from "../services/triageSafety";
 import {
   authMiddleware,
   AuthenticatedRequest,
@@ -8,11 +8,12 @@ import {
 import { rateLimiter } from "../middleware/rateLimiter";
 import { requireConsent } from "../middleware/consentMiddleware";
 import { aiTriageBudgetMiddleware } from "../middleware/aiTriageBudget";
-import { calculateSlaDeadline, getDoctorFee } from "../jobs/triageEscalation";
-import { broadcastToUsers, sendToUser } from "../services/websocket";
+import { calculateSlaDeadline, getDoctorFee } from "../services/triageSla";
+import { processAiTriageJob } from "../jobs/aiTriageJob";
+import { addAiTriageJob } from "../services/queue";
+import { sendToUser } from "../services/websocket";
 import prisma from "../lib/prisma";
-import { randomUUID } from "crypto";
-import { hashValue, writeClinicalAudit } from "../services/clinicalAudit";
+import { writeClinicalAudit } from "../services/clinicalAudit";
 import { sanitizeDataUrlImage } from "../utils/imageUtils";
 import {
   assertLabAttachmentCount,
@@ -24,7 +25,6 @@ import {
 } from "../services/triageAttachments";
 
 const router: Router = Router();
-const SYMPTOM_PREVIEW_LENGTH = 280;
 
 const patientTriageCaseInclude = {
   doctor: {
@@ -276,7 +276,6 @@ router.post(
         ? req.body.labResultFiles
         : [];
       const patientId = req.user?.id;
-      const caseId = randomUUID();
 
       if (!symptoms) {
         return res
@@ -485,18 +484,17 @@ router.post(
       }
       // ─────────────────────────────────────────────────────────────────────
 
-      const result = await analyzeSymptoms({
-        symptoms,
-        imageBase64,
-        patientContext,
-        patientId,
-        caseId,
-        vitalsSnapshot: latestVitalsSnapshot,
-      });
-
+      // AH-32: assessDeterministicRisk is pure and fast — the clinical
+      // safety floor, computed synchronously instead of waiting on the LLM.
+      // Because the real analysis can only ever narrow the final level to
+      // be *at least* this urgent (mergeGuardrails takes the min of the two
+      // in services/aiTriage.ts), this interim level is never optimistic
+      // relative to where the case will land once the AI job completes.
+      const risk = assessDeterministicRisk(symptoms, latestVitalsSnapshot);
       const now = new Date();
-      const slaDeadline = calculateSlaDeadline(result.triageLevel, now);
-      const feeCents = getDoctorFee(result.triageLevel);
+      const interimSlaDeadline = calculateSlaDeadline(risk.minTriageLevel, now);
+      const interimFeeCents = getDoctorFee(risk.minTriageLevel);
+      const floorFlags = [...risk.hardFlags, ...risk.cautionFlags];
 
       const triageCase = await prisma.triageCase.create({
         data: {
@@ -509,87 +507,70 @@ router.post(
                   attachments: storedAttachments,
                 })
               : undefined,
-          aiTriageLevel: result.triageLevel,
-          aiRecommendedAction: result.recommendedAction,
-          aiPossibleConditions: result.possibleConditions,
-          aiReasoning: result.reasoning,
-          slaDeadline,
-          doctorFeeCents: feeCents,
-          aiModel: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514",
-          aiContextUsed: !!patientContext,
-          statPearlsUsed: result.evidenceSources.includes("StatPearls/NCBI"),
+          aiTriageLevel: risk.minTriageLevel,
+          aiRecommendedAction:
+            "Preliminary deterministic safety assessment — full AI analysis in progress.",
+          aiPossibleConditions: [],
+          aiReasoning:
+            floorFlags.length > 0
+              ? `Deterministic safety rules flagged: ${floorFlags.join(", ")}. Full AI analysis in progress.`
+              : "No deterministic red flags detected. Full AI analysis in progress.",
+          slaDeadline: interimSlaDeadline,
+          doctorFeeCents: interimFeeCents,
+          aiContextUsed: false,
+          statPearlsUsed: false,
         },
       });
 
       await writeClinicalAudit({
         userId: patientId,
         userRole: req.user?.role,
-        action: "AI_TRIAGE_DECISION",
+        action: "AI_TRIAGE_SUBMITTED",
         resource: "triage_case",
         resourceId: triageCase.id,
         metadata: {
-          caseId,
-          triageLevel: result.triageLevel,
-          confidence: result.confidence,
-          requiresDoctorReview: result.requiresDoctorReview,
-          uncertaintyFlags: result.uncertaintyFlags,
-          evidenceSources: result.evidenceSources,
-          aiContextUsed: !!patientContext,
-          statPearlsUsed: result.evidenceSources.includes("StatPearls/NCBI"),
+          deterministicFloorLevel: risk.minTriageLevel,
+          deterministicFlags: floorFlags,
           attachmentCount: storedAttachments.length,
-          symptomsHash: hashValue(symptoms),
         },
       });
 
-      // Notify all available doctors via WebSocket that a new case needs review
-      try {
-        const availableDoctors = await prisma.user.findMany({
-          where: { role: "DOCTOR", isAvailable: true, isActive: true },
-          select: { id: true },
-        });
-        if (availableDoctors.length > 0) {
-          broadcastToUsers(
-            availableDoctors.map((d) => d.id),
-            {
-              type: "NEW_TRIAGE_CASE",
-              data: {
-                triageCaseId: triageCase.id,
-                triageLevel: result.triageLevel,
-                slaDeadline: slaDeadline.toISOString(),
-                symptoms: symptoms.slice(0, SYMPTOM_PREVIEW_LENGTH),
-                attachmentCount: storedAttachments.length,
-                createdAt: new Date().toISOString(),
-              },
-            },
-          );
-        }
-      } catch (wsErr) {
-        console.warn(
-          "[triage] WebSocket notify doctors failed (non-fatal):",
-          (wsErr as Error).message,
-        );
+      const jobData = {
+        caseId: triageCase.id,
+        patientId,
+        symptoms,
+        patientContext,
+        vitalsSnapshot: latestVitalsSnapshot,
+      };
+      const enqueued = await addAiTriageJob(jobData);
+      if (!enqueued) {
+        // No Redis/queue configured — run inline so the case doesn't get
+        // stuck showing only the interim placeholder forever. This is
+        // exactly today's pre-AH-32 behaviour: the request blocks on the
+        // AI call, just via the same code path the worker uses.
+        await processAiTriageJob(jobData);
       }
 
-      // Return acknowledgement only — NOT the AI result
-      // Patient receives the result via WebSocket when doctor releases it
-      // Return acknowledgement only — NOT the AI result
-      // Patient receives the result via WebSocket when doctor releases it
+      // Return acknowledgement only — NOT the AI result.
+      // Patient receives the result via WebSocket when doctor releases it.
+      // These figures reflect the interim deterministic-floor assessment;
+      // the case's real values are updated once the AI job completes.
       res.json({
         success: true,
         status: "PENDING_REVIEW",
         triageCaseId: triageCase.id,
-        slaDeadline: slaDeadline.toISOString(),
-        requiresDoctorReview: result.requiresDoctorReview,
+        slaDeadline: interimSlaDeadline.toISOString(),
+        requiresDoctorReview: true,
         meta: {
           estimatedWaitMinutes: { 1: 5, 2: 15, 3: 60, 4: 240, 5: 480 }[
-            result.triageLevel
+            risk.minTriageLevel
           ],
           attachmentCount: storedAttachments.length,
           disclaimer:
             "Not a medical diagnosis. Tool for decision support only. Sent to doctor for review.",
-          satsLevel: result.triageLevel,
+          satsLevel: risk.minTriageLevel,
           slaMinutes: { 1: 5, 2: 15, 3: 60, 4: 240, 5: 480 }[
-            result.triageLevel
+            risk.minTriageLevel
           ],
         },
       });

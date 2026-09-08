@@ -105,7 +105,7 @@ plus new suites for the AH-13 encryption AAD/rotation and AH-29 2FA flow.
 
 | ID | Finding | Priority |
 |----|---------|----------|
-| AH-32 | AI triage is `await`ed inside the HTTP handler — the primary blocker to 5,000 concurrent | P0 for scale |
+| AH-32 | AI triage moved off the request thread to a BullMQ worker — landed 2026-09-08, unit-verified only, still needs a staging load-test run (see §4) | P0 for scale — verify before trusting at scale |
 | AH-33 | Image processing runs in-process on base64 inside a 20 MB JSON body | P1 for scale |
 | AH-26 | TypeScript strict is off — five flags disabled, `strict` never set | P1 |
 | AH-07 | Integration and end-to-end tests still absent | P1 |
@@ -198,28 +198,62 @@ pooling with a per-replica `connection_limit` cap (`lib/prisma.ts`), WebSocket
 Redis pub/sub fan-out across replicas, BullMQ for email, push and PDF export,
 and Redis-cached auth removing login contention.
 
-### AH-32 — move AI triage off the request path
+### AH-32 — move AI triage off the request path — landed 2026-09-08, unit-verified only
 
-`routes/triage.ts:488` awaits `analyzeSymptoms()` inside the HTTP handler. That
-is a multi-second LLM call holding a socket, an event-loop slot and potentially
-a database connection. At 5,000 concurrent with 5% submitting triage, roughly
-250 requests sit parked on an external provider. Everything else in this phase
-is secondary to it.
+Implemented essentially as designed above:
 
-The infrastructure needed already exists and is unused for this path:
+1. `POST /api/triage` runs `assessDeterministicRisk` synchronously (pure,
+   fast, the clinical safety floor) and creates the `TriageCase` in
+   `PENDING_REVIEW` immediately, with the floor's level as an interim
+   `aiTriageLevel` — placeholder `aiRecommendedAction`/`aiReasoning` text
+   says analysis is in progress. Because `mergeGuardrails`
+   (`services/aiTriage.ts`) always takes `min(aiLevel, floorLevel)`, this
+   interim state is never optimistic relative to where the real analysis
+   lands — it can only get *more* urgent once the AI job completes, never less.
+2. `services/queue.ts` gained an `ai-triage` BullMQ queue; a worker calls
+   `jobs/aiTriageJob.ts`'s `processAiTriageJob`, which re-fetches the case,
+   runs the real `analyzeSymptoms`, updates `aiTriageLevel` /
+   `aiRecommendedAction` / `aiPossibleConditions` / `aiReasoning` /
+   `slaDeadline` / `doctorFeeCents`, writes the `AI_TRIAGE_DECISION` audit
+   entry, and *then* sends the same single `NEW_TRIAGE_CASE` WebSocket
+   notification to available doctors the synchronous flow used to send
+   immediately — same notification, later trigger point.
+3. The image is not carried through the job payload — it was already
+   persisted on `TriageCase.imageStorageRef` by the synchronous submission
+   step, so the worker reads it back from there rather than pushing base64
+   through Redis (the queue equivalent of AH-33's concern).
+4. **No Redis configured → no silent gap.** `addAiTriageJob` returns
+   whether it actually enqueued; when it didn't (no `REDIS_URL`, the same
+   condition every other optional-Redis feature in this app already
+   handles), `routes/triage.ts` calls `processAiTriageJob` inline — same
+   function, so there's exactly one implementation of this logic, and a
+   case can never get stuck showing only the interim placeholder forever
+   just because Redis isn't configured.
+5. The patient-facing response shape is **unchanged** — same fields, same
+   meaning, just computed from the interim floor instead of the final AI
+   result. `workspace/src/app/patient/ai-doctor/page.tsx` already treats
+   `meta.estimatedWaitMinutes` as possibly absent (`?? 60`) and never reads
+   `requiresDoctorReview` at all, so no frontend change was needed.
 
-1. `POST /api/triage` validates, runs `assessDeterministicRisk` synchronously
-   (it is pure and fast, and it is the clinical safety floor), creates the
-   `TriageCase` in `PENDING_REVIEW`, enqueues an `ai-triage` BullMQ job, and
-   returns `202 Accepted` with the case id.
-2. A worker runs `analyzeSymptoms`, writes the result, and emits over the
-   existing WebSocket fan-out.
-3. The client subscribes to the case instead of blocking on the response.
-4. Job failure leaves the case in `PENDING_REVIEW` with a flag — which is the
-   conservative outcome anyway, since a doctor reviews every case regardless.
+**Verified:** `tsc --noEmit`, lint, and the full unit suite all pass. A
+circular import was caught in the process — `services/queue.ts` needed
+`jobs/aiTriageJob.ts`, which needed `jobs/triageEscalation.ts` (for
+`calculateSlaDeadline`/`getDoctorFee`), which itself imports
+`services/queue.ts` for `addEmailJob`. Fixed by extracting those two pure
+functions into a new dependency-free `services/triageSla.ts`, now the
+shared source for `routes/triage.ts`, `jobs/aiTriageJob.ts` and
+`jobs/triageEscalation.ts` (which re-exports them for its existing
+importers). `services/triageSla.test.ts` covers the extracted functions.
 
-This changes the clinical flow's shape and needs a real staging run, not a unit
-test. It is deliberately not in the first branch.
+**Not verified — same caveat the original design carried:** this changes
+the clinical flow's shape and needs a real staging run under real
+concurrency with real AI providers in the loop, not a unit test. Nothing
+here confirms the worker actually keeps up under load, that BullMQ job
+latency stays acceptable at 5,000 concurrent, or that the interim-state
+window (typically sub-second when a worker is running, but unbounded if
+workers fall behind) stays short in practice. Run
+`scripts/load-test-patient-pipeline.js` against staging (see AH-37) before
+treating this as verified at scale.
 
 ### AH-02b — distributed rate-limit store — closed 2026-09-08
 
@@ -293,9 +327,11 @@ breaking those callers is a real design task on the Python side
 
 ### Then measure
 
-`scripts/load-test-patient-pipeline.js` exists but must run against staging with
-a real AI provider in the loop, after AH-32. Until that number exists, 5,000 is
-an aspiration rather than a claim. Tune `PRISMA_CONNECTION_LIMIT` and
+`scripts/load-test-patient-pipeline.js` exists but must run against staging
+with a real AI provider in the loop, now that AH-32 has landed (code-complete,
+not load-tested — see its section above) and against the API directly rather
+than the frontend proxy (AH-37). Until that number exists, 5,000 is an
+aspiration rather than a claim. Tune `PRISMA_CONNECTION_LIMIT` and
 `PRISMA_POOL_TIMEOUT` against the result, not against a guess.
 
 ---
