@@ -119,6 +119,7 @@ AH-07 (integration tests) — closed 2026-09-08, see below for the full writeup.
 | AH-36 | Biometrics ingest — partially addressed 2026-09-08, see below | P1 for scale (downgraded — see note) |
 | AH-37 | Load tests hit the Next.js proxy, so proxy and API latency are indistinguishable. Nobody knows which to fix. The load-test script already supports `BASE_URL` pointed at the API directly (it defaults there); the four historical runs just happened to target the production frontend domain instead — re-running against the real backend URL needs a live environment and is a manual step, not a code fix | P0 — measure first |
 | AH-38 | The primary dev machine's Application Control policy blocks `pnpm.exe`. `corepack pnpm` works around it, but a new engineer hits this on day one. Get pnpm allowlisted, or commit to builds happening only in CI and Docker | P1 — infrastructure |
+| AH-42 (new) | Frontend monolithic files — `lib/api.ts` and `doctor/dashboard/page.tsx` split 2026-09-08, no behavior change — see below. `patient/ai-doctor/page.tsx` (897 lines), `profile/page.tsx` (738), and `auth/signup/page.tsx` (562) follow the same pattern and are unsplit | P2 — maintainability, not correctness |
 
 ---
 
@@ -497,6 +498,49 @@ none of which were audited as part of this finding; flipping `strict: true`
 outright risks turning on flags nobody has checked for this codebase yet,
 which is a separate, smaller finding if it's wanted.
 
+### AH-42 — frontend monolithic files — partially addressed 2026-09-08
+
+`workspace/src/lib/api.ts` was 921 lines: one file holding the axios
+instance, both interceptors (session-refresh-on-401, the patient-role
+route guard), and every domain's request functions and response types —
+auth, patient/triage, bookings, visits, nurse, doctor, wearables, consent,
+admin. Split into `workspace/src/lib/api/` — `client.ts` for the axios
+instance and interceptors, one file per domain (`auth.ts`, `patient.ts`,
+`bookings.ts`, `visits.ts`, `nurse.ts`, `doctor.ts`, `wearables.ts`,
+`consent.ts`, `admin.ts`, `doctorProfile.ts`), and `index.ts` re-exporting
+all of them. No behavior change: `index.ts` re-exports the same names the
+921-line file did, so the 18 files across the app that
+`import { x } from '@/lib/api'` (or a relative equivalent) needed zero
+changes — module resolution finds `lib/api/index.ts` exactly where
+`lib/api.ts` used to be.
+
+`workspace/src/app/doctor/dashboard/page.tsx` was 954 lines: component
+state and every handler, plus the full JSX for two card-rendering loops
+(the AI triage queue and the nurse visit queue) and four complete modal
+forms (doctor review, prescription, emergency referral, follow-up
+request) all inline in one function. Extracted the two pure helper
+functions and five modal-state types to `_lib.ts`, the two card renderers
+to `_components/TriageCaseCard.tsx` and `_components/NurseVisitCard.tsx`,
+and the four modals to their own files under `_components/` — each takes
+its modal state, an `onChange`, and the submit handler as props, so the
+page keeps owning all state and API calls and the extracted files stay
+pure presentation. Page dropped from 954 to 414 lines.
+
+**Verified, not just compiled:** `tsc --noEmit` is clean, and
+`next build` compiles and generates all 24 routes successfully (the only
+build failure — an `EPERM` on a Windows-only symlink step in `next
+build`'s `standalone`-output file tracing — reproduces identically on the
+pre-refactor code too, so it's a pre-existing Windows dev-machine quirk
+unrelated to this change, not something it introduced; Railway's Linux
+build environment doesn't hit it).
+
+**Not done:** three more pages follow the identical God-component
+pattern and are unsplit — `patient/ai-doctor/page.tsx` (897 lines),
+`profile/page.tsx` (738), `auth/signup/page.tsx` (562). The same
+extraction approach (pure helpers and types to a `_lib.ts`, repeated
+JSX blocks to `_components/`, page keeps state/handlers) applies
+directly; deferred here for time, not because they're harder.
+
 ### Then measure
 
 `scripts/load-test-patient-pipeline.js` exists but must run against staging
@@ -554,12 +598,8 @@ aspiration rather than a claim. Tune `PRISMA_CONNECTION_LIMIT` and
 ## 6. Decisions from the product side — resolved 2026-09-08
 
 1. **Mobile approach: Capacitor, wrapping the existing Next.js app** —
-   confirmed. `android/` is still orphaned (no `capacitor.config`, no
-   `@capacitor/*` dependency, no synced web build) but is not being deleted:
-   it will be rebuilt clean as part of mobile enablement rather than
-   regenerated from scratch, since the native scaffold (package id, icons,
-   Health Connect activity) has some reusable value. See the mobile-strategy
-   assessment for the phased plan.
+   confirmed, and the orphaned `android/` scaffold has been reconnected
+   rather than rebuilt: see §8.
 2. **Payment column rename** (AH-20) — closed via an in-place `RENAME COLUMN`
    migration (`20260908130000`), not a wipe. Existing reference and gateway
    response data is preserved; no beta-database reset needed.
@@ -600,5 +640,79 @@ aspiration rather than a claim. Tune `PRISMA_CONNECTION_LIMIT` and
 | `SHUTDOWN_TIMEOUT_MS` | `15000` | Upper bound on the shutdown drain. |
 | `BACKEND_TIMEOUT_MS` | `30000` | Frontend proxy timeout to the API. |
 | `PRISMA_CONNECTION_LIMIT` | `10` | Per-replica Prisma pool size into PgBouncer. |
+| `CAPACITOR_SERVER_URL` | `https://app.ahavaon88.co.za` | Read at `cap sync`/build time by `workspace/capacitor.config.ts`. Override to point a locally built mobile app at a dev server instead of production. |
 
 Point the platform health probe at **`/ready`**, not `/health`.
+
+---
+
+## 8. Mobile enablement — Capacitor, 2026-09-08
+
+Confirms and implements the product decision in §6 item 1: the mobile app
+is the existing Next.js web app in a native shell, not a separate
+codebase. `capacitor.config.ts`'s `server.url` points the WebView at the
+deployed app (`https://app.ahavaon88.co.za` by default,
+`CAPACITOR_SERVER_URL`-overridable) instead of bundling a static copy of
+it — the right call specifically *because* this app is not static: cookie-
+session auth, a WebSocket connection, and the `/api/[...path]` server-side
+proxy all assume a real Next.js server behind the page, which a static
+export can't provide. The practical benefit: the WebView loads the real
+`app.ahavaon88.co.za` origin, so the existing cookie/CSRF/CORS setup needs
+no special-casing for a `capacitor://` or `https://localhost` origin the
+way a bundled-assets Capacitor app would — it's just another browser
+hitting the same site.
+
+**`android/` was not generated from scratch.** A native Android project
+already existed at the repo root — orphaned by an earlier, unrelated
+cleanup (AH-16/17 removed a *different*, dead Vite/Capacitor app root, and
+this native scaffold was deliberately kept rather than deleted, per §6
+item 1's original note). It carries real, non-regeneratable work: a
+Health-Connect permissions rationale activity
+(`HealthConnectPrivacyPolicyActivity.kt`, required by Google Play policy
+for apps requesting Health Connect data), the actual Health Connect
+`<uses-permission>` declarations and `capacitor-health`/`@capacitor/device`
+plugin wiring in `AndroidManifest.xml` and `capacitor.settings.gradle`, a
+`FileProvider` (needed for the triage image-upload flow), a
+`network_security_config.xml` scoped to allow cleartext only to the
+Android emulator's `10.0.2.2` loopback alias, and branded launcher/splash
+assets — none of which `cap add android` regenerates. It's moved to
+`workspace/android/` (git-mv'd, history preserved) so it sits next to the
+`capacitor.config.ts` that now drives it, `@capacitor/device` and
+`capacitor-health` are installed to match what it already referenced, and
+`cap sync` was run to regenerate only what's meant to be
+generated — confirmed by diffing: the sync touched exactly
+`capacitor.settings.gradle` (rewriting stale `pnpm` store paths from a
+prior install to the current ones) and the `assets/public` web-asset copy;
+every custom file was untouched. The placeholder privacy-policy URL in
+`HealthConnectPrivacyPolicyActivity.kt` (`your-frontend.up.railway.app`)
+is updated to the real route, `app.ahavaon88.co.za/legal/privacy-policy`.
+
+**iOS has no equivalent prior art** — `cap add ios` scaffolded
+`workspace/ios/` fresh, with default (unbranded) icons/launch screen and
+no Health Connect equivalent (HealthKit, if wanted, is a separate,
+unbuilt integration).
+
+**Verified:** `cap sync` (both platforms) completes cleanly and reports
+both plugins detected (`@capacitor/device`, `capacitor-health`) on
+Android and iOS. `git status` after the sync confirms no unexpected
+file changes.
+
+**Not done, and not doable from this environment:**
+- **Building an actual installable binary.** `npx cap add android`
+  scaffolds a Gradle project; building it needs a JDK, the Android SDK,
+  and Gradle able to download dependencies — none present on this
+  machine (no `java`, no `gradle` on `PATH`). `npx cap open android`
+  opens the project in Android Studio, which has to run on a machine
+  that has it installed.
+- **iOS entirely.** Building, running, or even opening the scaffolded
+  Xcode project requires a Mac with Xcode — categorically unavailable
+  here, not just unconfigured.
+- **Branding.** iOS's icons/launch screen are Capacitor's defaults, not
+  the app's actual mark. Android's are real assets already in the
+  scaffold; nothing to redo there.
+- **Push notifications.** `android/app/build.gradle` already
+  conditionally applies the `google-services` Gradle plugin if
+  `google-services.json` is present, but no such file exists yet — Push
+  is guarded off, not broken.
+- **Store listings, signing keys, and submission** — all a separate,
+  largely non-code workstream.

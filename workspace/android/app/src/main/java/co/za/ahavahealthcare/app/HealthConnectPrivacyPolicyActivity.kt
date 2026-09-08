@@ -26,8 +26,7 @@ class HealthConnectPrivacyPolicyActivity : Activity() {
                     request: WebResourceRequest?
                 ): Boolean = false
             }
-            // Replace with your deployed frontend URL when in production
-            val privacyUrl = "https://your-frontend.up.railway.app/privacy"
+            val privacyUrl = "https://app.ahavaon88.co.za/legal/privacy-policy"
             loadUrl(privacyUrl)
         }
 

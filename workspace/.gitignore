@@ -40,3 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Capacitor — android/ and ios/ each carry their own generated .gitignore
+# (from `cap add`) covering their build output; nothing extra needed here.
