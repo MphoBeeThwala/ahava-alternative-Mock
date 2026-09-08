@@ -40,11 +40,34 @@ describe("assessDeterministicRisk", () => {
       expect(result.hardFlags).toHaveLength(0);
     });
 
-    // KNOWN GAP (AH-24): the red-flag patterns are anchored with \b and are
-    // singular, so "seizures", "collapsing" and similar inflections do not
-    // match. A patient writing "he is having seizures" is not escalated.
-    // Left failing-by-omission rather than silently pinned as correct.
-    it.todo("escalates plural and inflected red-flag terms");
+    // AH-24 (fixed): the red-flag patterns were anchored with \b and were
+    // singular, so "seizures", "collapsing" and similar inflections were
+    // never escalated. Pinning the fix so a future refactor can't regress it.
+    it.each([
+      ["plural seizures", "he is having seizures"],
+      ["collapsing (present progressive)", "she is collapsing in the kitchen"],
+      ["plural overdoses", "found two empty bottles, suspect overdoses"],
+      ["plural strokes", "grandmother has had several strokes"],
+    ])("escalates %s to level 1", (_label: string, narrative: string) => {
+      const result = assessDeterministicRisk(narrative);
+
+      expect(result.minTriageLevel).toBe(1);
+      expect(result.hardFlags.length).toBeGreaterThan(0);
+    });
+
+    it("matches the DKA acronym despite input being lower-cased", () => {
+      // Regression: the pattern shipped as /\bDKA\b/ against text that is
+      // always lower-cased first, so it could never match anything.
+      const result = assessDeterministicRisk("brought in with suspected dka, no other symptoms reported");
+
+      expect(result.minTriageLevel).toBeLessThanOrEqual(2);
+    });
+
+    it("matches American-spelled diarrhea alongside the British spelling", () => {
+      const result = assessDeterministicRisk("chronic diarrhea for three weeks");
+
+      expect(result.minTriageLevel).toBeLessThanOrEqual(2);
+    });
   });
 
   describe("oxygen saturation", () => {
