@@ -127,58 +127,6 @@ jobs:
 
           echo "🚀 Railway deployment complete."
 
-  # ─────────────────────────────────────────────────────────────────────────
-  # 3. (Optional) Deploy to Render
-  #    Only runs when RENDER_API_KEY secret is configured.
-  # ─────────────────────────────────────────────────────────────────────────
-  deploy-render:
-    name: Deploy to Render (optional)
-    needs: build-and-publish
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4.3.1
-
-      - name: Deploy to Render
-        env:
-          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
-        run: |
-          if [ -z "$RENDER_API_KEY" ]; then
-            echo "::notice::RENDER_API_KEY not configured — skipping Render deployment."
-            exit 0
-          fi
-          echo "Deploying to Render..."
-          echo "Import render.yaml in Render dashboard to create services."
-          # Add Render deploy hook calls here when ready.
-
-  # ─────────────────────────────────────────────────────────────────────────
-  # 4. (Optional) Deploy to Fly.io
-  #    Only runs when FLY_API_TOKEN secret is configured.
-  # ─────────────────────────────────────────────────────────────────────────
-  deploy-fly:
-    name: Deploy to Fly.io (optional)
-    needs: build-and-publish
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4.3.1
-
-      - name: Setup Flyctl
-        uses: superfly/flyctl-actions/setup-flyctl@1.5
-
-      - name: Deploy to Fly.io
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: |
-          if [ -z "$FLY_API_TOKEN" ]; then
-            echo "::notice::FLY_API_TOKEN not configured — skipping Fly.io deployment."
-            exit 0
-          fi
-          echo "Deploying to Fly.io..."
-          flyctl deploy \
-            -c deploy/fly/api.fly.toml \
-            --image ghcr.io/${{ github.repository_owner }}/ahava-api:latest \
-            --remote-only \
-            || echo "⚠️ Fly.io API deployment failed"
+  # Railway is the sole deployment target. Render and Fly.io support was
+  # removed (docs/ENGINEERING_PLAN.md §6) rather than kept as unused
+  # optional jobs that would drift from the real service config.

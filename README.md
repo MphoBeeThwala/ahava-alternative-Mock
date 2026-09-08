@@ -80,8 +80,7 @@ Start with these:
 
 - [Operations Guide](./docs/OPERATIONS.md)
 - [Architecture](./docs/ARCHITECTURE.md)
-- [Railway Deployment](./docs/deployment/RAILWAY.md)
-- [Render Deployment](./docs/deployment/RENDER.md)
+- [Railway Deployment](./docs/deployment/RAILWAY.md) (the only supported deployment target)
 - [Redis Troubleshooting](./docs/REDIS_TROUBLESHOOTING.md)
 - [StatPearls Integration](./docs/STATPEARLS_INTEGRATION.md)
 
