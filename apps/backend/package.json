@@ -25,6 +25,7 @@
     "validate:env": "node scripts/validate-env.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1127.0",
     "@google/generative-ai": "^0.24.1",
     "@prisma/client": "6.19.3",
     "axios": "^1.6.2",

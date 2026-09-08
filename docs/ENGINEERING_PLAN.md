@@ -106,7 +106,7 @@ plus new suites for the AH-13 encryption AAD/rotation and AH-29 2FA flow.
 | ID | Finding | Priority |
 |----|---------|----------|
 | AH-32 | AI triage moved off the request thread to a BullMQ worker — landed 2026-09-08, unit-verified only, still needs a staging load-test run (see §4) | P0 for scale — verify before trusting at scale |
-| AH-33 | Image processing runs in-process on base64 inside a 20 MB JSON body | P1 for scale |
+| AH-33 | Storage moved to S3-compatible object storage 2026-09-08 (with a graceful fallback when unconfigured); the base64-JSON wire format and synchronous `sharp` processing are deliberately unchanged — see below | P1 for scale — partially addressed |
 | AH-26 | TypeScript strict is off — five flags disabled, `strict` never set | P1 |
 | AH-07 | Integration and end-to-end tests still absent | P1 |
 | AH-03b | Double-submit CSRF token, for defence in depth beyond the origin check | P2 |
@@ -268,12 +268,49 @@ separate per-process counter than the Redis-backed one, so a client whose
 requests straddle a brief Redis blip could exceed the limit slightly during
 that window — preferable to every request failing while Redis recovers.
 
-### AH-33 — image handling
+### AH-33 — image handling — partially addressed 2026-09-08
 
-Triage images arrive base64-encoded inside a 20 MB JSON body and are processed
-by `sharp` in-process. That is CPU-bound native work on the request path, with
-roughly 1.37× memory overhead from base64 and full buffering before processing.
-Move to multipart upload, store the object, and process in a worker.
+Storage moved; wire format and processing thread deliberately didn't.
+
+**Product decision (2026-09-08):** object storage backend is an
+S3-compatible client (works against AWS S3, Cloudflare R2, Backblaze B2,
+DigitalOcean Spaces — see `env.example`'s `S3_*` vars), rather than local
+disk. Local disk was ruled out because a file saved on one replica isn't
+visible to another — it would have undermined the multi-replica scaling
+this whole phase is for.
+
+**Done:** `services/objectStorage.ts` wraps the S3 API; `persistTriageAttachment`
+(`services/triageAttachments.ts`) uploads the sanitized buffer there instead
+of embedding it as base64 inside `TriageCase.imageStorageRef`, when object
+storage is configured — with a fallback to the exact previous behaviour when
+it isn't, so this doesn't force a bucket to exist before the app runs. The
+attachment-serving route (`routes/triageCaseReview.ts`) fetches from
+whichever backend a given attachment used; existing rows with embedded
+base64 keep reading correctly. This closes the real operational cost: large
+blobs bloating an unrelated table's rows, backups, and read performance.
+
+**Deliberately not done, and why:**
+- **The request still receives base64-in-JSON, not multipart.** Switching
+  requires a frontend rewrite of `workspace/src/app/patient/ai-doctor/page.tsx`
+  (currently converts the file to a data URL via `FileReader` before
+  sending) — a currently-working, safety-relevant patient flow with zero
+  existing test coverage (AH-07) and no way to verify end-to-end here (no
+  live Postgres, no real S3 bucket to actually exercise). Unlike AH-32,
+  where the response *contract* provably didn't change, a wire-format
+  change here is exactly the kind of thing that wants live testing before
+  landing, not code review alone.
+- **`sharp` sanitization still runs synchronously on the request thread.**
+  It's real CPU-bound work, but fast (tens to low hundreds of ms for a
+  2048×2048 resize+encode) — nowhere near AH-32's multi-second LLM calls.
+  Moving it to a worker would also reopen a privacy question AH-32 didn't
+  have: an unsanitized (EXIF/GPS-intact) image must never be readable
+  before sanitization completes, which needs either job-chaining between
+  an upload queue and the AH-32 AI-triage queue (which needs the sanitized
+  image) or a "processing" state on the attachment record — real design
+  work, not a drive-by addition to this pass.
+
+Re-scope as full P0 if profiling ever shows `sharp` itself (not the
+now-fixed DB bloat) is the actual bottleneck under load.
 
 ### AH-08 — cross-replica auth invalidation — closed 2026-09-08
 
