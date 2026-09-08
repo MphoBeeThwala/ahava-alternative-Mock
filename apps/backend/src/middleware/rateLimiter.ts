@@ -1,5 +1,78 @@
 import crypto from "crypto";
-import rateLimit from "express-rate-limit";
+import rateLimit, { MemoryStore, Store, IncrementResponse, Options } from "express-rate-limit";
+import RedisStore from "rate-limit-redis";
+import { getRedis } from "../services/redis";
+
+/**
+ * AH-02b: express-rate-limit's default store is per-process in-memory, so
+ * across N replicas the effective limit is N x max and every deploy resets
+ * every counter. This wraps rate-limit-redis's RedisStore so counts are
+ * shared across replicas via Redis, but never lets the app depend on Redis
+ * being up just to answer a request: any Redis error - not connected
+ * (REDIS_URL unset, same as running without it today), a timeout, a
+ * dropped connection - falls back to a local MemoryStore for that one call,
+ * the same degraded-but-working behaviour Redis outages already get
+ * elsewhere in this app (middleware/auth.ts's cache, services/monitoring.ts).
+ *
+ * The one thing this trades away: a request that falls back mid-window
+ * counts against a separate, per-process counter than the Redis-backed one,
+ * so a client whose requests happen to straddle a brief Redis blip could
+ * exceed the configured limit slightly during that window. Preferable to
+ * every request failing while Redis recovers.
+ */
+export class ResilientRateLimitStore implements Store {
+  private redisStore: RedisStore;
+  private fallback = new MemoryStore();
+
+  constructor(prefix: string) {
+    this.redisStore = new RedisStore({
+      prefix,
+      sendCommand: (...args: string[]): Promise<never> => {
+        try {
+          return getRedis().call(...(args as [string, ...string[]])) as Promise<never>;
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      },
+    });
+  }
+
+  init(options: Options): void {
+    this.fallback.init(options);
+    // RedisStore.init() loads its Lua scripts via sendCommand, which
+    // rejects immediately when Redis isn't initialized yet (or at all) —
+    // that's expected, not fatal: every call below falls back to
+    // `fallback` regardless, so a failed init here just means the first
+    // real request pays the same rejected-promise cost again. What
+    // matters is not leaving this rejection unhandled, which would
+    // otherwise crash the process on Node's unhandled-rejection default.
+    this.redisStore.init(options).catch(() => {});
+  }
+
+  async increment(key: string): Promise<IncrementResponse> {
+    try {
+      return await this.redisStore.increment(key);
+    } catch {
+      return this.fallback.increment(key);
+    }
+  }
+
+  async decrement(key: string): Promise<void> {
+    try {
+      await this.redisStore.decrement(key);
+    } catch {
+      await this.fallback.decrement(key);
+    }
+  }
+
+  async resetKey(key: string): Promise<void> {
+    try {
+      await this.redisStore.resetKey(key);
+    } catch {
+      await this.fallback.resetKey(key);
+    }
+  }
+}
 
 function envInt(name: string, fallback: number): number {
   const parsed = parseInt(process.env[name] ?? "", 10);
@@ -63,16 +136,6 @@ const generalMax = envInt(
       ? 100
       : 10000,
 );
-/**
- * FOLLOW-UP before scale: these limiters use express-rate-limit's default
- * in-memory store, which is per-process. Across N replicas the effective
- * limit is N x max, and every deploy resets all counters. Once `rate-limit-redis`
- * is added to apps/backend/package.json, give each limiter:
- *
- *   store: new RedisStore({ sendCommand: (...args) => getRedis().call(...args) })
- *
- * Tracked as AH-02b in docs/ENGINEERING_PLAN.md.
- */
 export const rateLimiter = rateLimit({
   windowMs: generalWindowMs,
   max: generalMax,
@@ -83,6 +146,7 @@ export const rateLimiter = rateLimit({
   legacyHeaders: false,
   skip: (req) => process.env.NODE_ENV === "development" && !getClientIp(req),
   keyGenerator: getClientIp,
+  store: new ResilientRateLimitStore("rl:general:"),
 });
 
 const authWindowMs = envInt("AUTH_RATE_LIMIT_WINDOW_MS", 15 * 60 * 1000);
@@ -101,6 +165,7 @@ export const authRateLimiter = rateLimit({
   legacyHeaders: false,
   skip: (req) => process.env.NODE_ENV === "development" && !getClientIp(req),
   keyGenerator: getAuthRateLimitKey,
+  store: new ResilientRateLimitStore("rl:auth:"),
 });
 
 const webhookWindowMs = envInt("WEBHOOK_RATE_LIMIT_WINDOW_MS", 1 * 60 * 1000);
@@ -116,4 +181,5 @@ export const webhookRateLimiter = rateLimit({
   legacyHeaders: false,
   skip: (req) => process.env.NODE_ENV === "development" && !getClientIp(req),
   keyGenerator: getClientIp,
+  store: new ResilientRateLimitStore("rl:webhook:"),
 });

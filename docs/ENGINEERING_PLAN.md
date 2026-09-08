@@ -92,6 +92,7 @@ found and fixed the same day (repo hygiene pass, see commit history).
 | AH-20 | `Payment.paystackReference` / `paystackData` renamed to `payfastReference` / `payfastData` (migration `20260908130000`) | `prisma/schema.prisma` |
 | AH-24 | Red-flag triage patterns were singular and `\b`-anchored — "seizures" did not match "seizure" | `services/triageSafety.ts` |
 | AH-29 | No 2FA for prescribers — closed as opt-in TOTP for any account, not role-restricted | `routes/twoFactor.ts` |
+| AH-02b | Rate limiters used an in-memory store; limits were per-replica and reset on deploy | `middleware/rateLimiter.ts` |
 | AH-41 (new) | `routes/webhooks.ts` carried a second, unauthenticated "POST /payment" webhook from before the PayFast migration that marked payments `COMPLETED` with none of AH-04/05's checks — its signature check failed *open* whenever `NODE_ENV` wasn't exactly `"production"` and `PAYSTACK_SECRET_KEY` was unset (the deployed default). Removed; PayFast's ITN handler in `routes/payments.ts` is the only payment webhook now. | `routes/webhooks.ts` |
 
 Partial coverage also landed for AH-07 (tests): four unit suites covering token
@@ -103,7 +104,6 @@ plus new suites for the AH-13 encryption AAD/rotation and AH-29 2FA flow.
 | ID | Finding | Priority |
 |----|---------|----------|
 | AH-32 | AI triage is `await`ed inside the HTTP handler — the primary blocker to 5,000 concurrent | P0 for scale |
-| AH-02b | Rate limiters use an in-memory store; limits are per-replica and reset on deploy | P0 for scale |
 | AH-33 | Image processing runs in-process on base64 inside a 20 MB JSON body | P1 for scale |
 | AH-08 | Auth cache is per-replica; deactivation lags up to 300s across the fleet | P1 |
 | AH-26 | TypeScript strict is off — five flags disabled, `strict` never set | P1 |
@@ -177,11 +177,10 @@ of these the number means before promising it to anyone.**
 
 The encouraging part: the architecture is already built for horizontal scale —
 PgBouncer transaction pooling, Redis-backed sessions, WebSocket pub/sub across
-replicas. Two things currently prevent replicas from scaling cleanly, and both
-are already on the list: the in-process auth cache (AH-08) and the in-memory
-rate-limit store (AH-02b). Fix those, size the instances properly, move the two
-inline-compute paths off the request thread, and the same architecture should
-carry the target.
+replicas. Two things prevented replicas from scaling cleanly; the rate-limit
+store (AH-02b) is now closed, the in-process auth cache (AH-08) is still open.
+Fix that, size the instances properly, move the two inline-compute paths off
+the request thread, and the same architecture should carry the target.
 
 ### Measure this before anything else
 
@@ -222,12 +221,18 @@ The infrastructure needed already exists and is unused for this path:
 This changes the clinical flow's shape and needs a real staging run, not a unit
 test. It is deliberately not in the first branch.
 
-### AH-02b — distributed rate-limit store
+### AH-02b — distributed rate-limit store — closed 2026-09-08
 
-Add `rate-limit-redis` and give each limiter a `RedisStore` backed by
-`getRedis()`. Without it, limits are multiplied by the replica count and reset
-on every deploy. The key-derivation fix (AH-02) already removed the unbounded
-key-growth risk.
+`rate-limit-redis`'s `RedisStore` now backs all three limiters, wrapped in
+`ResilientRateLimitStore` (`middleware/rateLimiter.ts`) rather than used
+directly: any Redis error — not configured, a timeout, a dropped connection —
+falls back to a local `MemoryStore` for that call instead of breaking request
+handling, since the general limiter is mounted globally (`app.use(rateLimiter)`
+in `index.ts`) and a hard Redis dependency there would take down the whole
+API. The trade-off: a request that falls back mid-window counts against a
+separate per-process counter than the Redis-backed one, so a client whose
+requests straddle a brief Redis blip could exceed the limit slightly during
+that window — preferable to every request failing while Redis recovers.
 
 ### AH-33 — image handling
 
