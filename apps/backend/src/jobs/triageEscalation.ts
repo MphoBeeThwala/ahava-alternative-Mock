@@ -16,39 +16,13 @@
 
 import { addEmailJob } from '../services/queue';
 import prisma from '../lib/prisma';
+import { calculateSlaDeadline, getDoctorFee } from '../services/triageSla';
 
-// SLA thresholds in minutes per triage level
-const SLA_MINUTES: Record<number, number> = {
-  1: 5,
-  2: 15,
-  3: 60,
-  4: 240,
-  5: 480,
-};
-
-// Doctor compensation in ZAR cents per level
-const DOCTOR_FEE_CENTS: Record<number, number> = {
-  1: 15000, // R150
-  2: 10000, // R100
-  3: 7500,  // R75
-  4: 5000,  // R50
-  5: 3000,  // R30
-};
-
-/**
- * Calculate the SLA deadline for a triage case at creation time.
- */
-export function calculateSlaDeadline(triageLevel: number, createdAt: Date): Date {
-  const minutes = SLA_MINUTES[triageLevel] ?? 60;
-  return new Date(createdAt.getTime() + minutes * 60 * 1000);
-}
-
-/**
- * Calculate doctor compensation for reviewing a case.
- */
-export function getDoctorFee(triageLevel: number): number {
-  return DOCTOR_FEE_CENTS[triageLevel] ?? 5000;
-}
+// Re-exported for existing importers of this module — the calculations
+// themselves live in services/triageSla.ts, kept dependency-free so
+// services/queue.ts (imported below) and jobs/aiTriageJob.ts (which also
+// needs these) don't form an import cycle through this file.
+export { calculateSlaDeadline, getDoctorFee };
 
 /**
  * Main escalation job — run on a cron schedule (every 2 minutes).

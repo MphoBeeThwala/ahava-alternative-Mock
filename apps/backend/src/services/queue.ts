@@ -1,12 +1,14 @@
 import type Redis from "ioredis";
 import { Queue, QueueEvents, UnrecoverableError, Worker } from "bullmq";
 import { sendEmail } from "./email";
+import { processAiTriageJob, type AiTriageJobData } from "../jobs/aiTriageJob";
 
 // Queue names
 export const QUEUE_NAMES = {
   PDF_EXPORT: "pdf-export",
   PUSH_NOTIFICATION: "push-notification",
   EMAIL: "email",
+  AI_TRIAGE: "ai-triage",
 } as const;
 
 // Lazy-initialized queues (only set after initializeQueue() when REDIS_URL is set)
@@ -14,6 +16,8 @@ let pdfExportQueue: Queue | null = null;
 let pushNotificationQueue: Queue | null = null;
 let emailQueue: Queue | null = null;
 let emailWorker: Worker | null = null;
+let aiTriageQueue: Queue | null = null;
+let aiTriageWorker: Worker | null = null;
 
 function getDefaultJobOptions() {
   return {
@@ -104,6 +108,41 @@ export const initializeQueue = async (connection: Redis) => {
     });
   }
 
+  // AH-32: AI triage off the request thread. analyzeSymptoms rarely throws
+  // (it already falls back to a conservative, doctor-forced result if every
+  // AI provider fails), so attempts stay low — retries here are mainly for
+  // genuine infra failures (a DB hiccup on the update), not AI flakiness.
+  aiTriageQueue = new Queue(QUEUE_NAMES.AI_TRIAGE, {
+    connection,
+    defaultJobOptions: {
+      removeOnComplete: 50,
+      removeOnFail: 20,
+      attempts: 2,
+      backoff: { type: "exponential" as const, delay: 5000 },
+    },
+  });
+  const aiTriageEvents = new QueueEvents(QUEUE_NAMES.AI_TRIAGE, { connection });
+  aiTriageEvents.on("failed", ({ jobId, failedReason }) => {
+    console.error(`❌ AI triage job ${jobId} failed:`, failedReason);
+  });
+
+  if (process.env.DISABLE_INLINE_QUEUE_WORKERS !== "1") {
+    const aiTriageConcurrency = Math.max(
+      1,
+      parseInt(process.env.AI_TRIAGE_WORKER_CONCURRENCY ?? "5", 10) || 5,
+    );
+    aiTriageWorker = new Worker(
+      QUEUE_NAMES.AI_TRIAGE,
+      async (job) => {
+        await processAiTriageJob(job.data as AiTriageJobData);
+      },
+      { connection, concurrency: aiTriageConcurrency },
+    );
+    aiTriageWorker.on("failed", (job, err) => {
+      console.error(`❌ AI triage job ${job?.id} failed:`, err?.message);
+    });
+  }
+
   console.log("✅ BullMQ queues initialized");
 };
 
@@ -141,4 +180,18 @@ export const addEmailJob = async (data: {
   // No Redis: send directly so notifications still work (e.g. serverless or dev without Redis)
   const { sendEmail } = await import("./email");
   sendEmail(data).catch((e) => console.error("[email] direct send failed", e));
+};
+
+/**
+ * AH-32: enqueues the AI triage job for a case routes/triage.ts already
+ * created (with an interim, deterministic-floor-based assessment). Returns
+ * whether it was actually queued — when it wasn't (no Redis configured),
+ * the caller runs processAiTriageJob synchronously instead, so a case never
+ * gets stuck showing only the interim placeholder forever. Same function
+ * either way; see jobs/aiTriageJob.ts.
+ */
+export const addAiTriageJob = async (data: AiTriageJobData): Promise<boolean> => {
+  if (!aiTriageQueue) return false;
+  await aiTriageQueue.add("analyze", data, { priority: 1 });
+  return true;
 };

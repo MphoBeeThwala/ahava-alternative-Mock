@@ -1,5 +1,10 @@
 import { randomUUID } from "crypto";
 import { sanitizeDataUrlImage } from "../utils/imageUtils";
+import {
+  isObjectStorageConfigured,
+  uploadObject,
+  getObjectBuffer,
+} from "./objectStorage";
 
 export type TriageAttachmentKind =
   | "symptom_image"
@@ -13,7 +18,13 @@ export interface StoredTriageAttachment {
   mimeType: string;
   byteSize: number;
   createdAt: string;
-  dataUrl: string;
+  // AH-33: exactly one of these is set. storageKey when object storage is
+  // configured — the bytes live in S3/R2/etc, this just names the object.
+  // dataUrl is the pre-AH-33 format (bytes embedded in this JSON manifest)
+  // and remains the fallback when object storage isn't configured, and the
+  // format existing rows were already written in.
+  storageKey?: string;
+  dataUrl?: string;
 }
 
 interface ParsedDataUrl {
@@ -81,6 +92,9 @@ function sanitizeFileName(fileName: string, fallbackBase: string, ext: string) {
 function normalizeManifestAttachment(
   attachment: any,
 ): StoredTriageAttachment | null {
+  const hasStorageKey = typeof attachment?.storageKey === "string" && attachment.storageKey.length > 0;
+  const hasDataUrl = typeof attachment?.dataUrl === "string" && attachment.dataUrl.length > 0;
+
   if (
     !attachment ||
     typeof attachment.id !== "string" ||
@@ -89,7 +103,7 @@ function normalizeManifestAttachment(
     typeof attachment.mimeType !== "string" ||
     typeof attachment.byteSize !== "number" ||
     typeof attachment.createdAt !== "string" ||
-    typeof attachment.dataUrl !== "string"
+    !(hasStorageKey || hasDataUrl)
   ) {
     return null;
   }
@@ -164,22 +178,49 @@ export async function persistTriageAttachment(params: {
   }
 
   const ext = extensionForMimeType(mimeType);
-
-  return {
-    id: randomUUID(),
+  const id = randomUUID();
+  const base = {
+    id,
     kind: params.kind,
     fileName: sanitizeFileName(params.fileName, params.kind, ext),
     mimeType,
     byteSize: buffer.length,
     createdAt: new Date().toISOString(),
-    dataUrl: dataUrlToStore,
   };
+
+  // AH-33: once sanitized (EXIF/GPS already stripped above for images), the
+  // final bytes go to object storage when configured, rather than being
+  // embedded in the TriageCase row — every existing consumer of this
+  // manifest goes through materializeTriageAttachment, so nothing else
+  // needs to know which backend a given attachment used.
+  if (isObjectStorageConfigured()) {
+    const storageKey = `triage-attachments/${id}.${ext}`;
+    await uploadObject(storageKey, buffer, mimeType);
+    return { ...base, storageKey };
+  }
+
+  return { ...base, dataUrl: dataUrlToStore };
 }
 
 export function buildTriageAttachmentUrl(caseId: string, attachmentId: string) {
   return `/api/triage-review/${caseId}/attachments/${attachmentId}`;
 }
 
-export function materializeTriageAttachment(attachment: StoredTriageAttachment) {
-  return parseDataUrl(attachment.dataUrl);
+/**
+ * Resolves an attachment's actual bytes, regardless of which backend it
+ * was stored with (see StoredTriageAttachment). Async because the object
+ * storage path fetches from S3; the legacy embedded-dataUrl path resolves
+ * synchronously but still returns a Promise for a single call-site shape.
+ */
+export async function materializeTriageAttachment(
+  attachment: StoredTriageAttachment,
+): Promise<ParsedDataUrl> {
+  if (attachment.storageKey) {
+    const { buffer, contentType } = await getObjectBuffer(attachment.storageKey);
+    return { mimeType: contentType || attachment.mimeType, buffer };
+  }
+  if (attachment.dataUrl) {
+    return parseDataUrl(attachment.dataUrl);
+  }
+  throw new Error(`Attachment ${attachment.id} has neither storageKey nor dataUrl`);
 }

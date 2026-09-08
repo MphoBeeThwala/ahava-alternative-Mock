@@ -610,7 +610,7 @@ router.get(
         return res.status(404).json({ error: "Attachment not found" });
       }
 
-      const { buffer } = materializeTriageAttachment(attachment);
+      const { buffer } = await materializeTriageAttachment(attachment);
       res.setHeader("Content-Type", attachment.mimeType);
       res.setHeader(
         "Content-Disposition",

@@ -25,6 +25,7 @@
     "validate:env": "node scripts/validate-env.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1127.0",
     "@google/generative-ai": "^0.24.1",
     "@prisma/client": "6.19.3",
     "axios": "^1.6.2",
@@ -35,7 +36,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
-    "express-rate-limit": "^8.2.1",
+    "express-rate-limit": "^8.7.0",
     "handlebars": "^4.7.8",
     "helmet": "^7.1.0",
     "ioredis": "^5.9.2",
@@ -46,6 +47,7 @@
     "morgan": "^1.10.0",
     "otplib": "^12.0.1",
     "pdfkit": "^0.14.0",
+    "rate-limit-redis": "^6.0.1",
     "redis": "^4.7.0",
     "resend": "^4.0.0",
     "sharp": "^0.33.0",

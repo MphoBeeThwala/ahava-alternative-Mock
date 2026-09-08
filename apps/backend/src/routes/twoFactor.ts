@@ -106,7 +106,7 @@ router.post("/setup", authMiddleware, authRateLimiter, async (req: Authenticated
     const secret = generateTotpSecret();
     await prisma.user.update({
       where: { id: user.id },
-      data: { totpSecret: encryptTotpSecret(secret) },
+      data: { totpSecret: encryptTotpSecret(secret, user.id) },
     });
 
     res.json({
@@ -135,7 +135,7 @@ router.post("/verify-setup", authMiddleware, authRateLimiter, async (req: Authen
       return res.status(409).json({ error: "Two-factor authentication is already enabled" });
     }
 
-    const secret = decryptTotpSecret(user.totpSecret);
+    const secret = decryptTotpSecret(user.totpSecret, user.id);
     if (!verifyTotpCode(secret, value.code)) {
       return res.status(400).json({ error: "Invalid code" });
     }
@@ -180,7 +180,7 @@ router.post("/disable", authMiddleware, authRateLimiter, async (req: Authenticat
       return res.status(401).json({ error: "Invalid password" });
     }
 
-    const secret = decryptTotpSecret(user.totpSecret);
+    const secret = decryptTotpSecret(user.totpSecret, user.id);
     const validTotp = verifyTotpCode(secret, value.code);
     const backupResult = validTotp
       ? null
@@ -236,7 +236,7 @@ router.post("/login-verify", authRateLimiter, async (req, res, next) => {
       return res.status(401).json({ error: "Invalid or expired login session" });
     }
 
-    const secret = decryptTotpSecret(user.totpSecret);
+    const secret = decryptTotpSecret(user.totpSecret, user.id);
     const validTotp = verifyTotpCode(secret, value.code);
     let remainingBackupCodes: string[] | null = null;
 

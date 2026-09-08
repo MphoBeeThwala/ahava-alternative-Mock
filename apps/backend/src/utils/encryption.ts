@@ -3,7 +3,11 @@ import crypto from 'crypto';
 const algorithm = 'aes-256-gcm';
 const keyLength = 32;
 const ivLength = 12;
+// v2 payloads (no AAD, single key) are still decrypted for data written
+// before AH-13. All new writes use v3 — see encryptData/decryptData below.
 const ENCRYPTION_VERSION = 'v2';
+const ENCRYPTION_VERSION_V3 = 'v3';
+const DEFAULT_KEY_ID = 'default';
 
 export function generateEncryptionKey(): string {
   return crypto.randomBytes(keyLength).toString('base64');
@@ -26,6 +30,41 @@ export function getEncryptionKey(key?: string): Buffer {
   return encryptionKey;
 }
 
+/**
+ * AH-13 key rotation: ENCRYPTION_KEY_ID names which "generation" the current
+ * ENCRYPTION_KEY is. New writes are always tagged with this id. A payload
+ * tagged with ENCRYPTION_KEY_PREVIOUS_ID still decrypts with
+ * ENCRYPTION_KEY_PREVIOUS, so both keys can be live during a rotation window
+ * — rotate by setting *_PREVIOUS to today's values, then generating a new
+ * ENCRYPTION_KEY/ENCRYPTION_KEY_ID.
+ */
+function getCurrentKeyId(): string {
+  return process.env.ENCRYPTION_KEY_ID || DEFAULT_KEY_ID;
+}
+
+function resolveKeyForId(keyId: string, explicitKey?: string): Buffer {
+  if (explicitKey) return getEncryptionKey(explicitKey);
+
+  if (keyId === getCurrentKeyId()) {
+    return getEncryptionKey();
+  }
+
+  const previousId = process.env.ENCRYPTION_KEY_PREVIOUS_ID;
+  const previousKey = process.env.ENCRYPTION_KEY_PREVIOUS;
+  if (previousId && previousKey && keyId === previousId) {
+    return getEncryptionKey(previousKey);
+  }
+
+  throw new Error(
+    `No encryption key configured for key id "${keyId}". If this is data from ` +
+      'before a key rotation, set ENCRYPTION_KEY_PREVIOUS_ID/ENCRYPTION_KEY_PREVIOUS to it.',
+  );
+}
+
+function buildAAD(aad?: string): Buffer {
+  return Buffer.from(aad ?? '', 'utf8');
+}
+
 function isHexString(value: string): boolean {
   return /^[0-9a-fA-F]+$/.test(value);
 }
@@ -33,16 +72,20 @@ function isHexString(value: string): boolean {
 export function isEncryptedPayload(value: string): boolean {
   if (!value || typeof value !== 'string') return false;
 
-  const v2 = value.split(':');
-  if (v2.length === 4 && v2[0] === ENCRYPTION_VERSION) {
-    const [_, ivB64, tagB64, cipherB64] = v2;
-    if (!ivB64 || !tagB64 || !cipherB64) return false;
-    return true;
+  const parts = value.split(':');
+
+  if (parts[0] === ENCRYPTION_VERSION_V3 && parts.length === 5) {
+    const [, keyId, ivB64, tagB64, cipherB64] = parts;
+    return Boolean(keyId && ivB64 && tagB64 && cipherB64);
   }
 
-  const legacy = value.split(':');
-  if (legacy.length === 3) {
-    const [ivHex, tagHex, cipherHex] = legacy;
+  if (parts[0] === ENCRYPTION_VERSION && parts.length === 4) {
+    const [, ivB64, tagB64, cipherB64] = parts;
+    return Boolean(ivB64 && tagB64 && cipherB64);
+  }
+
+  if (parts.length === 3) {
+    const [ivHex, tagHex, cipherHex] = parts;
     return Boolean(ivHex && tagHex && cipherHex && isHexString(ivHex) && isHexString(tagHex) && isHexString(cipherHex));
   }
 
@@ -68,10 +111,20 @@ export function assertEncryptionKeyConfigured(): void {
   }
 }
 
-export function encryptData(plaintext: string, key?: string): string {
+/**
+ * @param aad AH-13: binds the ciphertext to the context it was encrypted
+ *   for (e.g. `user:${userId}:totpSecret`), so a value can't be silently
+ *   moved between records or columns and still decrypt. Callers with no
+ *   natural stable identifier at encryption time may omit it — that stays
+ *   equivalent to the pre-AH-13 behaviour, just on the newer versioned
+ *   format with key-rotation support. `decryptData` must be called with
+ *   the exact same `aad` or decryption fails (GCM authentication).
+ */
+export function encryptData(plaintext: string, aad?: string, key?: string): string {
   const encryptionKey = getEncryptionKey(key);
   const iv = crypto.randomBytes(ivLength);
   const cipher = crypto.createCipheriv(algorithm, encryptionKey, iv);
+  cipher.setAAD(buildAAD(aad));
 
   const encrypted = Buffer.concat([
     cipher.update(plaintext, 'utf8'),
@@ -79,22 +132,37 @@ export function encryptData(plaintext: string, key?: string): string {
   ]);
   const authTag = cipher.getAuthTag();
 
-  // Versioned payload allows safe future upgrades:
-  // v2:<iv_b64>:<tag_b64>:<ciphertext_b64>
+  // v3:<keyId>:<iv_b64>:<tag_b64>:<ciphertext_b64>
   return [
-    ENCRYPTION_VERSION,
+    ENCRYPTION_VERSION_V3,
+    getCurrentKeyId(),
     iv.toString('base64'),
     authTag.toString('base64'),
     encrypted.toString('base64'),
   ].join(':');
 }
 
-export function decryptData(encryptedData: string, key?: string): string {
-  const encryptionKey = getEncryptionKey(key);
-
+export function decryptData(encryptedData: string, aad?: string, key?: string): string {
   const parts = encryptedData.split(':');
 
-  // New format: v2:<iv_b64>:<tag_b64>:<ciphertext_b64>
+  // v3:<keyId>:<iv_b64>:<tag_b64>:<ciphertext_b64> — current format, AAD-bound.
+  if (parts.length === 5 && parts[0] === ENCRYPTION_VERSION_V3) {
+    const [, keyId, ivB64, tagB64, cipherB64] = parts;
+    const encryptionKey = resolveKeyForId(keyId, key);
+    const iv = Buffer.from(ivB64, 'base64');
+    const authTag = Buffer.from(tagB64, 'base64');
+    const encrypted = Buffer.from(cipherB64, 'base64');
+
+    const decipher = crypto.createDecipheriv(algorithm, encryptionKey, iv);
+    decipher.setAAD(buildAAD(aad));
+    decipher.setAuthTag(authTag);
+
+    return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString('utf8');
+  }
+
+  const encryptionKey = getEncryptionKey(key);
+
+  // v2:<iv_b64>:<tag_b64>:<ciphertext_b64> — pre-AH-13, no AAD, single key.
   if (parts.length === 4 && parts[0] === ENCRYPTION_VERSION) {
     const iv = Buffer.from(parts[1], 'base64');
     const authTag = Buffer.from(parts[2], 'base64');

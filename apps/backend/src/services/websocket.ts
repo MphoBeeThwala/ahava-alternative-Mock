@@ -20,10 +20,15 @@ let redisPub: Redis | null = null;
 let redisSub: Redis | null = null;
 let redisReady = false;
 let warnedPublishFallback = false;
+// AH-08: lets middleware/auth.ts hear about a deactivation/role-change on
+// *other* replicas without middleware/auth.ts needing to know anything
+// about WebSockets or Redis pub/sub itself.
+let authCacheInvalidationHandler: ((userId: string) => void) | null = null;
 
 type WsEvent =
   | { instanceId: string; type: 'sendToUser'; userId: string; message: any }
   | { instanceId: string; type: 'broadcastToUsers'; userIds: string[]; message: any }
+  | { instanceId: string; type: 'authCacheInvalidate'; userId: string }
   | {
       instanceId: string;
       type: 'bookingAvailable';
@@ -103,6 +108,10 @@ const ensureRedisPubSub = async () => {
       }
       if (evt.type === 'broadcastToUsers') {
         evt.userIds.forEach((id) => deliverToUserLocal(id, evt.message));
+        return;
+      }
+      if (evt.type === 'authCacheInvalidate') {
+        authCacheInvalidationHandler?.(evt.userId);
         return;
       }
       if (evt.type === 'bookingTaken') {
@@ -565,6 +574,24 @@ export const sendToUser = (userId: string, message: any) => {
   const delivered = deliverToUserLocal(userId, message);
   publishEvent({ instanceId: INSTANCE_ID, type: 'sendToUser', userId, message });
   return delivered;
+};
+
+/**
+ * AH-08: middleware/auth.ts calls this after invalidating its own local
+ * cache entry, so every *other* replica hears about it too — without this,
+ * a deactivated/role-changed user stayed authenticated on any replica whose
+ * in-process cache hadn't independently expired (up to
+ * AUTH_USER_CACHE_TTL_SECONDS, 300s by default). Same graceful-without-Redis
+ * behaviour as the rest of this file: if pub/sub isn't configured, this is a
+ * no-op and each replica just falls back to its own TTL, exactly like today.
+ */
+export const publishAuthCacheInvalidation = (userId: string) => {
+  publishEvent({ instanceId: INSTANCE_ID, type: 'authCacheInvalidate', userId });
+};
+
+/** Registers the one handler that clears middleware/auth.ts's local cache. */
+export const onAuthCacheInvalidate = (handler: (userId: string) => void) => {
+  authCacheInvalidationHandler = handler;
 };
 
 // Helper function to broadcast to multiple users

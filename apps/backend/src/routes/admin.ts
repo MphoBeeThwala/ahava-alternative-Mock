@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { UserRole } from '@prisma/client';
-import { AuthenticatedRequest, authMiddleware, requireAdmin } from '../middleware/auth';
+import { AuthenticatedRequest, authMiddleware, requireAdmin, invalidateCachedUser } from '../middleware/auth';
 import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 import prisma from '../lib/prisma';
 
@@ -36,6 +36,11 @@ router.patch('/users/:id/suspend', requireAdmin, async (req: AuthenticatedReques
     const user = await prisma.user.findUnique({ where: { id } });
     if (!user) return res.status(404).json({ error: 'User not found' });
     const updated = await prisma.user.update({ where: { id }, data: { isActive: false } });
+    // AH-08: without this, a suspended user stayed authenticated on
+    // whichever replica(s) had already cached them — up to
+    // AUTH_USER_CACHE_TTL_SECONDS (300s default), even on the single
+    // replica that just handled this very request.
+    await invalidateCachedUser(id);
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'UPDATE', resource: 'AdminAction', resourceId: id, metadata: { entity: 'User', oldStatus: 'active', newStatus: 'suspended' }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
     res.json({ success: true, user: updated });
   } catch (error) { next(error); }
