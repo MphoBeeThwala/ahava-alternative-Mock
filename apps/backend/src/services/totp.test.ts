@@ -16,6 +16,11 @@ import {
 
 const TEST_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
 
+// hashBackupCodes/consumeBackupCode run up to 10 sequential bcrypt calls,
+// which are deliberately slow and contend with other test files' CPU use —
+// the default 5s Jest timeout is too tight for this file specifically.
+jest.setTimeout(20000);
+
 describe("totp", () => {
   const originalEncryptionKey = process.env.ENCRYPTION_KEY;
 
@@ -66,9 +71,18 @@ describe("totp", () => {
   describe("secret encryption at rest", () => {
     it("round-trips through encryptTotpSecret/decryptTotpSecret", () => {
       const secret = generateTotpSecret();
-      const encrypted = encryptTotpSecret(secret);
+      const encrypted = encryptTotpSecret(secret, "user-1");
       expect(encrypted).not.toEqual(secret);
-      expect(decryptTotpSecret(encrypted)).toEqual(secret);
+      expect(decryptTotpSecret(encrypted, "user-1")).toEqual(secret);
+    });
+
+    // AH-13: the AAD binds a secret to the account it was encrypted for, so
+    // a row copied/mismatched to a different user fails closed instead of
+    // silently decrypting into a working authenticator secret for them.
+    it("refuses to decrypt with a different user's id", () => {
+      const secret = generateTotpSecret();
+      const encrypted = encryptTotpSecret(secret, "user-1");
+      expect(() => decryptTotpSecret(encrypted, "user-2")).toThrow();
     });
   });
 
@@ -104,22 +118,17 @@ describe("totp", () => {
       expect(result.matched).toBe(true);
     });
 
-    it(
-      "does not match a code that isn't in the list",
-      async () => {
-        // A non-matching submission runs bcrypt.compare against every stored
-        // hash before concluding there's no match — bcrypt is deliberately
-        // slow, so this is the one case in the file worth a longer timeout
-        // rather than a false failure under load.
-        const codes = generateBackupCodes();
-        const hashed = await hashBackupCodes(codes);
+    it("does not match a code that isn't in the list", async () => {
+      // A non-matching submission runs bcrypt.compare against every stored
+      // hash before concluding there's no match — the slowest case in this
+      // file, covered by the module-level jest.setTimeout above.
+      const codes = generateBackupCodes();
+      const hashed = await hashBackupCodes(codes);
 
-        const result = await consumeBackupCode("00000-00000", hashed);
+      const result = await consumeBackupCode("00000-00000", hashed);
 
-        expect(result.matched).toBe(false);
-        expect(result.remaining).toEqual(hashed);
-      },
-      15000,
-    );
+      expect(result.matched).toBe(false);
+      expect(result.remaining).toEqual(hashed);
+    });
   });
 });

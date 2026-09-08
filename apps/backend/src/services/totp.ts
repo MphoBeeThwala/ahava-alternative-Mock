@@ -39,12 +39,20 @@ export function verifyTotpCode(secret: string, code: string): boolean {
   }
 }
 
-export function encryptTotpSecret(secret: string): string {
-  return encryptData(secret);
+// AH-13: AAD-bind the secret to the account it belongs to, so a totpSecret
+// value copied to a different user's row (e.g. by a bug elsewhere, or a
+// restored-from-backup row mismatch) fails to decrypt instead of silently
+// authenticating against the wrong account's authenticator app.
+function totpAAD(userId: string): string {
+  return `user:${userId}:totpSecret`;
 }
 
-export function decryptTotpSecret(encryptedSecret: string): string {
-  return decryptData(encryptedSecret);
+export function encryptTotpSecret(secret: string, userId: string): string {
+  return encryptData(secret, totpAAD(userId));
+}
+
+export function decryptTotpSecret(encryptedSecret: string, userId: string): string {
+  return decryptData(encryptedSecret, totpAAD(userId));
 }
 
 /** Ten single-use recovery codes, e.g. "A3F9-7K2Q". Returned once, plaintext. */
