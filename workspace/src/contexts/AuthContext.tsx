@@ -2,7 +2,17 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { authApi, AuthResponse, RegisterData } from '../lib/api';
+import { authApi, AuthResponse, RegisterData, isTwoFactorRequired } from '../lib/api';
+
+// AH-29: thrown by login() when the account has opt-in 2FA enabled. The
+// login page catches this specifically and shows a code-entry step; no
+// session exists yet at this point.
+export class TwoFactorRequiredError extends Error {
+  constructor(public pendingToken: string) {
+    super('Two-factor authentication code required');
+    this.name = 'TwoFactorRequiredError';
+  }
+}
 
 interface User {
   id: string;
@@ -17,6 +27,7 @@ interface User {
   dateOfBirth?: string;
   gender?: string;
   riskProfile?: Record<string, unknown> | null;
+  totpEnabled?: boolean;
 }
 
 interface AuthContextType {
@@ -24,6 +35,7 @@ interface AuthContextType {
   token: string | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
+  completeTwoFactorLogin: (pendingToken: string, code: string) => Promise<void>;
   register: (data: RegisterData) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -172,11 +184,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void initializeAuth();
   }, []);
 
-  const login = async (email: string, password: string) => {
-    const response: AuthResponse = await authApi.login({ email, password });
-    
+  const finalizeSession = async (user: User) => {
     if (typeof window !== 'undefined') {
-      localStorage.setItem('user', JSON.stringify(response.user));
+      localStorage.setItem('user', JSON.stringify(user));
       localStorage.removeItem('token');
       localStorage.removeItem('refreshToken');
       localStorage.removeItem('ahava_access_token');
@@ -184,15 +194,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.removeItem('accessToken');
       localStorage.removeItem('refresh_token');
     }
-    
+
     setToken('cookie-session');
-    setUser(response.user as User);
+    setUser(user);
 
     // Hydrate complete user shape (includes riskProfile/onboarding state).
     try {
       const me = await authApi.me();
       if (me?.user) {
-        const mergedUser = mergeUserPreservingPassport(response.user as User, me.user as User);
+        const mergedUser = mergeUserPreservingPassport(user, me.user as User);
         setUser(mergedUser);
         if (typeof window !== 'undefined') {
           localStorage.setItem('user', JSON.stringify(mergedUser));
@@ -202,6 +212,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Non-fatal: keep login response user
     }
+  };
+
+  const login = async (email: string, password: string) => {
+    const response = await authApi.login({ email, password });
+
+    if (isTwoFactorRequired(response)) {
+      throw new TwoFactorRequiredError(response.pendingToken);
+    }
+
+    await finalizeSession(response.user as User);
+  };
+
+  const completeTwoFactorLogin = async (pendingToken: string, code: string) => {
+    const response: AuthResponse = await authApi.verifyTwoFactorLogin(pendingToken, code);
+    await finalizeSession(response.user as User);
   };
 
   const register = async (data: RegisterData) => {
@@ -281,6 +306,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         token,
         loading,
         login,
+        completeTwoFactorLogin,
         register,
         logout,
         refreshUser,

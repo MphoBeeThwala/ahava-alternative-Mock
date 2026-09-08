@@ -28,39 +28,44 @@ export function assessDeterministicRisk(
     let minTriageLevel: 1 | 2 | 3 | 4 | 5 = 5;
 
     // Level 1 (Resuscitation) - Immediate life-threatening conditions
+    //
+    // AH-24: these were singular- and \b-anchored, so a patient writing
+    // "he is having seizures" or "she collapsed" (vs. "is collapsing") was
+    // never escalated. Every countable-noun / verb-tense pattern below now
+    // accepts the plural or the other common inflection.
     const level1Patterns = [
         /\bunconscious\b/,
         /\bunresponsive\b/,
-        /\bseizure\b/,
-        /\bstroke\b/,
+        /\bseizures?\b/,
+        /\bstrokes?\b/,
         /\bone[-\s]?sided weakness\b/,
         /\bblue lips\b/,
         /\bsevere bleeding\b/,
         /\bnot breathing\b/,
         /\bcardiac arrest\b/,
-        /\boverdose\b/,
-        /\bsuicid(al|e)\b/,
+        /\boverdos(?:e|es|ed|ing)\b/,
+        /\bsuicid(al|e|es)\b/,
         /\banaphylaxis\b/,
         /\banaphylactic shock\b/,
         /\bcannot speak\b/,
-        /\bchoking\b/,
-        /\bcollapsed\b/,
+        /\bchok(?:ing|ed)\b/,
+        /\bcollaps(?:ed|ing)\b/,
         /\bno pulse\b/,
     ];
 
     // Level 2 (Emergency) - High-risk conditions requiring urgent care
     const level2Patterns = [
-        /\bchest pain\b/,
+        /\bchest pains?\b/,
         /\bshort(ness)? of breath\b/,
         /\bdifficulty breathing\b/,
         /\bconfusion\b/,
-        /\bhigh fever\b/,
+        /\bhigh fevers?\b/,
         /\bblood in (stool|urine|vomit|sputum|cough)\b/,
         /\bpregnan(t|cy).*(bleed|pain|vaginal bleeding)\b/,
-        /\bsevere abdominal pain\b/,
-        /\bsevere headache\b/,
-        /\bvision changes\b/,
-        /\bspeech difficulty\b/,
+        /\bsevere abdominal pains?\b/,
+        /\bsevere headaches?\b/,
+        /\bvision changes?\b/,
+        /\bspeech difficult(?:y|ies)\b/,
         /\bweakness on one side\b/,
         /\bdrooping face\b/,
         /\bnumbs?ness\b/,
@@ -71,55 +76,60 @@ export function assessDeterministicRisk(
     const saSpecificPatterns = {
         level1: [
             /\bsevere immunodeficiency\b/,
-            /\bopportunistic infection\b/,
+            /\bopportunistic infections?\b/,
         ],
         level2: [
             // TB symptoms (endemic in SA - high burden globally)
             /\bcough.*(blood|bloody)\b/,
             /\bcoughing up blood\b/,
             /\bhaemoptysis\b/,
-            /\bnight sweats\b/,
+            /\bnight sweats?\b/,
             /\bweight loss.*(unintentional|unexplained)\b/,
             /\bpersistent cough\b/,
             /\bcough for (more than|over) (2|three) weeks\b/,
             // HIV/AIDS related (13% prevalence in SA adults)
-            /\bfever.*night sweats\b/,
-            /\bchronic diarrhoea\b/,
+            /\bfever.*night sweats?\b/,
+            // AH-24: accept both the British ("diarrhoea") and American
+            // ("diarrhea") spelling — either is plausible from a patient.
+            /\bchronic diarrh(?:o)?ea\b/,
             /\boral thrush\b/,
-            /\bwhite patches.*mouth\b/,
-            /\bpersistent fever\b/,
+            /\bwhite patch(?:es)?.*mouth\b/,
+            /\bpersistent fevers?\b/,
             /\bunexplained weight loss\b/,
             // Malaria (endemic in Limpopo, KwaZulu-Natal low-lying areas)
-            /\bfever.*chills\b/,
-            /\bcyclic fever\b/,
+            /\bfever.*chills?\b/,
+            /\bcyclic fevers?\b/,
             /\bmalaria\b/,
             /\btravel.*(limpopo|kwazulu|mozambique|zimbabwe)\b/,
             // Diabetes complications (high prevalence in SA)
             /\bdiabetic.*ketoacidosis\b/,
-            /\bDKA\b/,
+            // AH-24: `normalizedSymptoms` is lower-cased before matching
+            // (see above), so the literal-uppercase /\bDKA\b/ that shipped
+            // here could never match anything — fixed to lower-case.
+            /\bdka\b/,
             /\bfruity breath\b/,
             /\bexcessive thirst\b/,
             /\bfrequent urination.*excessive\b/,
             // Hypertension complications
             /\bsevere hypertension\b/,
-            /\bheadache.*blurred vision\b/,
-            // Pediatric emergencies
-            /\bchild.*high fever\b/,
-            /\bbaby.*fever\b/,
-            /\bpediatric.*dehydration\b/,
-            /\bchild.*difficulty breathing\b/,
+            /\bheadaches?.*blurred vision\b/,
+            // Pediatric emergencies (accept British "paediatric" too)
+            /\bchild(?:ren)?.*high fevers?\b/,
+            /\bbab(?:y|ies).*fevers?\b/,
+            /\b(?:pediatric|paediatric).*dehydration\b/,
+            /\bchild(?:ren)?.*difficulty breathing\b/,
             // Obstetric emergencies
-            /\bpregnan(t|cy).*severe headache\b/,
-            /\bpregnan(t|cy).*visual disturbances\b/,
-            /\bpregnan(t|cy).*abdominal pain\b/,
-            /\bpregnan(t|cy).*decreased fetal movement\b/,
-            /\bwater broke\b/,
-            /\blabour.*pain\b/,
+            /\bpregnan(t|cy).*severe headaches?\b/,
+            /\bpregnan(t|cy).*visual disturbances?\b/,
+            /\bpregnan(t|cy).*abdominal pains?\b/,
+            /\bpregnan(t|cy).*decreased f(?:e|oe)tal movements?\b/,
+            /\bwaters? broke\b/,
+            /\blabou?r.*pains?\b/,
             // Trauma
-            /\bhead.*injury\b/,
-            /\bfracture\b/,
-            /\bbroken bone\b/,
-            /\bsevere pain.*injury\b/,
+            /\bhead.*injur(?:y|ies)\b/,
+            /\bfractures?\b/,
+            /\bbroken bones?\b/,
+            /\bsevere pains?.*injur(?:y|ies)\b/,
         ],
     };
 

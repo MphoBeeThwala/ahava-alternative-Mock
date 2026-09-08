@@ -20,7 +20,7 @@ import {
   getRefreshTokenFromRequest,
   setAuthCookies,
 } from "../services/authSession";
-import { signToken, verifyToken } from "../services/tokens";
+import { signToken, verifyToken, TWOFA_PENDING_TTL_SECONDS } from "../services/tokens";
 
 const router: Router = Router();
 
@@ -373,7 +373,7 @@ router.post("/register", authRateLimiter, async (req, res, next) => {
     // Send email verification (non-fatal — requires DB migration to be applied)
     try {
       const verificationToken = crypto.randomBytes(32).toString("hex");
-      await (prisma.user.update as Function)({
+      await prisma.user.update({
         where: { id: user.id },
         data: { emailVerificationToken: verificationToken },
       });
@@ -510,6 +510,23 @@ router.post("/login", authRateLimiter, async (req, res, next) => {
     // Successful login — clear any failure counter
     await clearFailedAttempts(email);
 
+    // AH-29: opt-in 2FA. Password alone is not enough for an account with it
+    // enabled — issue a short-lived "twofa_pending" token (a distinct JWT
+    // type, so it cannot be used as a real session) and require
+    // POST /auth/2fa/login-verify with a TOTP or backup code before any
+    // cookies are set.
+    if (user.totpEnabled) {
+      const pendingToken = signToken(
+        { userId: user.id, role: user.role, typ: "twofa_pending" },
+        { expiresInSeconds: TWOFA_PENDING_TTL_SECONDS },
+      );
+      return res.json({
+        success: true,
+        twoFactorRequired: true,
+        pendingToken,
+      });
+    }
+
     // Generate tokens
     const { accessToken, refreshToken } = await generateTokens(
       user.id,
@@ -584,7 +601,7 @@ router.post("/refresh", async (req, res, next) => {
         const user = await prisma.user.findUnique({ where: { id: userId } });
         if (user) tokenRecord = { user, expiresAt: new Date(Date.now() + 86400000), token: tokenHash };
       }
-    } catch {}
+    } catch { /* redis unavailable — fall back to the prisma lookup below */ }
     if (!tokenRecord) {
       tokenRecord = await prisma.refreshToken.findUnique({
         where: { token: tokenHash },
@@ -701,7 +718,7 @@ router.post("/logout", async (req, res, next) => {
 
     if (refreshToken) {
       const tokenHash = hashRefreshToken(refreshToken);
-      try { await getRedis().del(`refresh:${tokenHash}`); } catch {}
+      try { await getRedis().del(`refresh:${tokenHash}`); } catch { /* redis unavailable — prisma delete below still revokes it */ }
       await prisma.refreshToken.deleteMany({
         where: { token: tokenHash },
       }).catch(() => {});
@@ -761,6 +778,7 @@ router.get("/me", authMiddleware, async (req: AuthenticatedRequest, res, next) =
         lastKnownLat: true,
         lastKnownLng: true,
         lastLocationUpdate: true,
+        totpEnabled: true,
       },
     });
 
@@ -896,7 +914,7 @@ router.post("/forgot-password", authRateLimiter, async (req, res, next) => {
     const token = crypto.randomBytes(32).toString("hex");
     const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
-    await (prisma.user.update as Function)({
+    await prisma.user.update({
       where: { id: user.id },
       data: { passwordResetToken: token, passwordResetExpiry: expiry },
     });
@@ -928,7 +946,7 @@ router.post("/reset-password", authRateLimiter, async (req, res, next) => {
     }).validate(req.body);
     if (error) return res.status(400).json({ error: error.details[0].message });
 
-    const user = await (prisma.user.findFirst as Function)({
+    const user = await prisma.user.findFirst({
       where: {
         passwordResetToken: value.token,
         passwordResetExpiry: { gt: new Date() },
@@ -942,7 +960,7 @@ router.post("/reset-password", authRateLimiter, async (req, res, next) => {
 
     const saltRounds = parseInt(process.env.BCRYPT_ROUNDS || "10", 10);
     const passwordHash = await bcrypt.hash(value.password, saltRounds);
-    await (prisma.user.update as Function)({
+    await prisma.user.update({
       where: { id: user.id },
       data: {
         passwordHash,
@@ -969,7 +987,7 @@ router.get("/verify-email", async (req, res, next) => {
     if (!token)
       return res.status(400).json({ error: "Verification token missing." });
 
-    const user = await (prisma.user.findFirst as Function)({
+    const user = await prisma.user.findFirst({
       where: { emailVerificationToken: token },
     });
 
@@ -978,7 +996,7 @@ router.get("/verify-email", async (req, res, next) => {
         .status(400)
         .json({ error: "Invalid or already-used verification link." });
 
-    await (prisma.user.update as Function)({
+    await prisma.user.update({
       where: { id: user.id },
       data: { isVerified: true, emailVerificationToken: null },
     });
@@ -1009,7 +1027,7 @@ router.post("/resend-verification", authRateLimiter, async (req, res, next) => {
       });
 
     const token = crypto.randomBytes(32).toString("hex");
-    await (prisma.user.update as Function)({
+    await prisma.user.update({
       where: { id: user.id },
       data: { emailVerificationToken: token },
     });
@@ -1048,7 +1066,7 @@ router.post(
           .json({ error: "Manual verification is not available." });
       }
       const userId = req.user!.id;
-      await (prisma.user.update as Function)({
+      await prisma.user.update({
         where: { id: userId },
         data: { isVerified: true, emailVerificationToken: null },
       });
@@ -1081,7 +1099,7 @@ function parseExpiry(s: string): number {
 }
 
 // Helper function to generate tokens
-async function generateTokens(userId: string, role: string) {
+export async function generateTokens(userId: string, role: string) {
   const signedTokens = createSignedTokens(userId, role);
 
   const refreshTtlSeconds = Math.max(

@@ -189,6 +189,20 @@ export interface AuthResponse {
   refreshToken?: string;
 }
 
+// AH-29: an account with opt-in 2FA enabled gets this instead of AuthResponse
+// from /auth/login — no session exists yet, only a 5-minute pendingToken.
+export interface TwoFactorRequiredResponse {
+  success: true;
+  twoFactorRequired: true;
+  pendingToken: string;
+}
+
+export function isTwoFactorRequired(
+  response: AuthResponse | TwoFactorRequiredResponse,
+): response is TwoFactorRequiredResponse {
+  return (response as TwoFactorRequiredResponse).twoFactorRequired === true;
+}
+
 export const authApi = {
   register: async (data: RegisterData): Promise<AuthResponse> => {
     const res = await apiClient.post('/auth/register', data, {
@@ -196,10 +210,29 @@ export const authApi = {
     });
     return res.data;
   },
-  login: async (data: LoginData): Promise<AuthResponse> => {
+  login: async (data: LoginData): Promise<AuthResponse | TwoFactorRequiredResponse> => {
     const res = await apiClient.post('/auth/login', data, {
       headers: COOKIE_AUTH_HEADERS,
     });
+    return res.data;
+  },
+  // AH-29: completes a login that returned twoFactorRequired.
+  verifyTwoFactorLogin: async (pendingToken: string, code: string): Promise<AuthResponse> => {
+    const res = await apiClient.post('/auth/2fa/login-verify', { pendingToken, code }, {
+      headers: COOKIE_AUTH_HEADERS,
+    });
+    return res.data;
+  },
+  setupTwoFactor: async (): Promise<{ success: boolean; secret: string; otpauthUrl: string }> => {
+    const res = await apiClient.post('/auth/2fa/setup', {});
+    return res.data;
+  },
+  verifyTwoFactorSetup: async (code: string): Promise<{ success: boolean; backupCodes: string[] }> => {
+    const res = await apiClient.post('/auth/2fa/verify-setup', { code });
+    return res.data;
+  },
+  disableTwoFactor: async (password: string, code: string): Promise<{ success: boolean }> => {
+    const res = await apiClient.post('/auth/2fa/disable', { password, code });
     return res.data;
   },
   refreshToken: async (): Promise<AuthResponse> => {

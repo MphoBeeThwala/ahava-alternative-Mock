@@ -189,7 +189,7 @@ router.post('/connect', authMiddleware, async (req: Request, res: Response, next
 
       // Some ROOK responses indicate the user is already authorized and do not
       // include a new authorization URL. Treat this as a successful connected state.
-      if (Boolean(data.authorized)) {
+      if (data.authorized) {
         await prisma.user.update({
           where: { id: userId },
           data: { rookUserId: userId } as any,

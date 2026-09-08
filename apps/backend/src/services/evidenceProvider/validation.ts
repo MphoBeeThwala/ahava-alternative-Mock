@@ -8,6 +8,7 @@
  * Tests cover all providers: WHO ICD-11, PubMed, Africa CDC, StatPearls
  */
 
+import * as fs from 'fs';
 import { combineEvidence, hasSufficientEvidence, getEvidenceSummary } from './combiner';
 import { getProviderRegistry, getEnabledProviders, getProvider } from './registry';
 import { ClinicalQuery, EvidenceResult, CombinedEvidence } from './types';
@@ -554,7 +555,6 @@ export async function generateValidationReport(): Promise<string> {
     report += '\n' + '='.repeat(80) + '\n';
     
     // Save report to file
-    const fs = require('fs');
     fs.writeFileSync('validation-report-' + new Date().toISOString().replace(/:/g, '-') + '.txt', report);
     
     return report;

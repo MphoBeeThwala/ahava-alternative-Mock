@@ -373,7 +373,7 @@ export async function getMonitoringSummary(userId: string): Promise<{
     const redis = getRedis();
     const cached = await redis.get(cacheKey);
     if (cached) return JSON.parse(cached);
-  } catch {}
+  } catch { /* redis unavailable — fall back to a fresh computation below */ }
   // Get baseline status (select only columns that exist in all environments)
   let readings: any[] = [];
   try {
@@ -460,6 +460,6 @@ export async function getMonitoringSummary(userId: string): Promise<{
     const { getRedis } = await import("./redis");
     const redis = getRedis();
     await redis.set(cacheKey, JSON.stringify(result), "EX", 60);
-  } catch {}
+  } catch { /* redis unavailable — result is still returned uncached */ }
   return result;
 }

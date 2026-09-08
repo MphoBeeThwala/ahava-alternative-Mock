@@ -22,7 +22,7 @@ async function getCachedUser(userId: string): Promise<NonNullable<AuthenticatedR
     const redis = getRedis();
     const cached = await redis.get(`auth:user:${userId}`);
     if (cached) return JSON.parse(cached);
-  } catch {}
+  } catch { /* redis unavailable — treat as a cache miss */ }
   return null;
 }
 async function setCachedUser(userId: string, user: NonNullable<AuthenticatedRequest['user']>, ttlSeconds: number) {
@@ -30,7 +30,7 @@ async function setCachedUser(userId: string, user: NonNullable<AuthenticatedRequ
     const { getRedis } = await import('../services/redis');
     const redis = getRedis();
     await redis.set(`auth:user:${userId}`, JSON.stringify(user), 'EX', ttlSeconds);
-  } catch {}
+  } catch { /* redis unavailable — request still succeeds, just uncached */ }
 }
 
 export async function invalidateCachedUser(userId: string) {
@@ -39,7 +39,7 @@ export async function invalidateCachedUser(userId: string) {
     const { getRedis } = await import("../services/redis");
     const redis = getRedis();
     await redis.del(`auth:user:${userId}`);
-  } catch {}
+  } catch { /* redis unavailable — local map entry above is still cleared */ }
 }
 
 export const authMiddleware = async (

@@ -124,7 +124,13 @@ model User {
   passwordResetExpiry       DateTime?
   emailVerificationToken    String?   @unique
   refreshTokens             RefreshToken[]
-  
+
+  // Two-factor auth (opt-in, AH-29). totpSecret is encrypted at rest via
+  // utils/encryption.ts — it is a login credential, not just a setting.
+  totpSecret        String?
+  totpEnabled       Boolean  @default(false)
+  totpBackupCodes   String[] @default([]) // bcrypt-hashed, single-use
+
   // Relations
   patientBookings   Booking[] @relation("PatientBookings")
   nurseVisits       Visit[]   @relation("NurseVisits")
