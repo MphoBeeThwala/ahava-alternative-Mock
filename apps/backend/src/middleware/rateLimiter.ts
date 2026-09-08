@@ -1,26 +1,36 @@
 import crypto from "crypto";
-import rateLimit, { ipKeyGenerator } from "express-rate-limit";
+import rateLimit from "express-rate-limit";
 
 function envInt(name: string, fallback: number): number {
   const parsed = parseInt(process.env[name] ?? "", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-// IPv6-safe key generator with explicit X-Forwarded-For support for proxy deployments.
-const getClientIp = (req: any) => {
-  const forwarded = req.headers["x-forwarded-for"];
-  if (forwarded) {
-    return typeof forwarded === "string"
-      ? forwarded.split(",")[0].trim()
-      : forwarded[0];
-  }
-  return ipKeyGenerator(req);
-};
+/**
+ * Client IP for rate-limit keying.
+ *
+ * This previously read the leftmost value of X-Forwarded-For, which is set by
+ * the caller and can be any string. That made every limiter here - general,
+ * auth and webhook - opt-out: a different header value per request meant a
+ * fresh bucket per request. It also let a caller mint unbounded distinct keys
+ * in the limiter's in-memory store.
+ *
+ * Express computes `req.ip` from the X-Forwarded-For chain according to the
+ * `trust proxy` setting (see index.ts), which counts hops from the far end
+ * and so cannot be spoofed by prepending entries. That is the value to key on.
+ *
+ * IPv6 addresses are truncated to a /64 because a single subscriber is
+ * routinely handed an entire /64 and could otherwise rotate through it.
+ */
+const getClientIp = (req: any): string => {
+  const ip: string = req?.ip || req?.socket?.remoteAddress || "unknown";
+  const normalized = ip.startsWith("::ffff:") ? ip.slice(7) : ip;
 
-const getRateLimitKey = (req: any) => {
-  const userId = req?._rateLimitUserId;
-  if (userId) return `u:${userId}`;
-  return `ip:${getClientIp(req)}`;
+  if (normalized.includes(":")) {
+    const groups = normalized.split(":");
+    return `${groups.slice(0, 4).join(":")}::/64`;
+  }
+  return normalized;
 };
 
 const authKeyStrategy = (
@@ -53,6 +63,16 @@ const generalMax = envInt(
       ? 100
       : 10000,
 );
+/**
+ * FOLLOW-UP before scale: these limiters use express-rate-limit's default
+ * in-memory store, which is per-process. Across N replicas the effective
+ * limit is N x max, and every deploy resets all counters. Once `rate-limit-redis`
+ * is added to apps/backend/package.json, give each limiter:
+ *
+ *   store: new RedisStore({ sendCommand: (...args) => getRedis().call(...args) })
+ *
+ * Tracked as AH-02b in docs/ENGINEERING_PLAN.md.
+ */
 export const rateLimiter = rateLimit({
   windowMs: generalWindowMs,
   max: generalMax,

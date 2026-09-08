@@ -928,7 +928,19 @@ router.patch(
 
       const updatedUser = await prisma.user.update({
         where: { id: userId },
-        data: { riskProfile: merged as object },
+        data: {
+          riskProfile: {
+            ...merged,
+            // Safety check: ensure completion % is never dropped during
+            // the write even if something upstream mutated `merged`.
+            passportCompletionPercent:
+              calculatedPassportCompletionPercent ??
+              merged.passportCompletionPercent ??
+              (currentRiskProfile as Record<string, unknown>)
+                .passportCompletionPercent ??
+              0,
+          } as object,
+        },
         select: { riskProfile: true },
       });
       await invalidateCachedUser(userId);
@@ -1223,9 +1235,20 @@ router.get(
 );
 
 // POST /api/patient/demo/start-stream
-// DEMO ONLY - Streams realistic biometric progression for investor demo
-// Works in production but requires authentication (applied by app.use mount)
+// DEMO ONLY - Streams realistic biometric progression for investor demo.
+//
+// This injects synthetic vitals into the caller's own record, which feed
+// baselines and early-warning alerts. Any authenticated patient could reach it
+// in production, poisoning their own clinical history. Disabled unless
+// explicitly switched on, so the demo still works on a staging deployment.
 router.post("/demo/start-stream", async (req: AuthenticatedRequest, res) => {
+  if (
+    process.env.NODE_ENV === "production" &&
+    process.env.ENABLE_DEMO_STREAM !== "true"
+  ) {
+    return res.status(403).json({ error: "Demo stream is disabled" });
+  }
+
   const userId = req.user?.id;
   if (!userId) {
     return res.status(401).json({ error: "Not authenticated" });

@@ -1,6 +1,5 @@
 import { Request, Router } from "express";
 import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 import { authRateLimiter } from "../middleware/rateLimiter";
@@ -21,6 +20,7 @@ import {
   getRefreshTokenFromRequest,
   setAuthCookies,
 } from "../services/authSession";
+import { signToken, verifyToken } from "../services/tokens";
 
 const router: Router = Router();
 
@@ -207,11 +207,6 @@ async function setRefreshReplayTokens(
 }
 
 function createSignedTokens(userId: string, role: string): SignedTokens {
-  if (!process.env.JWT_SECRET) {
-    throw new Error("JWT_SECRET not configured");
-  }
-
-  const secret = process.env.JWT_SECRET as jwt.Secret;
   const accessExpiry = Math.max(
     60,
     process.env.JWT_EXPIRES_IN ? parseExpiry(process.env.JWT_EXPIRES_IN) : 900,
@@ -220,13 +215,15 @@ function createSignedTokens(userId: string, role: string): SignedTokens {
     ? parseExpiry(process.env.REFRESH_TOKEN_EXPIRES_IN)
     : 604800; // 7d
 
-  const accessToken = jwt.sign({ userId, role }, secret, {
-    expiresIn: accessExpiry,
-  });
-  const refreshToken = jwt.sign({ userId, role }, secret, {
-    expiresIn: refreshExpiry,
-    jwtid: crypto.randomUUID(),
-  });
+  // `typ` is what stops these two being interchangeable — see services/tokens.ts.
+  const accessToken = signToken(
+    { userId, role, typ: "access" },
+    { expiresInSeconds: accessExpiry },
+  );
+  const refreshToken = signToken(
+    { userId, role, typ: "refresh" },
+    { expiresInSeconds: refreshExpiry, jwtid: crypto.randomUUID() },
+  );
   const refreshTokenHash = hashRefreshToken(refreshToken);
 
   return {
@@ -558,17 +555,12 @@ router.post("/refresh", async (req, res, next) => {
       return res.status(400).json({ error: "Refresh token is required" });
     }
 
-    // Verify refresh token
-    if (!process.env.JWT_SECRET) {
-      throw new Error("JWT_SECRET not configured");
-    }
-
+    // Verify refresh token. `verifyToken` rejects an access token or a
+    // WebSocket ticket presented here, even though all three are signed
+    // with the same secret.
     let decoded: { userId: string; role: string };
     try {
-      decoded = jwt.verify(refreshToken, process.env.JWT_SECRET) as {
-        userId: string;
-        role: string;
-      };
+      decoded = verifyToken(refreshToken, "refresh");
     } catch (verifyError) {
       const errName = (verifyError as { name?: string })?.name;
       return res.status(401).json({

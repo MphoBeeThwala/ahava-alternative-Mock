@@ -35,13 +35,15 @@ import healthConnectRoutes from "./routes/healthConnect";
 import { errorHandler } from "./middleware/errorHandler";
 import { rateLimiter } from "./middleware/rateLimiter";
 import { authMiddleware } from "./middleware/auth";
-import { attachRateLimitUserKey } from "./middleware/rateLimitUserKey";
 import { attachRequestId } from "./middleware/requestId";
+import { originGuard } from "./middleware/originGuard";
 
 // Import services
-import { initializeRedis } from "./services/redis";
+import { getRedis, initializeRedis } from "./services/redis";
 import { initializeQueue } from "./services/queue";
 import { getWebSocketRedisHealth, initializeWebSocket } from "./services/websocket";
+import prisma from "./lib/prisma";
+import { assertEncryptionKeyConfigured } from "./utils/encryption";
 
 const app = express();
 const server = createServer(app);
@@ -100,13 +102,18 @@ app.use(
 // Compression and logging
 app.use(compression());
 app.use(attachRequestId);
+// Request logging. This used to write only when DEBUG=true, which meant a
+// production deployment produced no request log at all — nothing to correlate
+// an incident against. Query strings stay redacted because they can carry
+// identifiers.
 app.use(
   morgan(
     ":req[x-request-id] :method :url :status :res[content-length] - :response-time ms",
     {
+      skip: () => process.env.DISABLE_REQUEST_LOG === "true",
       stream: {
         write: (message: string) => {
-          if (DEBUG) console.log(message.replace(/\?[^\s]+/, "?[REDACTED]").trim());
+          console.log(message.replace(/\?[^\s]+/, "?[REDACTED]").trim());
         },
       },
     },
@@ -124,18 +131,53 @@ app.use(
 );
 app.use(express.urlencoded({ extended: true, limit: "20mb" }));
 
-// Attach authenticated user ID for per-user rate limiting (non-blocking)
-app.use(attachRateLimitUserKey);
+// Reject cross-site state-changing requests that authenticate by cookie
+app.use(originGuard(corsOrigins));
 
 // Rate limiting
 app.use(rateLimiter);
 
-// Health check (Render/Railway probes this)
+// Liveness. Answers as long as the process is running — do not add dependency
+// checks here, or a database blip will have the platform restart every replica
+// at once.
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
     timestamp: new Date().toISOString(),
     timezone: process.env.TIMEZONE || "Africa/Johannesburg",
+  });
+});
+
+// Readiness. This is what the load balancer should probe: it answers 503 when
+// the instance cannot actually serve, so traffic stops being routed to a
+// replica whose database is gone. Previously /health returned ok
+// unconditionally and a broken instance stayed in rotation.
+app.get("/ready", async (req, res) => {
+  const checks: Record<string, "ok" | "degraded" | "down"> = {};
+
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    checks.database = "ok";
+  } catch {
+    checks.database = "down";
+  }
+
+  // Redis is optional: without it the API still serves, losing background jobs
+  // and cross-replica realtime. That is degraded, not unready.
+  if (process.env.REDIS_URL) {
+    try {
+      await getRedis().ping();
+      checks.redis = "ok";
+    } catch {
+      checks.redis = "degraded";
+    }
+  }
+
+  const ready = checks.database === "ok";
+  res.status(ready ? 200 : 503).json({
+    status: ready ? "ready" : "not_ready",
+    checks,
+    timestamp: new Date().toISOString(),
   });
 });
 
@@ -195,6 +237,11 @@ async function startServer() {
     throw new Error("JWT_SECRET must be at least 32 characters in production");
   }
 
+  // Fail here rather than partway through a booking. ENCRYPTION_KEY was only
+  // read the first time something was encrypted, so a bad key let the service
+  // start and then break at the point of encrypting a patient address.
+  assertEncryptionKeyConfigured();
+
   // Initialize Redis + Queues (optional - app works without them for core API)
   if (process.env.REDIS_URL) {
     try {
@@ -231,21 +278,73 @@ async function startServer() {
   });
 }
 
-// Graceful shutdown
-process.on("SIGTERM", () => {
-  if (DEBUG) console.log("🛑 SIGTERM received, shutting down gracefully");
-  server.close(() => {
-    if (DEBUG) console.log("✅ Process terminated");
+/**
+ * Graceful shutdown.
+ *
+ * This used to close the HTTP server and nothing else — no Prisma disconnect,
+ * no Redis quit, no WebSocket close, and no upper bound, so a single held
+ * connection could keep the process alive until the platform killed it
+ * mid-write.
+ */
+const SHUTDOWN_TIMEOUT_MS = Number(process.env.SHUTDOWN_TIMEOUT_MS ?? 15_000);
+let shuttingDown = false;
+
+async function shutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[shutdown] ${signal} received, draining`);
+
+  // Backstop: if a drain step hangs, exit anyway rather than being killed
+  // at an arbitrary point.
+  const forceExit = setTimeout(() => {
+    console.error("[shutdown] drain timed out, exiting");
+    process.exit(1);
+  }, SHUTDOWN_TIMEOUT_MS);
+  forceExit.unref();
+
+  try {
+    // Stop accepting new work first, so in-flight requests can finish.
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    wss.clients.forEach((client) => client.close(1001, "Server shutting down"));
+    wss.close();
+
+    await prisma.$disconnect().catch((err) =>
+      console.warn("[shutdown] prisma disconnect failed:", (err as Error).message),
+    );
+
+    if (process.env.REDIS_URL) {
+      try {
+        await getRedis().quit();
+      } catch (err) {
+        console.warn("[shutdown] redis quit failed:", (err as Error).message);
+      }
+    }
+
+    clearTimeout(forceExit);
+    console.log("[shutdown] complete");
     process.exit(0);
-  });
+  } catch (error) {
+    console.error("[shutdown] failed:", error);
+    process.exit(1);
+  }
+}
+
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));
+
+// Without these, a crash produced an unhandled rejection warning and an opaque
+// exit — nothing in the logs to say what happened.
+process.on("unhandledRejection", (reason) => {
+  console.error("[fatal] unhandled promise rejection:", reason);
+  void shutdown("unhandledRejection");
 });
 
-process.on("SIGINT", () => {
-  if (DEBUG) console.log("🛑 SIGINT received, shutting down gracefully");
-  server.close(() => {
-    if (DEBUG) console.log("✅ Process terminated");
-    process.exit(0);
-  });
+process.on("uncaughtException", (error) => {
+  console.error("[fatal] uncaught exception:", error);
+  void shutdown("uncaughtException");
 });
 
-startServer();
+startServer().catch((error) => {
+  console.error("[fatal] server failed to start:", (error as Error).message);
+  process.exit(1);
+});
