@@ -4,6 +4,7 @@ import { UserRole } from '@prisma/client';
 import prisma from '../lib/prisma';
 import { getAccessTokenFromRequest } from '../services/authSession';
 import { verifyToken } from '../services/tokens';
+import { publishAuthCacheInvalidation, onAuthCacheInvalidate } from '../services/websocket';
 
 export interface AuthenticatedRequest extends Request {
   user?: {
@@ -15,6 +16,11 @@ export interface AuthenticatedRequest extends Request {
 }
 
 const userCache = new Map<string, { user: NonNullable<AuthenticatedRequest['user']>; expiresAt: number }>();
+
+// AH-08: hear about another replica's invalidateCachedUser call so this
+// process's local cache doesn't keep serving a deactivated/role-changed
+// user for up to AUTH_USER_CACHE_TTL_SECONDS after the fact.
+onAuthCacheInvalidate((userId) => userCache.delete(userId));
 
 async function getCachedUser(userId: string): Promise<NonNullable<AuthenticatedRequest['user']> | null> {
   try {
@@ -40,6 +46,9 @@ export async function invalidateCachedUser(userId: string) {
     const redis = getRedis();
     await redis.del(`auth:user:${userId}`);
   } catch { /* redis unavailable — local map entry above is still cleared */ }
+  // AH-08: tell every other replica too — without this, only the replica
+  // that handled this request (and Redis's own cache) heard about it.
+  publishAuthCacheInvalidation(userId);
 }
 
 export const authMiddleware = async (

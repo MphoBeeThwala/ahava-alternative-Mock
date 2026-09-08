@@ -93,6 +93,7 @@ found and fixed the same day (repo hygiene pass, see commit history).
 | AH-24 | Red-flag triage patterns were singular and `\b`-anchored — "seizures" did not match "seizure" | `services/triageSafety.ts` |
 | AH-29 | No 2FA for prescribers — closed as opt-in TOTP for any account, not role-restricted | `routes/twoFactor.ts` |
 | AH-02b | Rate limiters used an in-memory store; limits were per-replica and reset on deploy | `middleware/rateLimiter.ts` |
+| AH-08 | Auth cache was per-replica; deactivation lagged up to 300s across the fleet — and the suspend endpoint never invalidated it at all, even locally | `middleware/auth.ts`, `routes/admin.ts` |
 | AH-41 (new) | `routes/webhooks.ts` carried a second, unauthenticated "POST /payment" webhook from before the PayFast migration that marked payments `COMPLETED` with none of AH-04/05's checks — its signature check failed *open* whenever `NODE_ENV` wasn't exactly `"production"` and `PAYSTACK_SECRET_KEY` was unset (the deployed default). Removed; PayFast's ITN handler in `routes/payments.ts` is the only payment webhook now. | `routes/webhooks.ts` |
 
 Partial coverage also landed for AH-07 (tests): four unit suites covering token
@@ -105,7 +106,6 @@ plus new suites for the AH-13 encryption AAD/rotation and AH-29 2FA flow.
 |----|---------|----------|
 | AH-32 | AI triage is `await`ed inside the HTTP handler — the primary blocker to 5,000 concurrent | P0 for scale |
 | AH-33 | Image processing runs in-process on base64 inside a 20 MB JSON body | P1 for scale |
-| AH-08 | Auth cache is per-replica; deactivation lags up to 300s across the fleet | P1 |
 | AH-26 | TypeScript strict is off — five flags disabled, `strict` never set | P1 |
 | AH-07 | Integration and end-to-end tests still absent | P1 |
 | AH-03b | Double-submit CSRF token, for defence in depth beyond the origin check | P2 |
@@ -177,10 +177,10 @@ of these the number means before promising it to anyone.**
 
 The encouraging part: the architecture is already built for horizontal scale —
 PgBouncer transaction pooling, Redis-backed sessions, WebSocket pub/sub across
-replicas. Two things prevented replicas from scaling cleanly; the rate-limit
-store (AH-02b) is now closed, the in-process auth cache (AH-08) is still open.
-Fix that, size the instances properly, move the two inline-compute paths off
-the request thread, and the same architecture should carry the target.
+replicas. The two things that prevented replicas from scaling cleanly — the
+rate-limit store (AH-02b) and the in-process auth cache (AH-08) — are both
+closed now. Size the instances properly, move the two inline-compute paths
+off the request thread, and the same architecture should carry the target.
 
 ### Measure this before anything else
 
@@ -241,10 +241,23 @@ by `sharp` in-process. That is CPU-bound native work on the request path, with
 roughly 1.37× memory overhead from base64 and full buffering before processing.
 Move to multipart upload, store the object, and process in a worker.
 
-### AH-08 — cross-replica auth invalidation
+### AH-08 — cross-replica auth invalidation — closed 2026-09-08
 
-Drop the in-process `Map` in `middleware/auth.ts` and rely on Redis alone, or
-publish invalidations over the pub/sub channel the WebSocket layer already uses.
+Took the pub/sub option: `invalidateCachedUser` now also calls
+`publishAuthCacheInvalidation` (`services/websocket.ts`), reusing the same
+Redis channel and `instanceId`-skip logic the WebSocket layer already has,
+rather than opening a second pair of Redis connections just for this.
+`middleware/auth.ts` registers a handler via the new `onAuthCacheInvalidate`
+so `services/websocket.ts` never needs to know anything about auth
+internals — one-directional dependency, no circular import.
+
+Also fixed a sharper version of the same bug on the way: `PATCH
+/api/admin/users/:id/suspend` never called `invalidateCachedUser` at all,
+so a suspended user stayed authenticated for up to
+`AUTH_USER_CACHE_TTL_SECONDS` (300s default) even on the single replica
+that handled the suspend request — the cross-replica gap this finding
+named was real, but there wasn't same-replica invalidation to begin with
+for the one endpoint that actually deactivates a user.
 
 ### Then measure
 
