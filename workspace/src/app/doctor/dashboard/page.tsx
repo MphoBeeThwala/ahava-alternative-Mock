@@ -1,86 +1,25 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import RoleGuard, { UserRole } from '../../../components/RoleGuard';
 import { doctorApi, doctorProfileApi, visitsApi, Visit, TriageCase } from '../../../lib/api';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useToast } from '../../../contexts/ToastContext';
 import DashboardLayout from '../../../components/DashboardLayout';
 import { Card } from '../../../components/ui/Card';
-import { Modal } from '../../../components/ui/Modal';
-import { StatusBadge } from '../../../components/ui/StatusBadge';
-
-// Helper function to calculate urgency level based on time (IMPROVEMENT #3)
-function getUrgencyLevel(createdAt: string): { level: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT'; color: string; hoursAgo: number; label: string } {
-  const created = new Date(createdAt).getTime();
-  const now = new Date().getTime();
-  const hoursAgo = Math.floor((now - created) / (1000 * 60 * 60));
-
-  let level: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT' = 'LOW';
-  let color = '#4caf50'; // green
-  let label = 'ROUTINE';
-
-  if (hoursAgo >= 24) {
-    level = 'URGENT';
-    color = '#d32f2f'; // red
-    label = '[URGENT]';
-  } else if (hoursAgo >= 6) {
-    level = 'HIGH';
-    color = '#ff6f00'; // orange
-    label = '[HIGH]';
-  } else if (hoursAgo >= 1) {
-    level = 'MEDIUM';
-    color = '#fbc02d'; // yellow
-    label = '[MEDIUM]';
-  } else {
-    label = '[NEW]';
-  }
-
-  return { level, color, hoursAgo, label };
-}
-
-function formatTimeAgo(hours: number): string {
-  if (hours === 0) return 'just now';
-  if (hours < 1) return '< 1 hour ago';
-  if (hours === 1) return '1 hour ago';
-  if (hours < 24) return `${hours} hours ago`;
-  return `${Math.floor(hours / 24)} days ago`;
-}
-
-type ReviewModal = {
-    caseId: string;
-    aiTriageLevel: number;
-    doctorNotes: string;
-    doctorDiagnosis: string;
-    doctorRecommendations: string;
-    finalTriageLevel: number;
-    overrideReason: string;
-};
-
-type MedRow = { name: string; dosage: string; frequency: string; duration: string; instructions: string };
-
-type PrescriptionModal = {
-    caseId: string;
-    diagnosis: string;
-    medications: MedRow[];
-    doctorNotes: string;
-};
-
-type ReferralModal = {
-    caseId: string;
-    referralType: string;
-    provisionalDiagnosis: string;
-    clinicalNotes: string;
-    recommendedFacility: string;
-};
-
-type FollowUpModal = {
-    caseId: string;
-    requestType: 'MORE_INFO' | 'INVESTIGATION';
-    message: string;
-    questionsText: string;
-    investigationsText: string;
-};
+import { ReviewModal } from './_components/ReviewModal';
+import { PrescriptionModal } from './_components/PrescriptionModal';
+import { ReferralModal } from './_components/ReferralModal';
+import { FollowUpRequestModal } from './_components/FollowUpRequestModal';
+import { TriageCaseCard } from './_components/TriageCaseCard';
+import { NurseVisitCard } from './_components/NurseVisitCard';
+import {
+  blankMed,
+  type ReviewModalState,
+  type PrescriptionModalState,
+  type ReferralModalState,
+  type FollowUpModalState,
+} from './_lib';
 
 export default function DoctorDashboard() {
     const { user } = useAuth();
@@ -88,17 +27,15 @@ export default function DoctorDashboard() {
     const [triageQueue, setTriageQueue] = useState<Visit[]>([]);
     const [triageCases, setTriageCases] = useState<TriageCase[]>([]);
     const [loading, setLoading] = useState(false);
-    const [reviewModal, setReviewModal] = useState<ReviewModal | null>(null);
+    const [reviewModal, setReviewModal] = useState<ReviewModalState | null>(null);
     const [releasing, setReleasing] = useState<string | null>(null);
-    const [prescriptionModal, setPrescriptionModal] = useState<PrescriptionModal | null>(null);
-    const [referralModal, setReferralModal] = useState<ReferralModal | null>(null);
-    const [followUpModal, setFollowUpModal] = useState<FollowUpModal | null>(null);
+    const [prescriptionModal, setPrescriptionModal] = useState<PrescriptionModalState | null>(null);
+    const [referralModal, setReferralModal] = useState<ReferralModalState | null>(null);
+    const [followUpModal, setFollowUpModal] = useState<FollowUpModalState | null>(null);
     const [submittingDoc, setSubmittingDoc] = useState(false);
     const [hcpsaStatus, setHcpsaStatus] = useState<{ hcpsaNumber: string | null; hcpsaVerified: boolean } | null>(null);
     const [hcpsaInput, setHcpsaInput] = useState('');
     const [savingHcpsa, setSavingHcpsa] = useState(false);
-
-    const blankMed = (): MedRow => ({ name: '', dosage: '', frequency: '', duration: '', instructions: '' });
 
     const loadHcpsaStatus = useCallback(async () => {
         try {
@@ -387,178 +324,25 @@ export default function DoctorDashboard() {
                     <section className="mb-10">
                         <h2 className="text-xl font-bold text-[var(--foreground)] mb-4">AI Triage Queue (remote)</h2>
                         <div className="grid gap-6">
-                            {triageCases.map((tc) => {
-                              const { level, color, hoursAgo, label } = getUrgencyLevel(tc.createdAt);
-                              const provisionalImpression =
-                                (tc.aiPossibleConditions || []).find(Boolean) || 'No clear provisional impression';
-                              
-                              return (
-                                <Card key={tc.id} style={{ borderLeft: `4px solid ${color}` }}>
-                                    <div className="flex justify-between items-start mb-4">
-                                        <div>
-                                            <h3 className="text-xl font-bold text-[var(--foreground)]">
-                                                {label} {tc.patient?.firstName} {tc.patient?.lastName}
-                                            </h3>
-                                            <p className="text-sm text-[var(--muted)]">
-                                                {formatTimeAgo(hoursAgo)} • General
-                                            </p>
-                                        </div>
-                                        <div style={{ 
-                                          backgroundColor: color, 
-                                          color: 'white',
-                                          padding: '8px 12px',
-                                          borderRadius: '6px',
-                                          fontWeight: 'bold'
-                                        }}>
-                                          {level}
-                                        </div>
-                                    </div>
-                                    <p className="text-slate-700 mb-2"><strong>Symptoms:</strong> {tc.symptoms}</p>
-                                    <p className="text-slate-700 text-sm mb-2"><strong>AI provisional impression:</strong> {provisionalImpression}</p>
-                                    <p className="text-slate-600 text-sm mb-2"><strong>AI recommendation:</strong> {tc.aiRecommendedAction}</p>
-                                    <p className="text-slate-500 text-sm mb-2"><strong>Possible conditions:</strong> {(tc.aiPossibleConditions || []).join(', ')}</p>
-                                    <p className="text-slate-500 text-sm mb-2"><strong>AI reasoning:</strong> {tc.aiReasoning}</p>
-                                    {tc.attachments && tc.attachments.length > 0 && (
-                                        <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                                            <p className="mb-2 text-sm font-semibold text-slate-800">Clinical attachments</p>
-                                            <div className="flex flex-wrap gap-2">
-                                                {tc.attachments.map((attachment) => (
-                                                    <a
-                                                        key={attachment.id}
-                                                        href={attachment.url}
-                                                        target="_blank"
-                                                        rel="noreferrer"
-                                                        className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:border-blue-400 hover:text-blue-700"
-                                                    >
-                                                        <span>{attachment.kind === 'symptom_image' ? '📸' : attachment.kind === 'lab_result' ? '🧪' : '📎'}</span>
-                                                        <span>{attachment.fileName}</span>
-                                                    </a>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-                                    {(tc.medicalPassport || tc.reviewSafety) && (
-                                        <div className="mb-4 grid gap-3 md:grid-cols-2">
-                                            <div className="rounded-lg border border-slate-200 bg-white p-3">
-                                                <p className="mb-2 text-sm font-semibold text-slate-800">Medical passport</p>
-                                                <div className="space-y-1 text-xs text-slate-600">
-                                                    <p><strong>Allergies:</strong> {tc.medicalPassport?.allergies?.length ? tc.medicalPassport.allergies.join(', ') : 'Not recorded'}</p>
-                                                    <p><strong>Current meds:</strong> {tc.medicalPassport?.currentMedications?.length ? tc.medicalPassport.currentMedications.join(', ') : 'Not recorded'}</p>
-                                                    <p><strong>Chronic conditions:</strong> {tc.medicalPassport?.chronicConditions?.length ? tc.medicalPassport.chronicConditions.join(', ') : 'Not recorded'}</p>
-                                                    <p><strong>Blood type:</strong> {tc.medicalPassport?.bloodType || 'Not recorded'}</p>
-                                                    <p><strong>Pregnancy:</strong> {tc.medicalPassport?.pregnancy === null || tc.medicalPassport?.pregnancy === undefined ? 'Not recorded' : tc.medicalPassport?.pregnancy ? 'Yes' : 'No'}</p>
-                                                </div>
-                                            </div>
-                                            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-                                                <p className="mb-2 text-sm font-semibold text-amber-900">Safety review</p>
-                                                {tc.reviewSafety?.warnings?.length ? (
-                                                    <ul className="space-y-1 text-xs text-amber-800">
-                                                        {tc.reviewSafety.warnings.map((warning, idx) => (
-                                                            <li key={idx}>• {warning}</li>
-                                                        ))}
-                                                    </ul>
-                                                ) : (
-                                                    <p className="text-xs text-emerald-700">Medical-passport review checks are complete.</p>
-                                                )}
-                                                {!!tc.medicalPassport?.missingFields?.length && (
-                                                    <p className="mt-2 text-xs text-amber-700">
-                                                        Missing: {tc.medicalPassport.missingFields.join(', ')}
-                                                    </p>
-                                                )}
-                                            </div>
-                                        </div>
-                                    )}
-                                    {tc.followUpRequestedAt && (
-                                        <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm">
-                                            <p className="font-semibold text-blue-900">
-                                                {tc.status === 'AWAITING_PATIENT_RESPONSE' ? 'Awaiting patient response' : 'Most recent follow-up request'}
-                                            </p>
-                                            {tc.followUpRequestMessage && (
-                                                <p className="mt-1 text-blue-800">{tc.followUpRequestMessage}</p>
-                                            )}
-                                            {!!tc.followUpQuestions?.length && (
-                                                <p className="mt-2 text-xs text-blue-700">
-                                                    Questions: {tc.followUpQuestions.join(' | ')}
-                                                </p>
-                                            )}
-                                            {!!tc.requestedInvestigations?.length && (
-                                                <p className="mt-1 text-xs text-blue-700">
-                                                    Investigations: {tc.requestedInvestigations.join(' | ')}
-                                                </p>
-                                            )}
-                                            {tc.patientFollowUpResponse && (
-                                                <div className="mt-3 rounded-md bg-white p-3 text-slate-700">
-                                                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Patient response</p>
-                                                    <p className="mt-1 text-sm">{tc.patientFollowUpResponse}</p>
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-                                    {tc.aiModel && (
-                                        <p className="text-xs text-slate-400 mb-4">AI model: {tc.aiModel}</p>
-                                    )}
-                                    <div className="flex flex-wrap gap-3 border-t pt-4" style={{ borderColor: 'var(--border)' }}>
-                                        {tc.status === 'PENDING_REVIEW' && (
-                                            <button
-                                                onClick={() => handleClaim(tc.id)}
-                                                className="px-4 py-2 rounded-lg font-medium text-white transition"
-                                                style={{ backgroundColor: '#2196f3' }}
-                                            >
-                                                Claim case
-                                            </button>
-                                        )}
-                                        {(tc.status === 'ASSIGNED' || tc.status === 'REVIEWED') && (
-                                            <button
-                                                onClick={() => setReviewModal({ caseId: tc.id, aiTriageLevel: tc.aiTriageLevel, doctorNotes: '', doctorDiagnosis: '', doctorRecommendations: '', finalTriageLevel: tc.aiTriageLevel, overrideReason: '' })}
-                                                className="px-4 py-2 rounded-lg font-medium text-white transition"
-                                                style={{ backgroundColor: '#ff9800' }}
-                                            >
-                                                ✎ Write review
-                                            </button>
-                                        )}
-                                        {(tc.status === 'ASSIGNED' || tc.status === 'REVIEWED') && (
-                                            <button
-                                                onClick={() => setFollowUpModal({
-                                                    caseId: tc.id,
-                                                    requestType: 'MORE_INFO',
-                                                    message: tc.followUpRequestMessage || '',
-                                                    questionsText: (tc.followUpQuestions || []).join('\n'),
-                                                    investigationsText: (tc.requestedInvestigations || []).join('\n'),
-                                                })}
-                                                className="px-4 py-2 rounded-lg font-medium text-white transition"
-                                                style={{ backgroundColor: '#2563eb' }}
-                                            >
-                                                Request more info
-                                            </button>
-                                        )}
-                                        {tc.status === 'REVIEWED' && (<>
-                                            <button
-                                                onClick={() => handleRelease(tc.id)}
-                                                disabled={releasing === tc.id}
-                                                className="px-4 py-2 rounded-lg font-medium text-white transition disabled:opacity-60"
-                                                style={{ backgroundColor: '#4caf50' }}
-                                            >
-                                                {releasing === tc.id ? 'Releasing…' : '✅ Release result'}
-                                            </button>
-                                            <button
-                                                onClick={() => setPrescriptionModal({ caseId: tc.id, diagnosis: tc.doctorDiagnosis || '', medications: [blankMed()], doctorNotes: '' })}
-                                                className="px-4 py-2 rounded-lg font-medium text-white transition"
-                                                style={{ backgroundColor: '#0d9488' }}
-                                            >
-                                                💊 Write prescription
-                                            </button>
-                                            <button
-                                                onClick={() => setReferralModal({ caseId: tc.id, referralType: 'EMERGENCY', provisionalDiagnosis: tc.doctorDiagnosis || '', clinicalNotes: '', recommendedFacility: 'HOSPITAL' })}
-                                                className="px-4 py-2 rounded-lg font-medium text-white transition"
-                                                style={{ backgroundColor: '#dc2626' }}
-                                            >
-                                                🚨 Emergency referral
-                                            </button>
-                                        </>)}
-                                    </div>
-                                </Card>
-                              );
-                            })}
+                            {triageCases.map((tc) => (
+                                <TriageCaseCard
+                                    key={tc.id}
+                                    tc={tc}
+                                    releasing={releasing}
+                                    onClaim={handleClaim}
+                                    onOpenReview={(c) => setReviewModal({ caseId: c.id, aiTriageLevel: c.aiTriageLevel, doctorNotes: '', doctorDiagnosis: '', doctorRecommendations: '', finalTriageLevel: c.aiTriageLevel, overrideReason: '' })}
+                                    onOpenFollowUp={(c) => setFollowUpModal({
+                                        caseId: c.id,
+                                        requestType: 'MORE_INFO',
+                                        message: c.followUpRequestMessage || '',
+                                        questionsText: (c.followUpQuestions || []).join('\n'),
+                                        investigationsText: (c.requestedInvestigations || []).join('\n'),
+                                    })}
+                                    onRelease={handleRelease}
+                                    onOpenPrescription={(c) => setPrescriptionModal({ caseId: c.id, diagnosis: c.doctorDiagnosis || '', medications: [blankMed()], doctorNotes: '' })}
+                                    onOpenReferral={(c) => setReferralModal({ caseId: c.id, referralType: 'EMERGENCY', provisionalDiagnosis: c.doctorDiagnosis || '', clinicalNotes: '', recommendedFacility: 'HOSPITAL' })}
+                                />
+                            ))}
                         </div>
                     </section>
                 )}
@@ -581,371 +365,47 @@ export default function DoctorDashboard() {
                 ) : (
                     <div className="grid gap-6">
                         {triageQueue.map((visit) => (
-                            <Card key={visit.id}>
-                                <div className="flex justify-between items-start mb-4">
-                                    <div>
-                                        <h3 className="text-xl font-bold text-[var(--foreground)]">
-                                            {visit.booking?.patient?.firstName} {visit.booking?.patient?.lastName}
-                                        </h3>
-                                        <p className="text-sm text-[var(--muted)]">
-                                            {visit.createdAt ? new Date(visit.createdAt).toLocaleString() : 'Date TBD'}
-                                        </p>
-                                        <p className="text-sm text-[var(--muted)] mt-1">{visit.booking?.encryptedAddress ?? 'Address on file'}</p>
-                                    </div>
-                                    <StatusBadge variant={visit.triageLevel <= 2 ? 'danger' : 'warning'}>
-                                        {visit.triageLevel ? `Level ${visit.triageLevel}` : visit.status}
-                                    </StatusBadge>
-                                </div>
-
-                                {visit.biometrics && (
-                                    <div className="grid md:grid-cols-2 gap-6 mb-6">
-                                        <div className="bg-slate-50 p-4 rounded-lg">
-                                            <h4 className="font-semibold text-slate-800 mb-2">Biometric Readings</h4>
-                                            <div className="text-sm text-slate-700 space-y-1">
-                                                {visit.biometrics.heartRate && (
-                                                    <p>Heart Rate: {visit.biometrics.heartRate} bpm</p>
-                                                )}
-                                                {visit.biometrics.bloodPressure && (
-                                                    <p>BP: {visit.biometrics.bloodPressure.systolic}/{visit.biometrics.bloodPressure.diastolic}</p>
-                                                )}
-                                                {visit.biometrics.temperature && (
-                                                    <p>Temperature: {visit.biometrics.temperature}°C</p>
-                                                )}
-                                                {visit.biometrics.oxygenSaturation && (
-                                                    <p>SpO2: {visit.biometrics.oxygenSaturation}%</p>
-                                                )}
-                                            </div>
-                                        </div>
-                                        {visit.treatment && (
-                                            <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
-                                                <h4 className="font-semibold text-blue-800 mb-2">Treatment Plan</h4>
-                                                <div className="text-sm text-blue-700">
-                                                    {visit.treatment.medications && visit.treatment.medications.length > 0 && (
-                                                        <div className="mb-2">
-                                                            <strong>Medications:</strong>
-                                                            <ul className="list-disc list-inside">
-                                                                {visit.treatment.medications.map((med, idx) => (
-                                                                    <li key={idx}>{med.name} - {med.dosage}</li>
-                                                                ))}
-                                                            </ul>
-                                                        </div>
-                                                    )}
-                                                    {visit.treatment.notes && (
-                                                        <p><strong>Notes:</strong> {visit.treatment.notes}</p>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-
-                                {visit.nurseReport && (
-                                    <div className="bg-green-50 p-4 rounded-lg mb-6 border border-green-100">
-                                        <h4 className="font-semibold text-green-800 mb-2">Nurse Report</h4>
-                                        <p className="text-sm text-green-700">{visit.nurseReport}</p>
-                                    </div>
-                                )}
-
-                                <div className="flex gap-4 border-t pt-4" style={{ borderColor: 'var(--border)' }}>
-                                    <button
-                                        onClick={() => handleApprove(visit.id)}
-                                        className="px-6 py-2 rounded-lg font-medium text-white transition"
-                                        style={{ backgroundColor: 'var(--success)' }}
-                                    >
-                                        Approve & Complete
-                                    </button>
-                                    <button
-                                        onClick={() => handleStatusUpdate(visit.id, 'PENDING_REVIEW')}
-                                        className="px-6 py-2 rounded-lg border font-semibold transition bg-[var(--card)] hover:bg-slate-50"
-                                        style={{ borderColor: 'var(--border)', color: 'var(--foreground)' }}
-                                    >
-                                        Request More Info
-                                    </button>
-                                    <button
-                                        onClick={() => handleStatusUpdate(visit.id, 'CANCELLED')}
-                                        className="px-6 py-2 rounded-lg border font-medium transition ml-auto hover:bg-red-50"
-                                        style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }}
-                                    >
-                                        Escalate to ER
-                                    </button>
-                                </div>
-                            </Card>
+                            <NurseVisitCard
+                                key={visit.id}
+                                visit={visit}
+                                onApprove={handleApprove}
+                                onStatusUpdate={handleStatusUpdate}
+                            />
                         ))}
                     </div>
                 )}
                 </section>
 
-                {/* ── Prescription modal ── */}
-                <Modal
-                    open={!!prescriptionModal}
+                <PrescriptionModal
+                    state={prescriptionModal}
+                    onChange={setPrescriptionModal}
                     onClose={() => setPrescriptionModal(null)}
-                    title="💊 Write Prescription"
-                    primaryLabel={submittingDoc ? 'Issuing…' : 'Issue prescription'}
-                    onPrimary={handleIssuePrescription}
-                    primaryDisabled={submittingDoc}
-                    secondaryLabel="Cancel"
-                    onSecondary={() => setPrescriptionModal(null)}
-                >
-                    <div className="space-y-4">
-                        <p className="text-xs text-amber-600 bg-amber-50 rounded-lg p-3">
-                            ⚠️ Your HPCSA practice number will be printed on this script. Ensure it is set in your profile before issuing.
-                        </p>
-                        <div>
-                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Diagnosis <span className="text-red-500">*</span></label>
-                            <input type="text" className="w-full rounded-lg border px-4 py-2.5" style={{ borderColor: 'var(--border)' }}
-                                value={prescriptionModal?.diagnosis ?? ''}
-                                onChange={e => prescriptionModal && setPrescriptionModal({ ...prescriptionModal, diagnosis: e.target.value })}
-                                placeholder="Clinical diagnosis"
-                            />
-                        </div>
-                        <div>
-                            <div className="flex items-center justify-between mb-2">
-                                <label className="text-sm font-medium text-[var(--foreground)]">Medications <span className="text-red-500">*</span></label>
-                                <button type="button" className="text-xs text-teal-600 font-semibold"
-                                    onClick={() => prescriptionModal && setPrescriptionModal({ ...prescriptionModal, medications: [...prescriptionModal.medications, blankMed()] })}>
-                                    + Add medication
-                                </button>
-                            </div>
-                            {prescriptionModal?.medications.map((med, i) => (
-                                <div key={i} className="border rounded-lg p-3 mb-2 space-y-2" style={{ borderColor: 'var(--border)' }}>
-                                    <div className="flex gap-2">
-                                        <input placeholder="Drug name *" className="flex-1 rounded border px-3 py-2 text-sm" style={{ borderColor: 'var(--border)' }}
-                                            value={med.name}
-                                            onChange={e => { const m = [...prescriptionModal.medications]; m[i] = { ...m[i], name: e.target.value }; setPrescriptionModal({ ...prescriptionModal, medications: m }); }}
-                                        />
-                                        <input placeholder="Dosage *" className="w-28 rounded border px-3 py-2 text-sm" style={{ borderColor: 'var(--border)' }}
-                                            value={med.dosage}
-                                            onChange={e => { const m = [...prescriptionModal.medications]; m[i] = { ...m[i], dosage: e.target.value }; setPrescriptionModal({ ...prescriptionModal, medications: m }); }}
-                                        />
-                                        {prescriptionModal.medications.length > 1 && (
-                                            <button type="button" className="text-red-400 text-xs px-2"
-                                                onClick={() => { const m = prescriptionModal.medications.filter((_, idx) => idx !== i); setPrescriptionModal({ ...prescriptionModal, medications: m }); }}>✕</button>
-                                        )}
-                                    </div>
-                                    <div className="flex gap-2">
-                                        <input placeholder="Frequency (e.g. 3x daily)" className="flex-1 rounded border px-3 py-2 text-sm" style={{ borderColor: 'var(--border)' }}
-                                            value={med.frequency}
-                                            onChange={e => { const m = [...prescriptionModal.medications]; m[i] = { ...m[i], frequency: e.target.value }; setPrescriptionModal({ ...prescriptionModal, medications: m }); }}
-                                        />
-                                        <input placeholder="Duration (e.g. 5 days)" className="flex-1 rounded border px-3 py-2 text-sm" style={{ borderColor: 'var(--border)' }}
-                                            value={med.duration}
-                                            onChange={e => { const m = [...prescriptionModal.medications]; m[i] = { ...m[i], duration: e.target.value }; setPrescriptionModal({ ...prescriptionModal, medications: m }); }}
-                                        />
-                                    </div>
-                                    <input placeholder="Special instructions (optional)" className="w-full rounded border px-3 py-2 text-sm" style={{ borderColor: 'var(--border)' }}
-                                        value={med.instructions}
-                                        onChange={e => { const m = [...prescriptionModal.medications]; m[i] = { ...m[i], instructions: e.target.value }; setPrescriptionModal({ ...prescriptionModal, medications: m }); }}
-                                    />
-                                </div>
-                            ))}
-                        </div>
-                        <div>
-                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Additional notes</label>
-                            <textarea rows={2} className="w-full rounded-lg border px-4 py-2.5 text-sm" style={{ borderColor: 'var(--border)' }}
-                                value={prescriptionModal?.doctorNotes ?? ''}
-                                onChange={e => prescriptionModal && setPrescriptionModal({ ...prescriptionModal, doctorNotes: e.target.value })}
-                                placeholder="Dietary advice, follow-up instructions, etc."
-                            />
-                        </div>
-                        <p className="text-xs text-[var(--muted)]">The patient will receive a real-time notification and a downloadable PDF prescription. Valid for 30 days from issue (Schedule 0–4).</p>
-                    </div>
-                </Modal>
+                    onSubmit={handleIssuePrescription}
+                    submitting={submittingDoc}
+                />
 
-                <Modal
-                    open={!!followUpModal}
+                <FollowUpRequestModal
+                    state={followUpModal}
+                    onChange={setFollowUpModal}
                     onClose={() => setFollowUpModal(null)}
-                    title="Request more information"
-                    primaryLabel={submittingDoc ? 'Sending…' : 'Send request'}
-                    onPrimary={handleRequestFollowUp}
-                    primaryDisabled={submittingDoc}
-                    secondaryLabel="Cancel"
-                    onSecondary={() => setFollowUpModal(null)}
-                >
-                    <div className="space-y-4">
-                        <div>
-                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Request type</label>
-                            <select
-                                className="w-full rounded-lg border px-4 py-2.5 text-sm"
-                                style={{ borderColor: 'var(--border)' }}
-                                value={followUpModal?.requestType ?? 'MORE_INFO'}
-                                onChange={(e) => followUpModal && setFollowUpModal({ ...followUpModal, requestType: e.target.value as 'MORE_INFO' | 'INVESTIGATION' })}
-                            >
-                                <option value="MORE_INFO">More information</option>
-                                <option value="INVESTIGATION">Investigation / results request</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Patient-facing message</label>
-                            <textarea
-                                rows={3}
-                                className="w-full rounded-lg border px-4 py-2.5 text-sm"
-                                style={{ borderColor: 'var(--border)' }}
-                                value={followUpModal?.message ?? ''}
-                                onChange={(e) => followUpModal && setFollowUpModal({ ...followUpModal, message: e.target.value })}
-                                placeholder="Explain what you still need from the patient."
-                            />
-                        </div>
-                        <div>
-                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Questions</label>
-                            <textarea
-                                rows={4}
-                                className="w-full rounded-lg border px-4 py-2.5 text-sm"
-                                style={{ borderColor: 'var(--border)' }}
-                                value={followUpModal?.questionsText ?? ''}
-                                onChange={(e) => followUpModal && setFollowUpModal({ ...followUpModal, questionsText: e.target.value })}
-                                placeholder={"One question per line\nHow long have you had the fever?\nHave you started any new medication?"}
-                            />
-                        </div>
-                        <div>
-                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Requested investigations</label>
-                            <textarea
-                                rows={4}
-                                className="w-full rounded-lg border px-4 py-2.5 text-sm"
-                                style={{ borderColor: 'var(--border)' }}
-                                value={followUpModal?.investigationsText ?? ''}
-                                onChange={(e) => followUpModal && setFollowUpModal({ ...followUpModal, investigationsText: e.target.value })}
-                                placeholder={"One item per line\nUpload latest glucose log\nAttach chest X-ray report"}
-                            />
-                        </div>
-                    </div>
-                </Modal>
+                    onSubmit={handleRequestFollowUp}
+                    submitting={submittingDoc}
+                />
 
-                {/* ── Emergency Referral modal ── */}
-                <Modal
-                    open={!!referralModal}
+                <ReferralModal
+                    state={referralModal}
+                    onChange={setReferralModal}
                     onClose={() => setReferralModal(null)}
-                    title="🚨 Emergency Referral"
-                    primaryLabel={submittingDoc ? 'Issuing…' : 'Issue referral'}
-                    onPrimary={handleIssueReferral}
-                    primaryDisabled={submittingDoc}
-                    secondaryLabel="Cancel"
-                    onSecondary={() => setReferralModal(null)}
-                >
-                    <div className="space-y-4">
-                        <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-                            <p className="text-sm font-semibold text-red-700">⚠️ Emergency referral</p>
-                            <p className="text-xs text-red-600 mt-1">The patient will receive an immediate alert with SA emergency numbers (10177 / 112) and a downloadable referral letter they can present at any facility — even without platform access.</p>
-                        </div>
-                        <div className="flex gap-3">
-                            <div className="flex-1">
-                                <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Referral type</label>
-                                <select className="w-full rounded-lg border px-4 py-2.5 text-sm" style={{ borderColor: 'var(--border)' }}
-                                    value={referralModal?.referralType ?? 'EMERGENCY'}
-                                    onChange={e => referralModal && setReferralModal({ ...referralModal, referralType: e.target.value })}>
-                                    <option value="EMERGENCY">🔴 Emergency</option>
-                                    <option value="URGENT">🟠 Urgent</option>
-                                    <option value="SPECIALIST">🔵 Specialist</option>
-                                    <option value="ROUTINE">🟢 Routine</option>
-                                </select>
-                            </div>
-                            <div className="flex-1">
-                                <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Recommended facility</label>
-                                <select className="w-full rounded-lg border px-4 py-2.5 text-sm" style={{ borderColor: 'var(--border)' }}
-                                    value={referralModal?.recommendedFacility ?? 'HOSPITAL'}
-                                    onChange={e => referralModal && setReferralModal({ ...referralModal, recommendedFacility: e.target.value })}>
-                                    <option value="HOSPITAL">Hospital (Emergency)</option>
-                                    <option value="CLINIC">Clinic / CHC</option>
-                                    <option value="SPECIALIST">Specialist rooms</option>
-                                    <option value="EMS">EMS / Ambulance</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div>
-                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Provisional diagnosis <span className="text-red-500">*</span></label>
-                            <input type="text" className="w-full rounded-lg border px-4 py-2.5" style={{ borderColor: 'var(--border)' }}
-                                value={referralModal?.provisionalDiagnosis ?? ''}
-                                onChange={e => referralModal && setReferralModal({ ...referralModal, provisionalDiagnosis: e.target.value })}
-                                placeholder="e.g. Suspected bacterial meningitis"
-                            />
-                        </div>
-                        <div>
-                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Clinical assessment / referral notes <span className="text-red-500">*</span></label>
-                            <textarea rows={5} className="w-full rounded-lg border px-4 py-2.5 text-sm" style={{ borderColor: 'var(--border)' }}
-                                value={referralModal?.clinicalNotes ?? ''}
-                                onChange={e => referralModal && setReferralModal({ ...referralModal, clinicalNotes: e.target.value })}
-                                placeholder="Describe the patient's presentation, vitals, AI assessment findings, and your clinical reasoning for this referral. This text appears verbatim on the referral letter."
-                            />
-                        </div>
-                        <p className="text-xs text-[var(--muted)]">Your HPCSA practice number will be printed on the referral. The letter is legally valid under the National Health Act 61 of 2003.</p>
-                    </div>
-                </Modal>
+                    onSubmit={handleIssueReferral}
+                    submitting={submittingDoc}
+                />
 
-                {/* Doctor review modal — claim → review → release */}
-                <Modal
-                    open={!!reviewModal}
+                <ReviewModal
+                    state={reviewModal}
+                    onChange={setReviewModal}
                     onClose={() => setReviewModal(null)}
-                    title="Doctor review"
-                    primaryLabel="Save review"
-                    onPrimary={handleSaveReview}
-                    primaryDisabled={!reviewModal?.doctorNotes?.trim() || !reviewModal?.doctorDiagnosis?.trim()}
-                    secondaryLabel="Cancel"
-                    onSecondary={() => setReviewModal(null)}
-                >
-                    <div className="space-y-4">
-                        <div>
-                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Clinical notes <span className="text-red-500">*</span></label>
-                            <textarea
-                                placeholder="Clinical observations and reasoning"
-                                className="w-full rounded-lg border px-4 py-2.5 text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2"
-                                style={{ borderColor: 'var(--border)' }}
-                                rows={3}
-                                value={reviewModal?.doctorNotes ?? ''}
-                                onChange={(e) => reviewModal && setReviewModal({ ...reviewModal, doctorNotes: e.target.value })}
-                            />
-                        </div>
-                        <div>
-                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Diagnosis <span className="text-red-500">*</span></label>
-                            <input
-                                type="text"
-                                placeholder="Your clinical diagnosis"
-                                className="w-full rounded-lg border px-4 py-2.5 text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2"
-                                style={{ borderColor: 'var(--border)' }}
-                                value={reviewModal?.doctorDiagnosis ?? ''}
-                                onChange={(e) => reviewModal && setReviewModal({ ...reviewModal, doctorDiagnosis: e.target.value })}
-                            />
-                        </div>
-                        <div>
-                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Recommendations to patient</label>
-                            <textarea
-                                placeholder="What should the patient do next?"
-                                className="w-full rounded-lg border px-4 py-2.5 text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2"
-                                style={{ borderColor: 'var(--border)' }}
-                                rows={2}
-                                value={reviewModal?.doctorRecommendations ?? ''}
-                                onChange={(e) => reviewModal && setReviewModal({ ...reviewModal, doctorRecommendations: e.target.value })}
-                            />
-                        </div>
-                        <div>
-                            <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Final SATS level (AI suggested: {reviewModal?.aiTriageLevel})</label>
-                            <select
-                                className="w-full rounded-lg border px-4 py-2.5 text-[var(--foreground)] focus:outline-none focus:ring-2"
-                                style={{ borderColor: 'var(--border)' }}
-                                value={reviewModal?.finalTriageLevel ?? reviewModal?.aiTriageLevel ?? ''}
-                                onChange={(e) => reviewModal && setReviewModal({ ...reviewModal, finalTriageLevel: parseInt(e.target.value) })}
-                            >
-                                <option value={1}>1 — Resuscitation (Red)</option>
-                                <option value={2}>2 — Emergency (Orange)</option>
-                                <option value={3}>3 — Urgent (Yellow)</option>
-                                <option value={4}>4 — Less-Urgent (Green)</option>
-                                <option value={5}>5 — Non-Urgent (Blue)</option>
-                            </select>
-                        </div>
-                        {reviewModal && reviewModal.finalTriageLevel !== reviewModal.aiTriageLevel && (
-                            <div>
-                                <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Override reason <span className="text-red-500">*</span></label>
-                                <input
-                                    type="text"
-                                    placeholder="Why are you changing the AI triage level?"
-                                    className="w-full rounded-lg border px-4 py-2.5 text-[var(--foreground)] placeholder:text-[var(--muted)] focus:outline-none focus:ring-2"
-                                    style={{ borderColor: 'var(--border)' }}
-                                    value={reviewModal?.overrideReason ?? ''}
-                                    onChange={(e) => reviewModal && setReviewModal({ ...reviewModal, overrideReason: e.target.value })}
-                                />
-                            </div>
-                        )}
-                        <p className="text-xs text-[var(--muted)] pt-2">After saving, click <strong>Release to patient</strong> on the case card to deliver the result in real time.</p>
-                    </div>
-                </Modal>
+                    onSubmit={handleSaveReview}
+                />
                 </div>{/* p-6 */}
                 </div>{/* outer bg */}
             </DashboardLayout>
