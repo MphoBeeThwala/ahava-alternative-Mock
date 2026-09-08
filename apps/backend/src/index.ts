@@ -14,6 +14,7 @@ const DEBUG = process.env.DEBUG === "true";
 
 // Import routes
 import authRoutes from "./routes/auth";
+import twoFactorRoutes from "./routes/twoFactor";
 import bookingRoutes from "./routes/bookings";
 import visitRoutes from "./routes/visits";
 import messageRoutes from "./routes/messages";
@@ -192,6 +193,7 @@ app.get("/", (req, res) => {
 
 // API routes
 app.use("/api/auth", authRoutes);
+app.use("/api/auth/2fa", twoFactorRoutes);
 app.use("/api/bookings", authMiddleware, bookingRoutes);
 app.use("/api/visits", authMiddleware, visitRoutes);
 app.use("/api/messages", authMiddleware, messageRoutes);

@@ -22,7 +22,10 @@ export const TOKEN_ISSUER = "ahava-api";
 export const TOKEN_AUDIENCE = "ahava-app";
 export const TOKEN_ALGORITHM = "HS256" as const;
 
-export type TokenType = "access" | "refresh" | "websocket";
+export type TokenType = "access" | "refresh" | "websocket" | "twofa_pending";
+
+/** How long a user has to complete AH-29's second login step. */
+export const TWOFA_PENDING_TTL_SECONDS = 300;
 
 export interface AhavaTokenPayload {
   userId: string;

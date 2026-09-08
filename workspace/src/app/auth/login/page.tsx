@@ -3,15 +3,18 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useAuth } from '../../../contexts/AuthContext';
+import { useAuth, TwoFactorRequiredError } from '../../../contexts/AuthContext';
 
 export default function LoginPage() {
     const router = useRouter();
-    const { login, isAuthenticated } = useAuth();
+    const { login, completeTwoFactorLogin, isAuthenticated } = useAuth();
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    // AH-29: set once the account turns out to have opt-in 2FA enabled.
+    const [pendingToken, setPendingToken] = useState<string | null>(null);
+    const [twoFactorCode, setTwoFactorCode] = useState('');
 
     // Redirect if already authenticated
     React.useEffect(() => {
@@ -34,19 +37,13 @@ export default function LoginPage() {
 
         try {
             await login(email, password);
-            
-            // Get user from localStorage after login
-            const user = JSON.parse(localStorage.getItem('user') || '{}');
-            
-            // Redirect based on role
-            switch (user.role) {
-                case 'PATIENT': router.push('/patient/dashboard'); break;
-                case 'DOCTOR': router.push('/doctor/dashboard'); break;
-                case 'NURSE': router.push('/nurse/dashboard'); break;
-                case 'ADMIN': router.push('/admin/dashboard'); break;
-                default: router.push('/');
-            }
+            redirectAfterLogin();
         } catch (err: unknown) {
+            if (err instanceof TwoFactorRequiredError) {
+                setPendingToken(err.pendingToken);
+                setLoading(false);
+                return;
+            }
             const e = err as { message?: string; code?: string; response?: { status?: number; data?: { error?: string } } };
             const status = e.response?.status;
             const is502 = status === 502 || status === 503 || status === 504;
@@ -58,6 +55,33 @@ export default function LoginPage() {
             } else {
                 setError((e.response?.data as { error?: string })?.error || e.message || 'Login failed');
             }
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const redirectAfterLogin = () => {
+        const user = JSON.parse(localStorage.getItem('user') || '{}');
+        switch (user.role) {
+            case 'PATIENT': router.push('/patient/dashboard'); break;
+            case 'DOCTOR': router.push('/doctor/dashboard'); break;
+            case 'NURSE': router.push('/nurse/dashboard'); break;
+            case 'ADMIN': router.push('/admin/dashboard'); break;
+            default: router.push('/');
+        }
+    };
+
+    const handleTwoFactorSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!pendingToken) return;
+        setLoading(true);
+        setError('');
+        try {
+            await completeTwoFactorLogin(pendingToken, twoFactorCode.trim());
+            redirectAfterLogin();
+        } catch (err: unknown) {
+            const e2 = err as { response?: { status?: number; data?: { error?: string } } };
+            setError(e2.response?.data?.error || 'Invalid code');
         } finally {
             setLoading(false);
         }
@@ -109,8 +133,14 @@ export default function LoginPage() {
                     </Link>
 
                     <div style={{ marginBottom: 32 }}>
-                        <h1 style={{ fontSize: 28, fontWeight: 900, color: '#1c1917', marginBottom: 6 }}>Welcome back</h1>
-                        <p style={{ fontSize: 14, color: '#57534e' }}>Sign in to your Ahava account</p>
+                        <h1 style={{ fontSize: 28, fontWeight: 900, color: '#1c1917', marginBottom: 6 }}>
+                            {pendingToken ? 'Enter your code' : 'Welcome back'}
+                        </h1>
+                        <p style={{ fontSize: 14, color: '#57534e' }}>
+                            {pendingToken
+                                ? 'Enter the 6-digit code from your authenticator app, or a backup code.'
+                                : 'Sign in to your Ahava account'}
+                        </p>
                     </div>
 
                     {error && (
@@ -120,50 +150,86 @@ export default function LoginPage() {
                         </div>
                     )}
 
-                    <form style={{ display: 'flex', flexDirection: 'column', gap: 18 }} onSubmit={handleSubmit}>
-                        <div>
-                            <label htmlFor="login-email" style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Email address</label>
-                            <input
-                                id="login-email"
-                                data-testid="login-email"
-                                type="email"
-                                required
-                                autoComplete="email"
-                                placeholder="you@example.com"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                style={inp}
-                                onFocus={(e) => (e.currentTarget.style.borderColor = '#0d9488')}
-                                onBlur={(e) => (e.currentTarget.style.borderColor = '#e7e5e4')}
-                            />
-                        </div>
-                        <div>
-                            <label htmlFor="login-password" style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Password</label>
-                            <input
-                                id="login-password"
-                                data-testid="login-password"
-                                type="password"
-                                required
-                                autoComplete="current-password"
-                                placeholder="••••••••"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                style={inp}
-                                onFocus={(e) => (e.currentTarget.style.borderColor = '#0d9488')}
-                                onBlur={(e) => (e.currentTarget.style.borderColor = '#e7e5e4')}
-                            />
-                            <div style={{ textAlign: 'right', marginTop: 6 }}>
-                                <Link href="/auth/forgot-password" style={{ fontSize: 12, color: '#0d9488', fontWeight: 600, textDecoration: 'none' }}>Forgot password?</Link>
+                    {pendingToken ? (
+                        <form style={{ display: 'flex', flexDirection: 'column', gap: 18 }} onSubmit={handleTwoFactorSubmit}>
+                            <div>
+                                <label htmlFor="twofa-code" style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Authentication code</label>
+                                <input
+                                    id="twofa-code"
+                                    data-testid="twofa-code"
+                                    type="text"
+                                    inputMode="numeric"
+                                    autoComplete="one-time-code"
+                                    autoFocus
+                                    placeholder="123456"
+                                    value={twoFactorCode}
+                                    onChange={(e) => setTwoFactorCode(e.target.value)}
+                                    style={{ ...inp, letterSpacing: 4, textAlign: 'center', fontSize: 20 }}
+                                    onFocus={(e) => (e.currentTarget.style.borderColor = '#0d9488')}
+                                    onBlur={(e) => (e.currentTarget.style.borderColor = '#e7e5e4')}
+                                />
                             </div>
-                        </div>
-                        <button
-                            type="submit"
-                            disabled={loading}
-                            style={{ width: '100%', background: loading ? '#a8a29e' : 'linear-gradient(135deg,#0d9488,#059669)', border: 'none', color: 'white', borderRadius: 10, padding: '13px 20px', fontSize: 15, fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer', fontFamily: 'inherit', boxShadow: loading ? 'none' : '0 4px 14px rgba(13,148,136,0.35)', marginTop: 4 }}
-                        >
-                            {loading ? 'Signing in…' : 'Sign In →'}
-                        </button>
-                    </form>
+                            <button
+                                type="submit"
+                                disabled={loading || twoFactorCode.trim().length === 0}
+                                style={{ width: '100%', background: loading ? '#a8a29e' : 'linear-gradient(135deg,#0d9488,#059669)', border: 'none', color: 'white', borderRadius: 10, padding: '13px 20px', fontSize: 15, fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer', fontFamily: 'inherit', boxShadow: loading ? 'none' : '0 4px 14px rgba(13,148,136,0.35)', marginTop: 4 }}
+                            >
+                                {loading ? 'Verifying…' : 'Verify →'}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => { setPendingToken(null); setTwoFactorCode(''); setError(''); }}
+                                style={{ background: 'none', border: 'none', color: '#78716c', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}
+                            >
+                                ← Back to sign in
+                            </button>
+                        </form>
+                    ) : (
+                        <form style={{ display: 'flex', flexDirection: 'column', gap: 18 }} onSubmit={handleSubmit}>
+                            <div>
+                                <label htmlFor="login-email" style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Email address</label>
+                                <input
+                                    id="login-email"
+                                    data-testid="login-email"
+                                    type="email"
+                                    required
+                                    autoComplete="email"
+                                    placeholder="you@example.com"
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    style={inp}
+                                    onFocus={(e) => (e.currentTarget.style.borderColor = '#0d9488')}
+                                    onBlur={(e) => (e.currentTarget.style.borderColor = '#e7e5e4')}
+                                />
+                            </div>
+                            <div>
+                                <label htmlFor="login-password" style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Password</label>
+                                <input
+                                    id="login-password"
+                                    data-testid="login-password"
+                                    type="password"
+                                    required
+                                    autoComplete="current-password"
+                                    placeholder="••••••••"
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    style={inp}
+                                    onFocus={(e) => (e.currentTarget.style.borderColor = '#0d9488')}
+                                    onBlur={(e) => (e.currentTarget.style.borderColor = '#e7e5e4')}
+                                />
+                                <div style={{ textAlign: 'right', marginTop: 6 }}>
+                                    <Link href="/auth/forgot-password" style={{ fontSize: 12, color: '#0d9488', fontWeight: 600, textDecoration: 'none' }}>Forgot password?</Link>
+                                </div>
+                            </div>
+                            <button
+                                type="submit"
+                                disabled={loading}
+                                style={{ width: '100%', background: loading ? '#a8a29e' : 'linear-gradient(135deg,#0d9488,#059669)', border: 'none', color: 'white', borderRadius: 10, padding: '13px 20px', fontSize: 15, fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer', fontFamily: 'inherit', boxShadow: loading ? 'none' : '0 4px 14px rgba(13,148,136,0.35)', marginTop: 4 }}
+                            >
+                                {loading ? 'Signing in…' : 'Sign In →'}
+                            </button>
+                        </form>
+                    )}
 
                     <p style={{ textAlign: 'center', marginTop: 28, fontSize: 13, color: '#57534e' }}>
                         Don&apos;t have an account?{' '}

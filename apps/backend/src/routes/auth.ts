@@ -20,7 +20,7 @@ import {
   getRefreshTokenFromRequest,
   setAuthCookies,
 } from "../services/authSession";
-import { signToken, verifyToken } from "../services/tokens";
+import { signToken, verifyToken, TWOFA_PENDING_TTL_SECONDS } from "../services/tokens";
 
 const router: Router = Router();
 
@@ -510,6 +510,23 @@ router.post("/login", authRateLimiter, async (req, res, next) => {
     // Successful login — clear any failure counter
     await clearFailedAttempts(email);
 
+    // AH-29: opt-in 2FA. Password alone is not enough for an account with it
+    // enabled — issue a short-lived "twofa_pending" token (a distinct JWT
+    // type, so it cannot be used as a real session) and require
+    // POST /auth/2fa/login-verify with a TOTP or backup code before any
+    // cookies are set.
+    if (user.totpEnabled) {
+      const pendingToken = signToken(
+        { userId: user.id, role: user.role, typ: "twofa_pending" },
+        { expiresInSeconds: TWOFA_PENDING_TTL_SECONDS },
+      );
+      return res.json({
+        success: true,
+        twoFactorRequired: true,
+        pendingToken,
+      });
+    }
+
     // Generate tokens
     const { accessToken, refreshToken } = await generateTokens(
       user.id,
@@ -761,6 +778,7 @@ router.get("/me", authMiddleware, async (req: AuthenticatedRequest, res, next) =
         lastKnownLat: true,
         lastKnownLng: true,
         lastLocationUpdate: true,
+        totpEnabled: true,
       },
     });
 
@@ -1081,7 +1099,7 @@ function parseExpiry(s: string): number {
 }
 
 // Helper function to generate tokens
-async function generateTokens(userId: string, role: string) {
+export async function generateTokens(userId: string, role: string) {
   const signedTokens = createSignedTokens(userId, role);
 
   const refreshTtlSeconds = Math.max(
