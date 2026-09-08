@@ -192,23 +192,23 @@ model Booking {
   insuranceMemberNumber String?
   insuranceStatus InsuranceStatus?
   
-  // Paystack
-  paystackReference String?
-  
+  // AH-20: renamed from paystackReference — this project uses PayFast.
+  payfastReference String?
+
   // Relations
   patient         User          @relation("PatientBookings", fields: [patientId], references: [id])
   visit           Visit?
-  
+
   // Audit
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
-  
+
   @@index([patientId])
   @@index([nurseId])
   @@index([doctorId])
   @@index([scheduledDate])
   @@index([paymentStatus])
-  @@index([paystackReference])
+  @@index([payfastReference])
   @@map("bookings")
 }
 
@@ -293,20 +293,20 @@ model Payment {
   currency        String        @default("ZAR")
   status          PaymentStatus @default(PENDING)
   
-  // Paystack
-  paystackReference String?
-  paystackData    Json?         // Store Paystack response
-  
+  // AH-20: renamed from paystackReference/paystackData — this project uses PayFast.
+  payfastReference String?
+  payfastData     Json?         // Raw PayFast ITN/checkout response
+
   // Relations
   visit           Visit         @relation(fields: [visitId], references: [id])
-  
+
   // Audit
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
-  
+
   @@index([visitId, createdAt])
   @@index([status])
-  @@index([paystackReference])
+  @@index([payfastReference])
   @@map("payments")
 }
 

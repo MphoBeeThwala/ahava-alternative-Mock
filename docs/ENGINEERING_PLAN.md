@@ -47,18 +47,18 @@ took the amount from the request body, so the payer chose what to pay
 
 ## 2. Status
 
-Phases 1–3 landed on `hardening/enterprise-readiness-p0`. Nothing in that branch
-has been compiled or executed — the review environment has no package registry
-access, so CI is the first thing that will genuinely verify it. Expect the first
-run to be red, and treat that output as the next unit of work.
+Phases 1–3 landed on `hardening/enterprise-readiness-p0`, merged into `main`.
+Verified 2026-09-08: `tsc --noEmit`, lint, and the full unit suite all pass —
+plus 17 pre-existing lint errors on `main` unrelated to that branch were
+found and fixed the same day (repo hygiene pass, see commit history).
 
 | Phase | Scope | State |
 |---|---|---|
-| 1 | Quality gate | Landed, unverified |
-| 2 | Security blockers | Landed, unverified |
-| 3 | Cleanup and operability | Landed, unverified |
+| 1 | Quality gate | Landed, verified 2026-09-08 |
+| 2 | Security blockers | Landed, verified 2026-09-08 |
+| 3 | Cleanup and operability | Landed, verified 2026-09-08 |
 | 4 | Throughput to 5,000 concurrent | Designed, not started |
-| 5 | Compliance and durability | Not started |
+| 5 | Compliance and durability | In progress — AH-13, AH-29 landed 2026-09-08; AH-26, AH-15's purge job, AH-23 still open |
 
 ---
 
@@ -88,9 +88,15 @@ run to be red, and treat that output as the next unit of work.
 | AH-28 | `ENCRYPTION_KEY` validated lazily, failing mid-booking | `utils/encryption.ts` |
 | AH-30 | Payment amount taken from the request body | `routes/payments.ts` |
 | AH-31 | Refund endpoint unreachable — `requireAdmin` with no `authMiddleware` | `routes/payments.ts` |
+| AH-13 | PHI encryption had no AAD binding and no key rotation path | `utils/encryption.ts` |
+| AH-20 | `Payment.paystackReference` / `paystackData` renamed to `payfastReference` / `payfastData` (migration `20260908130000`) | `prisma/schema.prisma` |
+| AH-24 | Red-flag triage patterns were singular and `\b`-anchored — "seizures" did not match "seizure" | `services/triageSafety.ts` |
+| AH-29 | No 2FA for prescribers — closed as opt-in TOTP for any account, not role-restricted | `routes/twoFactor.ts` |
+| AH-41 (new) | `routes/webhooks.ts` carried a second, unauthenticated "POST /payment" webhook from before the PayFast migration that marked payments `COMPLETED` with none of AH-04/05's checks — its signature check failed *open* whenever `NODE_ENV` wasn't exactly `"production"` and `PAYSTACK_SECRET_KEY` was unset (the deployed default). Removed; PayFast's ITN handler in `routes/payments.ts` is the only payment webhook now. | `routes/webhooks.ts` |
 
 Partial coverage also landed for AH-07 (tests): four unit suites covering token
-typing, PayFast signatures, the CSRF guard, and the clinical safety thresholds.
+typing, PayFast signatures, the CSRF guard, and the clinical safety thresholds,
+plus new suites for the AH-13 encryption AAD/rotation and AH-29 2FA flow.
 
 ### Open
 
@@ -102,15 +108,11 @@ typing, PayFast signatures, the CSRF guard, and the clinical safety thresholds.
 | AH-08 | Auth cache is per-replica; deactivation lags up to 300s across the fleet | P1 |
 | AH-26 | TypeScript strict is off — five flags disabled, `strict` never set | P1 |
 | AH-07 | Integration and end-to-end tests still absent | P1 |
-| AH-29 | No 2FA for prescribers | P1 |
 | AH-03b | Double-submit CSRF token, for defence in depth beyond the origin check | P2 |
-| AH-13 | PHI encryption has no AAD binding and no key rotation path | P2 |
 | AH-15 | Cross-border PHI transfer to AI providers not named in the consent record | P2 |
-| AH-20 | `Payment.paystackReference` / `paystackData` on a PayFast gateway | P2 |
 | AH-23 | No API versioning | P2 |
-| AH-24 | Red-flag triage patterns are singular and `\b`-anchored — "seizures" does not match "seizure" | P1 (clinical) |
 | AH-34 | `demoStream` holds a `setInterval` per user in-process | P2 |
-| AH-35 | Every service is on Render `plan: starter` (0.5 vCPU). At 200 concurrent, bcrypt alone saturates it — this is the measured login bottleneck | P0 for scale |
+| AH-35 | The Render `plan: starter` (0.5 vCPU) sizing this was measured against no longer applies — Render was removed in favour of Railway-only (§6). Re-measure against whatever Railway tier is actually deployed before assuming the bcrypt-saturation finding still holds at the same concurrency | P0 for scale — re-verify |
 | AH-36 | Biometrics ingest runs anomaly detection and four sequential DB round-trips inline; slowest non-login endpoint in every load run | P0 for scale |
 | AH-37 | Load tests hit the Next.js proxy, so proxy and API latency are indistinguishable. Nobody knows which to fix | P0 — measure first |
 | AH-38 | The primary dev machine's Application Control policy blocks `pnpm.exe`. `corepack pnpm` works around it, but a new engineer hits this on day one. Get pnpm allowlisted, or commit to builds happening only in CI and Docker | P1 — infrastructure |
@@ -250,35 +252,66 @@ an aspiration rather than a claim. Tune `PRISMA_CONNECTION_LIMIT` and
 
 ## 5. Phase 5 — compliance and durability
 
+- ~~**AH-13** Bind encryption AAD to a context string and add a key id to the
+  payload prefix so two keys can be live during a rotation.~~ **Closed
+  2026-09-08.** `aad` is a plain string, not a structured `{table, column,
+  recordId}` triple as originally sketched — callers with no stable id at
+  encryption time (e.g. an address encrypted before its row exists) can omit
+  it. `services/totp.ts` binds AH-29's secret to `user:${userId}:totpSecret`.
+- ~~**AH-29** TOTP before prescribing.~~ **Closed 2026-09-08** as opt-in for
+  any account, not role-restricted to `DOCTOR`/`ADMIN` — product decision,
+  §6 item 4.
 - **AH-26** Turn on TypeScript strict in stages. Do not flip `strict: true`
   across 95 files in one commit — enable `strictNullChecks` first, directory by
   directory, starting with `services/triageSafety.ts` and `services/aiTriage.ts`.
 - **AH-15** Confirm every route that reaches an AI provider is behind
   `requireConsent`, and version the consent text so it names the offshore
   processors and the transfer. POPIA s72 applies to symptom narratives.
-- **AH-13** Bind encryption AAD to `{table}:{column}:{recordId}` and add a key
-  id to the payload prefix so two keys can be live during a rotation.
-- **AH-29** TOTP for `DOCTOR` and `ADMIN` before prescribing. Sequenced after
-  AH-01, because MFA on a session that cannot be revoked is theatre.
+  Retention periods for the consent text to cite are now decided (§6 item 3).
 - **AH-23** Move to `/api/v1/*` before a mobile client is in the field.
 - **POPIA operations** Data export and erasure endpoints, a retention schedule,
   and a purge job. The `ExportJob` model already exists as a starting point.
+  Retention periods decided (§6 item 3); the schedule/purge job itself is
+  still unbuilt.
 
 ---
 
-## 6. Decisions needed from the product side
+## 6. Decisions from the product side — resolved 2026-09-08
 
-These are not engineering calls:
-
-1. **`android/`** is orphaned — no `capacitor.config`, and the app it wrapped
-   has been removed. Recommendation: delete it and rebuild from the Next.js
-   frontend when mobile is funded. Left in place pending that call.
-2. **Payment column rename** (AH-20) — whether the beta database can be wiped
-   or needs a data migration.
-3. **Retention periods** for audit logs and biometrics, for AH-15.
-4. **Whether prescriber 2FA is mandatory** or opt-in at launch.
-5. **One primary PaaS.** Railway, Render and Fly configs all sit in the repo and
-   will drift. Recommendation: Railway primary, the rest archived under `deploy/`.
+1. **Mobile approach: Capacitor, wrapping the existing Next.js app** —
+   confirmed. `android/` is still orphaned (no `capacitor.config`, no
+   `@capacitor/*` dependency, no synced web build) but is not being deleted:
+   it will be rebuilt clean as part of mobile enablement rather than
+   regenerated from scratch, since the native scaffold (package id, icons,
+   Health Connect activity) has some reusable value. See the mobile-strategy
+   assessment for the phased plan.
+2. **Payment column rename** (AH-20) — closed via an in-place `RENAME COLUMN`
+   migration (`20260908130000`), not a wipe. Existing reference and gateway
+   response data is preserved; no beta-database reset needed.
+3. **Retention periods** (for AH-15's POPIA consent wording and the eventual
+   purge job) — set as an engineering judgment call, since neither POPIA nor
+   the National Health Act specify exact numeric periods for every data type
+   here. **Have this confirmed by legal/compliance before treating it as
+   final** — these are defensible defaults, not a legal opinion:
+   - **AuditLog, TriageCase, Visit, Prescription, Referral** (the clinical
+     record itself, or its access trail): **7 years** from last entry,
+     aligned with HPCSA guidance on medical record retention (6 years
+     minimum, longer for minors).
+   - **BiometricReading, HealthAlert** (high-volume wearable/manual
+     telemetry, not the clinical record): **2 years**, enough to support the
+     progressive-baseline system's trend analysis; older readings can be
+     aggregated or dropped without losing clinical meaning.
+   - **PatientConsent**: retained for the life of the account plus 7 years
+     after closure — POPIA's accountability principle means being able to
+     prove what consent existed and when, not just honouring it prospectively.
+   - Implementation (the actual scheduled purge job and data-export
+     endpoints against the existing `ExportJob` model) is Phase 5 work,
+     queued but not built in this pass.
+4. **Prescriber 2FA: opt-in**, not mandatory — closed as AH-29, available to
+   every role rather than gated to prescribers specifically.
+5. **One primary PaaS: Railway.** Closed — Render and Fly.io configs were
+   removed outright (not archived; see `deploy/README.md`), rather than kept
+   as unused alternatives that would drift.
 
 ---
 

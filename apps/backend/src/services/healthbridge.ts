@@ -200,7 +200,7 @@ export async function submitClaim(input: ClaimInput): Promise<ClaimResult> {
     // Record claim against the visit payment
     await prisma.payment.updateMany({
       where: { visitId: input.visitId },
-      data:  { paystackData: { claimId, status, submittedAt: new Date().toISOString() } },
+      data:  { payfastData: { claimId, status, submittedAt: new Date().toISOString() } },
     });
 
     return { success: true, claimId, status, rawResponse: responseBody };

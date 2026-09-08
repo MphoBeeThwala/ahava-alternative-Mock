@@ -64,14 +64,14 @@ router.post('/create', authMiddleware, async (req: AuthenticatedRequest, res) =>
 
     const payfastResult = await payfast.createPayment(amountInCents, 'Nurse Visit', reference);
 
-    // Persist payment record (paystackReference doubles as gateway correlation ref)
+    // Persist payment record (payfastReference doubles as gateway correlation ref)
     const record = await prisma.payment.create({
       data: {
         visitId,
         amountInCents,
         status: 'PENDING',
-        paystackReference: reference,
-        paystackData: payfastResult.data as unknown as any,
+        payfastReference: reference,
+        payfastData: payfastResult.data as unknown as any,
       },
     });
 
@@ -145,7 +145,7 @@ router.post('/webhook', async (req, res) => {
 
     const correlationRef: string | undefined = data.m_payment_id || data.custom_str1;
     const payment = correlationRef
-      ? await prisma.payment.findFirst({ where: { paystackReference: correlationRef } })
+      ? await prisma.payment.findFirst({ where: { payfastReference: correlationRef } })
       : null;
 
     if (!payment) {
@@ -189,7 +189,7 @@ router.post('/webhook', async (req, res) => {
 
     await prisma.payment.update({
       where: { id: payment.id },
-      data: { status: nextStatus, paystackData: data as unknown as any },
+      data: { status: nextStatus, payfastData: data as unknown as any },
     });
 
     await createAuditLog({
