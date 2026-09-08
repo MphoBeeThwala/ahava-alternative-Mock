@@ -147,46 +147,50 @@ router.post(
       // Detect early warning signs for specific conditions
       const earlyWarnings = detectEarlyWarningSigns(anomalies, value);
 
-      // Update biometric record with analysis results
-      try {
-        if (
-          prisma.biometricReading &&
-          typeof prisma.biometricReading.update === "function"
-        ) {
-          await prisma.biometricReading.update({
-            where: { id: biometricRecord.id },
-            data: {
-              alertLevel,
-              anomalies: anomalies as any,
-              readinessScore,
-            },
-          });
-        } else {
-          // Fallback: Update via raw SQL
-          await prisma.$executeRaw`
-          UPDATE biometric_readings
-          SET "alertLevel" = ${alertLevel},
-              anomalies = ${JSON.stringify(anomalies)}::jsonb,
-              "readinessScore" = ${readinessScore}
-          WHERE id = ${biometricRecord.id}
-        `;
+      // AH-36: these two writes touch different tables and neither depends
+      // on the other's result (both only need biometricRecord.id and the
+      // already-computed alertLevel/anomalies/readinessScore) — run them
+      // concurrently instead of sequentially.
+      const updateBiometricRecord = async (): Promise<void> => {
+        try {
+          if (
+            prisma.biometricReading &&
+            typeof prisma.biometricReading.update === "function"
+          ) {
+            await prisma.biometricReading.update({
+              where: { id: biometricRecord.id },
+              data: {
+                alertLevel,
+                anomalies: anomalies as any,
+                readinessScore,
+              },
+            });
+          } else {
+            // Fallback: Update via raw SQL
+            await prisma.$executeRaw`
+            UPDATE biometric_readings
+            SET "alertLevel" = ${alertLevel},
+                anomalies = ${JSON.stringify(anomalies)}::jsonb,
+                "readinessScore" = ${readinessScore}
+            WHERE id = ${biometricRecord.id}
+          `;
+          }
+        } catch (updateError) {
+          console.warn(
+            "[Patient] Failed to update biometric record:",
+            updateError,
+          );
         }
-      } catch (updateError) {
-        console.warn(
-          "[Patient] Failed to update biometric record:",
-          updateError,
-        );
-      }
+      };
 
-      // Create alert if anomalies detected
-      let alert = null;
-      if (alertLevel !== "GREEN" && anomalies.length > 0) {
+      const createAlertIfNeeded = async (): Promise<{ id: string } | null> => {
+        if (!(alertLevel !== "GREEN" && anomalies.length > 0)) return null;
         try {
           if (
             prisma.healthAlert &&
             typeof prisma.healthAlert.create === "function"
           ) {
-            alert = await prisma.healthAlert.create({
+            return await prisma.healthAlert.create({
               data: {
                 userId,
                 alertLevel: alertLevel as "YELLOW" | "RED",
@@ -199,9 +203,9 @@ router.post(
                 biometricReadingId: biometricRecord.id,
               },
             });
-          } else {
-            // Fallback: Create alert via raw SQL
-            const alertResult = await prisma.$queryRaw<Array<{ id: string }>>`
+          }
+          // Fallback: Create alert via raw SQL
+          const alertResult = await prisma.$queryRaw<Array<{ id: string }>>`
             INSERT INTO health_alerts (
               id, "userId", "alertLevel", title, message, "detectedAnomalies", "biometricReadingId", "createdAt"
             ) VALUES (
@@ -213,12 +217,17 @@ router.post(
               NOW()
             ) RETURNING id
           `;
-            alert = { id: alertResult[0]?.id };
-          }
+          return { id: alertResult[0]?.id };
         } catch (alertError) {
           console.warn("[Patient] Failed to create alert:", alertError);
+          return null;
         }
-      }
+      };
+
+      const [, alert] = await Promise.all([
+        updateBiometricRecord(),
+        createAlertIfNeeded(),
+      ]);
 
       res.json({
         success: true,

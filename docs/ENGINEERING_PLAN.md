@@ -94,6 +94,7 @@ found and fixed the same day (repo hygiene pass, see commit history).
 | AH-29 | No 2FA for prescribers — closed as opt-in TOTP for any account, not role-restricted | `routes/twoFactor.ts` |
 | AH-02b | Rate limiters used an in-memory store; limits were per-replica and reset on deploy | `middleware/rateLimiter.ts` |
 | AH-08 | Auth cache was per-replica; deactivation lagged up to 300s across the fleet — and the suspend endpoint never invalidated it at all, even locally | `middleware/auth.ts`, `routes/admin.ts` |
+| AH-39 | CI installed with `--no-frozen-lockfile`; tightened once the regenerated `pnpm-lock.yaml` landed in Phase 0 | `.github/workflows/ci.yml` |
 | AH-41 (new) | `routes/webhooks.ts` carried a second, unauthenticated "POST /payment" webhook from before the PayFast migration that marked payments `COMPLETED` with none of AH-04/05's checks — its signature check failed *open* whenever `NODE_ENV` wasn't exactly `"production"` and `PAYSTACK_SECRET_KEY` was unset (the deployed default). Removed; PayFast's ITN handler in `routes/payments.ts` is the only payment webhook now. | `routes/webhooks.ts` |
 
 Partial coverage also landed for AH-07 (tests): four unit suites covering token
@@ -113,10 +114,9 @@ plus new suites for the AH-13 encryption AAD/rotation and AH-29 2FA flow.
 | AH-23 | No API versioning | P2 |
 | AH-34 | `demoStream` holds a `setInterval` per user in-process | P2 |
 | AH-35 | The Render `plan: starter` (0.5 vCPU) sizing this was measured against no longer applies — Render was removed in favour of Railway-only (§6). Re-measure against whatever Railway tier is actually deployed before assuming the bcrypt-saturation finding still holds at the same concurrency | P0 for scale — re-verify |
-| AH-36 | Biometrics ingest runs anomaly detection and four sequential DB round-trips inline; slowest non-login endpoint in every load run | P0 for scale |
-| AH-37 | Load tests hit the Next.js proxy, so proxy and API latency are indistinguishable. Nobody knows which to fix | P0 — measure first |
+| AH-36 | Biometrics ingest — partially addressed 2026-09-08, see below | P1 for scale (downgraded — see note) |
+| AH-37 | Load tests hit the Next.js proxy, so proxy and API latency are indistinguishable. Nobody knows which to fix. The load-test script already supports `BASE_URL` pointed at the API directly (it defaults there); the four historical runs just happened to target the production frontend domain instead — re-running against the real backend URL needs a live environment and is a manual step, not a code fix | P0 — measure first |
 | AH-38 | The primary dev machine's Application Control policy blocks `pnpm.exe`. `corepack pnpm` works around it, but a new engineer hits this on day one. Get pnpm allowlisted, or commit to builds happening only in CI and Docker | P1 — infrastructure |
-| AH-39 | CI installs with `--no-frozen-lockfile` so the branch can be verified without a working local pnpm. Tighten once a regenerated lockfile is committed | P2 — follow-up |
 
 ---
 
@@ -258,6 +258,38 @@ so a suspended user stayed authenticated for up to
 that handled the suspend request — the cross-replica gap this finding
 named was real, but there wasn't same-replica invalidation to begin with
 for the one endpoint that actually deactivates a user.
+
+### AH-36 — biometrics ingest — partially addressed 2026-09-08
+
+The finding's framing ("four sequential DB round-trips") undersold the real
+cost once actually traced through `routes/patient.ts` POST `/biometrics`:
+
+1. `INSERT` the biometric reading.
+2. `processBiometricReading` (`services/monitoring.ts`) — **two sequential
+   HTTP calls to the ML service**, `POST /ingest` then
+   `GET /readiness-score/{userId}`, each with a 5s timeout. This is the
+   dominant cost, not Postgres.
+3. `UPDATE` the reading with the analysis result.
+4. `INSERT` a `HealthAlert`, conditionally.
+
+**Fixed:** steps 3 and 4 are independent writes to different tables —
+neither needs the other's result, both only need `biometricRecord.id` and
+the already-computed `alertLevel`/`anomalies`/`readinessScore`. They now run
+via `Promise.all` instead of sequentially.
+
+**Deliberately not fixed:** the two ML-service calls in step 2 look like
+the same kind of independent pair, but they aren't safe to parallelize.
+`get_readiness_score`'s own docstring says it uses "persistent DB history,"
+and `ingest_biometrics` is what writes that history — running them
+concurrently risks the readiness score reading state from *before* the
+reading it's meant to score. The correct fix is to have `POST /ingest` on
+the ML-service side compute and return the readiness score in the same
+response, collapsing two round-trips into one. Not done here because
+`GET /readiness-score/{userId}` is also called independently elsewhere
+(`routes/patient.ts:271`, `services/monitoring.ts:405`,
+`routes/healthConnect.ts`) — folding it into `/ingest`'s response without
+breaking those callers is a real design task on the Python side
+(`apps/ml-service/main.py`, `engine.py`), not a same-session drive-by fix.
 
 ### Then measure
 
