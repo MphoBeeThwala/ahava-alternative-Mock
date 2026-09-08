@@ -826,18 +826,13 @@ router.patch(
         ...(mergedMedicalPassport
           ? {
               medicalPassport: mergedMedicalPassport,
+              passportCompletionPercent: calculateMedicalPassportCompletion(
+                mergedMedicalPassport,
+              ),
             }
           : {}),
         updatedAt: new Date().toISOString(),
       };
-
-      // Always keep passportCompletionPercent in sync with the actual
-      // merged medical passport data so it never goes stale/reverts.
-      if (mergedMedicalPassport) {
-        merged.passportCompletionPercent = calculateMedicalPassportCompletion(
-          mergedMedicalPassport,
-        );
-      }
 
       const updatedUser = await prisma.user.update({
         where: { id: userId },
