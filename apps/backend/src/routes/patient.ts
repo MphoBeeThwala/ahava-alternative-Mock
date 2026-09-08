@@ -763,6 +763,95 @@ const riskProfileSchema = Joi.object({
   }).optional(),
 }).min(1);
 
+function hasNonEmptyString(value: unknown): boolean {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function hasNonEmptyStringArray(value: unknown): boolean {
+  return Array.isArray(value) && value.some((entry) => hasNonEmptyString(entry));
+}
+
+function calculateMedicalPassportCompletion(args: {
+  firstName?: string | null;
+  lastName?: string | null;
+  phone?: string | null;
+  dateOfBirth?: Date | string | null;
+  gender?: string | null;
+  medicalPassport: Record<string, unknown>;
+}): number {
+  const checks = [
+    hasNonEmptyString(args.firstName) && hasNonEmptyString(args.lastName),
+    hasNonEmptyString(args.phone),
+    Boolean(args.dateOfBirth),
+    hasNonEmptyString(args.gender),
+    hasNonEmptyString(args.medicalPassport.emergencyContactName),
+    hasNonEmptyString(args.medicalPassport.emergencyContactPhone),
+    hasNonEmptyString(args.medicalPassport.bloodType),
+    hasNonEmptyStringArray(args.medicalPassport.allergies),
+    hasNonEmptyStringArray(args.medicalPassport.chronicConditions),
+    hasNonEmptyStringArray(args.medicalPassport.currentMedications),
+  ];
+
+  return Math.round(
+    (checks.filter(Boolean).length / checks.length) * 100,
+  );
+}
+
+function getNextPassportQuestion(args: {
+  firstName?: string | null;
+  lastName?: string | null;
+  phone?: string | null;
+  dateOfBirth?: Date | string | null;
+  gender?: string | null;
+  medicalPassport: Record<string, unknown>;
+}): string | undefined {
+  const prompts = [
+    {
+      done: hasNonEmptyString(args.firstName) && hasNonEmptyString(args.lastName),
+      prompt: "What is your full name?",
+    },
+    {
+      done: hasNonEmptyString(args.phone),
+      prompt: "What is your best contact number?",
+    },
+    {
+      done: Boolean(args.dateOfBirth),
+      prompt: "What is your date of birth?",
+    },
+    {
+      done: hasNonEmptyString(args.gender),
+      prompt: "What gender should we record for clinical care?",
+    },
+    {
+      done: hasNonEmptyString(args.medicalPassport.emergencyContactName),
+      prompt: "Who should we contact in an emergency?",
+    },
+    {
+      done: hasNonEmptyString(args.medicalPassport.emergencyContactPhone),
+      prompt: "What is your emergency contact's phone number?",
+    },
+    {
+      done: hasNonEmptyString(args.medicalPassport.bloodType),
+      prompt: "Do you know your blood type?",
+    },
+    {
+      done: hasNonEmptyStringArray(args.medicalPassport.allergies),
+      prompt: "Do you have any known allergies? (type None if none)",
+    },
+    {
+      done: hasNonEmptyStringArray(args.medicalPassport.chronicConditions),
+      prompt: "Any chronic conditions we should record? (type None if none)",
+    },
+    {
+      done: hasNonEmptyStringArray(args.medicalPassport.currentMedications),
+      prompt: "Are you taking any regular medications? (type None if none)",
+    },
+  ];
+
+  return prompts.find((item) => !item.done)?.prompt;
+}
+
+
 router.patch(
   "/risk-profile",
   authMiddleware,
@@ -775,7 +864,14 @@ router.patch(
       const userId = req.user!.id;
       const current = await prisma.user.findUnique({
         where: { id: userId },
-        select: { dateOfBirth: true, gender: true, riskProfile: true },
+        select: {
+          firstName: true,
+          lastName: true,
+          phone: true,
+          dateOfBirth: true,
+          gender: true,
+          riskProfile: true,
+        },
       });
       const currentRiskProfile =
         ((current?.riskProfile as Record<string, unknown> | null) ?? {});
@@ -796,6 +892,26 @@ router.patch(
             ...incomingMedicalPassport,
           }
         : undefined;
+      const calculatedPassportCompletionPercent = mergedMedicalPassport
+        ? calculateMedicalPassportCompletion({
+            firstName: current?.firstName,
+            lastName: current?.lastName,
+            phone: current?.phone,
+            dateOfBirth: current?.dateOfBirth,
+            gender: current?.gender,
+            medicalPassport: mergedMedicalPassport,
+          })
+        : undefined;
+      const nextPassportQuestion = mergedMedicalPassport
+        ? getNextPassportQuestion({
+            firstName: current?.firstName,
+            lastName: current?.lastName,
+            phone: current?.phone,
+            dateOfBirth: current?.dateOfBirth,
+            gender: current?.gender,
+            medicalPassport: mergedMedicalPassport,
+          })
+        : undefined;
 
       const merged = {
         ...currentRiskProfile,
@@ -803,12 +919,8 @@ router.patch(
         ...(mergedMedicalPassport
           ? {
               medicalPassport: mergedMedicalPassport,
-              ...(typeof incomingRiskProfile.passportCompletionPercent === "number"
-                ? {
-                    passportCompletionPercent:
-                      incomingRiskProfile.passportCompletionPercent,
-                  }
-                : {}),
+              passportCompletionPercent: calculatedPassportCompletionPercent,
+              nextPassportQuestion,
             }
           : {}),
         updatedAt: new Date().toISOString(),
