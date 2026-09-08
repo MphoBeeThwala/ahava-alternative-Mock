@@ -1,4 +1,4 @@
-import express from "express";
+import express, { Application } from "express";
 import cors from "cors";
 import helmet from "helmet";
 import compression from "compression";
@@ -46,7 +46,7 @@ import { getWebSocketRedisHealth, initializeWebSocket } from "./services/websock
 import prisma from "./lib/prisma";
 import { assertEncryptionKeyConfigured } from "./utils/encryption";
 
-const app = express();
+const app: Application = express();
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
@@ -225,8 +225,14 @@ app.use(`${API_V1}/consent`, authMiddleware, consentRoutes); // moved from /api/
 app.use(`${API_V1}/biometrics/health-connect`, healthConnectRoutes);
 app.use("/webhooks", webhookRoutes);
 
-// WebSocket initialization
-initializeWebSocket(wss);
+// AH-07: skipped in tests for the same reason startServer() is below — it
+// registers a heartbeat setInterval (services/websocket.ts) that's correct
+// for a long-running server but leaves Jest's process unable to exit
+// naturally. Integration tests exercise HTTP routes via supertest, not
+// WebSocket connections, so nothing here is under test either way.
+if (process.env.NODE_ENV !== "test") {
+  initializeWebSocket(wss);
+}
 
 // Error handling
 app.use(errorHandler);
@@ -356,7 +362,16 @@ process.on("uncaughtException", (error) => {
   void shutdown("uncaughtException");
 });
 
-startServer().catch((error) => {
-  console.error("[fatal] server failed to start:", (error as Error).message);
-  process.exit(1);
-});
+// AH-07: importing this module for supertest (integration tests) must not
+// also start a real listener/Redis connection/signal handlers — Jest sets
+// NODE_ENV=test by default, so this is the same condition every other
+// Redis-optional code path in this app already checks against, not a new
+// test-only branch.
+if (process.env.NODE_ENV !== "test") {
+  startServer().catch((error) => {
+    console.error("[fatal] server failed to start:", (error as Error).message);
+    process.exit(1);
+  });
+}
+
+export { app };

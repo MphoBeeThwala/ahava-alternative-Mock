@@ -19,6 +19,7 @@
     "dev:api": "pnpm --filter @ahava-healthcare/api dev",
     "test": "pnpm -r run test",
     "test:backend": "pnpm --filter @ahava-healthcare/api test",
+    "test:integration": "pnpm --filter @ahava-healthcare/api test:integration",
     "lint": "pnpm -r run lint",
     "lint:fix": "pnpm -r run lint:fix",
     "type-check": "pnpm -r run type-check",

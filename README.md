@@ -66,6 +66,7 @@ pnpm dev:api
 pnpm build
 pnpm lint
 pnpm test
+pnpm test:integration  # real Postgres via embedded-postgres, no Docker needed
 pnpm type-check
 pnpm prisma:generate
 pnpm prisma:migrate
