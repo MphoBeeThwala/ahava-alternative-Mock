@@ -41,6 +41,10 @@ pids
 coverage/
 *.lcov
 
+# AH-07: ephemeral Postgres data dir for integration tests (embedded-postgres)
+apps/backend/.test-pgdata/
+apps/backend/logfile
+
 # nyc test coverage
 .nyc_output
 

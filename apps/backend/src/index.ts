@@ -1,4 +1,4 @@
-import express from "express";
+import express, { Application } from "express";
 import cors from "cors";
 import helmet from "helmet";
 import compression from "compression";
@@ -46,7 +46,7 @@ import { getWebSocketRedisHealth, initializeWebSocket } from "./services/websock
 import prisma from "./lib/prisma";
 import { assertEncryptionKeyConfigured } from "./utils/encryption";
 
-const app = express();
+const app: Application = express();
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
@@ -191,32 +191,48 @@ app.get("/", (req, res) => {
   res.redirect(302, "/health");
 });
 
-// API routes
-app.use("/api/auth", authRoutes);
-app.use("/api/auth/2fa", twoFactorRoutes);
-app.use("/api/bookings", authMiddleware, bookingRoutes);
-app.use("/api/visits", authMiddleware, visitRoutes);
-app.use("/api/messages", authMiddleware, messageRoutes);
+// AH-23: versioned API. A mobile client can't be force-upgraded off an old
+// response shape the way a web deploy can, so the contract is pinned before
+// one exists (docs/ENGINEERING_PLAN.md). /api/v1/* is the real, current API.
+//
+// /api/payments is additionally kept mounted at its original, unversioned
+// path — deliberately, not as a migration shim. PayFast's ITN callback URL
+// is configured in PayFast's own merchant dashboard, outside this codebase;
+// renaming it here would silently stop payment confirmations from arriving
+// until someone manually updates that dashboard. Every other route moved.
+const API_V1 = "/api/v1";
+app.use(`${API_V1}/auth`, authRoutes);
+app.use(`${API_V1}/auth/2fa`, twoFactorRoutes);
+app.use(`${API_V1}/bookings`, authMiddleware, bookingRoutes);
+app.use(`${API_V1}/visits`, authMiddleware, visitRoutes);
+app.use(`${API_V1}/messages`, authMiddleware, messageRoutes);
 // NOTE: no app-level auth on payments - the PayFast ITN webhook is a
 // server-to-server callback that cannot present a JWT. It is protected by
 // PayFast signature verification instead; all other payment routes enforce
 // authMiddleware/requireAdmin inline.
-app.use("/api/payments", paymentRoutes);
-app.use("/api/admin", authMiddleware, adminRoutes);
-app.use("/api/triage", authMiddleware, triageRoutes);
-app.use("/api/triage-cases", authMiddleware, triageCasesRoutes);
-app.use("/api/triage-review", authMiddleware, triageCaseReviewRoutes);
-app.use("/api/nurse", authMiddleware, nurseRoutes);
-app.use("/api/patient", authMiddleware, patientRoutes);
-app.use("/api/profile", profileRoutes);
-app.use("/api/terra", terraRoutes);
-app.use("/api/rook", rookRoutes);
-app.use("/api/consent", authMiddleware, consentRoutes); // moved from /api/patient/consent to avoid prefix conflict
-app.use("/api/biometrics/health-connect", healthConnectRoutes);
+app.use("/api/payments", paymentRoutes); // unversioned: see comment above
+app.use(`${API_V1}/payments`, paymentRoutes);
+app.use(`${API_V1}/admin`, authMiddleware, adminRoutes);
+app.use(`${API_V1}/triage`, authMiddleware, triageRoutes);
+app.use(`${API_V1}/triage-cases`, authMiddleware, triageCasesRoutes);
+app.use(`${API_V1}/triage-review`, authMiddleware, triageCaseReviewRoutes);
+app.use(`${API_V1}/nurse`, authMiddleware, nurseRoutes);
+app.use(`${API_V1}/patient`, authMiddleware, patientRoutes);
+app.use(`${API_V1}/profile`, profileRoutes);
+app.use(`${API_V1}/terra`, terraRoutes);
+app.use(`${API_V1}/rook`, rookRoutes);
+app.use(`${API_V1}/consent`, authMiddleware, consentRoutes); // moved from /api/patient/consent to avoid prefix conflict
+app.use(`${API_V1}/biometrics/health-connect`, healthConnectRoutes);
 app.use("/webhooks", webhookRoutes);
 
-// WebSocket initialization
-initializeWebSocket(wss);
+// AH-07: skipped in tests for the same reason startServer() is below — it
+// registers a heartbeat setInterval (services/websocket.ts) that's correct
+// for a long-running server but leaves Jest's process unable to exit
+// naturally. Integration tests exercise HTTP routes via supertest, not
+// WebSocket connections, so nothing here is under test either way.
+if (process.env.NODE_ENV !== "test") {
+  initializeWebSocket(wss);
+}
 
 // Error handling
 app.use(errorHandler);
@@ -346,7 +362,16 @@ process.on("uncaughtException", (error) => {
   void shutdown("uncaughtException");
 });
 
-startServer().catch((error) => {
-  console.error("[fatal] server failed to start:", (error as Error).message);
-  process.exit(1);
-});
+// AH-07: importing this module for supertest (integration tests) must not
+// also start a real listener/Redis connection/signal handlers — Jest sets
+// NODE_ENV=test by default, so this is the same condition every other
+// Redis-optional code path in this app already checks against, not a new
+// test-only branch.
+if (process.env.NODE_ENV !== "test") {
+  startServer().catch((error) => {
+    console.error("[fatal] server failed to start:", (error as Error).message);
+    process.exit(1);
+  });
+}
+
+export { app };

@@ -18,6 +18,20 @@ module.exports = [
         '@typescript-eslint/no-explicit-any': 'warn',
         '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       },
+    },
+    {
+      // AH-07: plain CommonJS test infrastructure (Jest globalSetup/
+      // globalTeardown run outside the ts-jest transform, before any test
+      // file loads) — Node globals/require, not the TS ruleset above.
+      files: ['**/*.js'],
+      languageOptions: {
+        ecmaVersion: 2020,
+        sourceType: 'commonjs',
+        globals: globals.node,
+      },
+      rules: {
+        '@typescript-eslint/no-var-requires': 'off',
+      },
     }
   ),
 ];

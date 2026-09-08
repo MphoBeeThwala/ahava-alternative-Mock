@@ -4,7 +4,7 @@ const PASSWORD = process.env.MOCK_PATIENT_PASSWORD || 'MockPatient1!';
 async function main() {
   const email = 'patient_0001@mock.ahava.test';
   console.log('1. Login...');
-  const loginRes = await fetch(`${BASE}/api/auth/login`, {
+  const loginRes = await fetch(`${BASE}/api/v1/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password: PASSWORD }),
@@ -26,13 +26,13 @@ async function main() {
     return;
   }
 
-  console.log('\n2. GET /api/patient/alerts (before biometrics)...');
-  const alertsRes1 = await fetch(`${BASE}/api/patient/alerts`, { headers: { Authorization: `Bearer ${token}` } });
+  console.log('\n2. GET /api/v1/patient/alerts (before biometrics)...');
+  const alertsRes1 = await fetch(`${BASE}/api/v1/patient/alerts`, { headers: { Authorization: `Bearer ${token}` } });
   const alertsData1 = await alertsRes1.json().catch(() => ({}));
   console.log('   Status:', alertsRes1.status, alertsData1.error || 'ok');
 
-  console.log('\n3. POST /api/patient/biometrics...');
-  const bioRes = await fetch(`${BASE}/api/patient/biometrics`, {
+  console.log('\n3. POST /api/v1/patient/biometrics...');
+  const bioRes = await fetch(`${BASE}/api/v1/patient/biometrics`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -54,8 +54,8 @@ async function main() {
   if (bioData.error) console.log('   Error:', bioData.error);
   if (bioRes.ok) console.log('   Success:', bioData.success);
 
-  console.log('\n4. GET /api/patient/alerts (after biometrics)...');
-  const alertsRes2 = await fetch(`${BASE}/api/patient/alerts`, { headers: { Authorization: `Bearer ${token}` } });
+  console.log('\n4. GET /api/v1/patient/alerts (after biometrics)...');
+  const alertsRes2 = await fetch(`${BASE}/api/v1/patient/alerts`, { headers: { Authorization: `Bearer ${token}` } });
   const alertsData2 = await alertsRes2.json().catch(() => ({}));
   console.log('   Status:', alertsRes2.status, alertsData2.error || 'ok');
 }

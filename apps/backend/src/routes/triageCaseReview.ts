@@ -719,7 +719,9 @@ router.post(
         }),
       ]);
 
-      const downloadUrl = `/api/triage-review/${id}/prescription/pdf`;
+      // No /api prefix: fetched via apiClient, whose baseURL is already
+      // "/api" (was /api/api/... and 404ing — see routes/triage.ts).
+      const downloadUrl = `/triage-review/${id}/prescription/pdf`;
       sendToUser(triageCase.patientId, {
         type: "PRESCRIPTION_ISSUED",
         data: {
@@ -925,7 +927,7 @@ router.post(
         }),
       ]);
 
-      const downloadUrl = `/api/triage-review/${id}/referral/pdf`;
+      const downloadUrl = `/triage-review/${id}/referral/pdf`;
       sendToUser(triageCase.patientId, {
         type: "EMERGENCY_REFERRAL_ISSUED",
         data: {

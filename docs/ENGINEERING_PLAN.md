@@ -95,11 +95,15 @@ found and fixed the same day (repo hygiene pass, see commit history).
 | AH-02b | Rate limiters used an in-memory store; limits were per-replica and reset on deploy | `middleware/rateLimiter.ts` |
 | AH-08 | Auth cache was per-replica; deactivation lagged up to 300s across the fleet — and the suspend endpoint never invalidated it at all, even locally | `middleware/auth.ts`, `routes/admin.ts` |
 | AH-39 | CI installed with `--no-frozen-lockfile`; tightened once the regenerated `pnpm-lock.yaml` landed in Phase 0 | `.github/workflows/ci.yml` |
+| AH-23 | No API versioning — every route now lives under `/api/v1/*` except the PayFast webhook (see §5) | `index.ts` |
+| AH-07 | No integration/end-to-end tests — 11 now run against a real, disposable PostgreSQL for every PR (see below) | `apps/backend/src/testSetup/`, `*.integration.test.ts` |
 | AH-41 (new) | `routes/webhooks.ts` carried a second, unauthenticated "POST /payment" webhook from before the PayFast migration that marked payments `COMPLETED` with none of AH-04/05's checks — its signature check failed *open* whenever `NODE_ENV` wasn't exactly `"production"` and `PAYSTACK_SECRET_KEY` was unset (the deployed default). Removed; PayFast's ITN handler in `routes/payments.ts` is the only payment webhook now. | `routes/webhooks.ts` |
 
-Partial coverage also landed for AH-07 (tests): four unit suites covering token
-typing, PayFast signatures, the CSRF guard, and the clinical safety thresholds,
-plus new suites for the AH-13 encryption AAD/rotation and AH-29 2FA flow.
+Unit coverage: nine suites covering token typing, PayFast signatures, the
+CSRF guard, clinical safety thresholds, encryption AAD/rotation, the 2FA
+flow, rate-limiter/auth-cache resilience, and SLA/fee calculation.
+
+AH-07 (integration tests) — closed 2026-09-08, see below for the full writeup.
 
 ### Open
 
@@ -108,10 +112,8 @@ plus new suites for the AH-13 encryption AAD/rotation and AH-29 2FA flow.
 | AH-32 | AI triage moved off the request thread to a BullMQ worker — landed 2026-09-08, unit-verified only, still needs a staging load-test run (see §4) | P0 for scale — verify before trusting at scale |
 | AH-33 | Storage moved to S3-compatible object storage 2026-09-08 (with a graceful fallback when unconfigured); the base64-JSON wire format and synchronous `sharp` processing are deliberately unchanged — see below | P1 for scale — partially addressed |
 | AH-26 | TypeScript strict is off — five flags disabled, `strict` never set | P1 |
-| AH-07 | Integration and end-to-end tests still absent | P1 |
 | AH-03b | Double-submit CSRF token, for defence in depth beyond the origin check | P2 |
 | AH-15 | Cross-border PHI transfer to AI providers not named in the consent record | P2 |
-| AH-23 | No API versioning | P2 |
 | AH-34 | `demoStream` holds a `setInterval` per user in-process | P2 |
 | AH-35 | The Render `plan: starter` (0.5 vCPU) sizing this was measured against no longer applies — Render was removed in favour of Railway-only (§6). Re-measure against whatever Railway tier is actually deployed before assuming the bcrypt-saturation finding still holds at the same concurrency | P0 for scale — re-verify |
 | AH-36 | Biometrics ingest — partially addressed 2026-09-08, see below | P1 for scale (downgraded — see note) |
@@ -362,6 +364,73 @@ response, collapsing two round-trips into one. Not done here because
 breaking those callers is a real design task on the Python side
 (`apps/ml-service/main.py`, `engine.py`), not a same-session drive-by fix.
 
+### AH-07 — integration tests — closed 2026-09-08
+
+`apps/backend` had `supertest` installed since before this branch existed
+and zero uses of it. All routing was unit-tested at best (middleware logic
+in isolation, no route ever actually invoked end to end), and
+`workspace/package.json`'s `test` script was literally `echo "No tests
+configured for workspace"`.
+
+**What's here:** `apps/backend/src/testSetup/{globalSetup,globalTeardown}.js`
+plus `jest.integration.config.js` (`pnpm test:integration`) run real
+supertest requests against the real Express `app` (now exported from
+`index.ts`, guarded by the same `NODE_ENV==="test"` check that skips
+`startServer()` — see below) — three files, 11 tests: health/readiness,
+a full auth cycle (register → login → `/me` → logout, plus wrong-password/
+weak-password/no-session cases), and, most valuably, a real end-to-end
+triage submission that exercises AH-32's synchronous fallback path
+(no `REDIS_URL` in this environment, so `addAiTriageJob` returns `false`
+and `processAiTriageJob` runs inline) and confirms a red-flag symptom
+still reaches level 1 through the *entire* real chain — deterministic
+floor, `analyzeSymptoms`' own conservative fallback (no AI provider keys
+configured either), `mergeGuardrails`, the DB write — not just in
+`triageSafety.test.ts`'s isolated unit tests.
+
+**The database is real, not mocked or swapped for a different engine.**
+`globalSetup.js` runs `embedded-postgres` — a genuine `pg_ctl`-managed
+PostgreSQL binary — and applies the actual migration history with
+`prisma migrate deploy`, the same command the `migrations` CI job already
+trusted. No Docker required locally. In CI, `DATABASE_URL` is already set
+(the `integration` job's own `postgres:16` service container, added
+alongside the existing `migrations` job), so `globalSetup.js` detects
+that and uses it instead of starting its own — one code path, either
+environment.
+
+**Two real bugs surfaced by building this, not by writing test
+assertions against a rewritten app:**
+- Windows' default locale (`WIN1252`) can't represent a UTF-8 character
+  one migration file uses in a comment (`─`) — `embedded-postgres` was
+  failing on `prisma migrate deploy` before a single test ran. Fixed by
+  forcing `--encoding=UTF8 --locale=C` at `initdb` time, matching what
+  Docker's `postgres:16` image and Railway both already default to.
+- `services/websocket.ts`'s heartbeat `setInterval` (needed in
+  production, run forever) left Jest's process unable to exit naturally
+  after every test passed — traced with `--detectOpenHandles` rather than
+  guessed at. `initializeWebSocket(wss)` is now skipped in test mode
+  (same guard as `startServer()`); the residual handle after that fix
+  (some native-module resource neither guard reaches) is handled with
+  `forceExit: true` in `jest.integration.config.js`, the accepted standard
+  practice for supertest-style tests rather than an unbounded search for
+  one more handle with no guarantee it's the last.
+
+**Also required:** `eslint.config.cjs` gained a `**/*.js` override with
+Node/CommonJS globals — the plain-JS `testSetup/` scripts (deliberately
+not TypeScript; Jest's `globalSetup`/`globalTeardown` run before the
+ts-jest transform pipeline is available) were failing lint with `require`/
+`process`/`module` all flagged as undefined under the TS-oriented ruleset.
+And `jest.config.js` (the unit-test config) gained a
+`testPathIgnorePatterns` entry for `*.integration.test.ts` — without it,
+the unit suite tried to run these too, with no database and no
+`globalSetup`, and failed outright.
+
+**Not done:** this covers three flows, not the full route surface —
+booking, payments, prescriptions/referrals, wearable ingestion, and admin
+actions have no integration coverage yet. The harness this session built
+(register-a-patient helper, agent-based cookie sessions, the real-DB
+setup) is reusable for extending it; doing so wasn't in scope for closing
+this specific finding.
+
 ### Then measure
 
 `scripts/load-test-patient-pipeline.js` exists but must run against staging
@@ -391,7 +460,24 @@ aspiration rather than a claim. Tune `PRISMA_CONNECTION_LIMIT` and
   `requireConsent`, and version the consent text so it names the offshore
   processors and the transfer. POPIA s72 applies to symptom narratives.
   Retention periods for the consent text to cite are now decided (§6 item 3).
-- **AH-23** Move to `/api/v1/*` before a mobile client is in the field.
+- ~~**AH-23** Move to `/api/v1/*` before a mobile client is in the field.~~
+  **Closed 2026-09-08.** Every route moved except `/api/payments/webhook`,
+  kept mounted at its original path too — PayFast's ITN URL is configured
+  in PayFast's own dashboard, outside this codebase, and renaming it here
+  would silently stop payment confirmations until someone updated that
+  dashboard by hand. The frontend's browser-facing surface is unchanged
+  (`/api/*`); only its proxy (`workspace/src/app/api/[...path]/route.ts`)
+  knows the backend is versioned. Caught two real bugs on the way: the
+  `middleware/originGuard.ts` webhook exemption list had two dead entries
+  (`/api/terra/webhook`, `/api/rook/webhook`) that matched no real
+  route — Terra/ROOK webhooks only ever land on `/webhooks/terra` and
+  `/webhooks/rook`, already covered by the `/webhooks` prefix — removed;
+  and `downloadUrl` for prescription/referral PDFs
+  (`routes/triage.ts`, `routes/triageCaseReview.ts`) included a leading
+  `/api` that, combined with `apiClient`'s own `/api` baseURL, meant every
+  prescription/referral PDF download was hitting `/api/api/...` and
+  404ing — fixed by dropping the prefix at the source (verified against
+  axios's actual `combineURLs` behaviour, not assumed).
 - **POPIA operations** Data export and erasure endpoints, a retention schedule,
   and a purge job. The `ExportJob` model already exists as a starting point.
   Retention periods decided (§6 item 3); the schedule/purge job itself is

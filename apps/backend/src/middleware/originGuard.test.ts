@@ -129,10 +129,30 @@ describe("originGuard", () => {
       expect(next).toHaveBeenCalled();
     });
 
-    it("a signature-verified payment webhook", () => {
+    it("a signature-verified payment webhook at its original, unversioned path", () => {
+      // AH-23: kept mounted here deliberately — PayFast's dashboard points
+      // at this exact URL, outside this codebase's control.
       const { next } = run({
         path: "/api/payments/webhook",
         headers: { origin: "https://www.payfast.co.za" },
+      });
+
+      expect(next).toHaveBeenCalled();
+    });
+
+    it("a signature-verified payment webhook at the versioned path", () => {
+      const { next } = run({
+        path: "/api/v1/payments/webhook",
+        headers: { origin: "https://www.payfast.co.za" },
+      });
+
+      expect(next).toHaveBeenCalled();
+    });
+
+    it("a Health Connect sync at the versioned path", () => {
+      const { next } = run({
+        path: "/api/v1/biometrics/health-connect",
+        headers: {},
       });
 
       expect(next).toHaveBeenCalled();

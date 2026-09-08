@@ -23,7 +23,7 @@ function pad(n) {
 }
 
 async function login(email) {
-  const res = await fetch(`${BASE_URL}/api/auth/login`, {
+  const res = await fetch(`${BASE_URL}/api/v1/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password: PASSWORD }),
@@ -38,7 +38,7 @@ async function login(email) {
 
 async function submitBiometrics(token) {
   const authHeader = 'Bearer ' + String(token).trim();
-  const res = await fetch(`${BASE_URL}/api/patient/biometrics`, {
+  const res = await fetch(`${BASE_URL}/api/v1/patient/biometrics`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -62,7 +62,7 @@ async function submitBiometrics(token) {
 }
 
 async function getAlerts(token) {
-  const res = await fetch(`${BASE_URL}/api/patient/alerts`, {
+  const res = await fetch(`${BASE_URL}/api/v1/patient/alerts`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   const data = await res.json().catch(() => ({}));
@@ -71,7 +71,7 @@ async function getAlerts(token) {
 }
 
 async function getHistory(token) {
-  const res = await fetch(`${BASE_URL}/api/patient/biometrics/history?limit=10&offset=0`, {
+  const res = await fetch(`${BASE_URL}/api/v1/patient/biometrics/history?limit=10&offset=0`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   const data = await res.json().catch(() => ({}));

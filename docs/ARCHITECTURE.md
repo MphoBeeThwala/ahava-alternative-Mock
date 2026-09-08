@@ -18,6 +18,14 @@ Ahava Healthcare is a full-stack healthcare platform for South Africa.
 - ORM: Prisma (PostgreSQL + TimescaleDB)
 - Authentication: JWT with role-based access control
 - Task Queue: BullMQ with Redis
+- API versioning: every route lives under `/api/v1/*` (AH-23), pinned
+  before a mobile client exists to depend on the response shape. The one
+  exception is `/api/payments/webhook` (also reachable, unversioned) —
+  PayFast's ITN callback URL is configured in PayFast's own dashboard, so
+  renaming it here would silently stop payment confirmations from arriving.
+  The Next.js frontend still calls same-origin `/api/*`; its proxy
+  (`workspace/src/app/api/[...path]/route.ts`) is the only place that
+  knows the backend is versioned, translating to `/api/v1/*` there.
 
 ### Machine Learning Service
 - Framework: FastAPI (Python)

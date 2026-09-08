@@ -135,3 +135,42 @@ jobs:
       # Proves the migration history replays from empty onto a real Postgres.
       - name: Apply migrations
         run: pnpm --filter @ahava-healthcare/api exec prisma migrate deploy
+
+  integration:
+    name: Backend — integration tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ahava_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # AH-07: DATABASE_URL is already set (this job's env, above), so
+      # testSetup/globalSetup.js skips spinning up its own embedded-postgres
+      # (that path exists for running these same tests locally without
+      # Docker) and applies migrations to this real service container
+      # instead — one real database, same as production, not a mock.
+      - name: Integration tests
+        run: pnpm --filter @ahava-healthcare/api test:integration
