@@ -1,23 +1,79 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import RoleGuard, { UserRole } from '../../../components/RoleGuard';
-import { patientApi, bookingsApi, terraApi, TerraStatus, BiometricReading, MonitoringSummary, Booking } from '../../../lib/api';
+import {
+    patientApi,
+    bookingsApi,
+    terraApi,
+    TerraStatus,
+    BiometricReading,
+    MonitoringSummary,
+    Booking,
+    PatientTriageCase,
+} from '../../../lib/api';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useToast } from '../../../contexts/ToastContext';
 import DashboardLayout from '../../../components/DashboardLayout';
 import { Card, CardHeader, CardTitle } from '../../../components/ui/Card';
 import { StatusBadge } from '../../../components/ui/StatusBadge';
+import { PageHeader } from '../../../components/ui/PageHeader';
+import { StatCard } from '../../../components/ui/StatCard';
+import { Timeline, type TimelineStep } from '../../../components/ui/Timeline';
+import { DataTable, type DataTableColumn } from '../../../components/ui/DataTable';
+import { EmptyState } from '../../../components/ui/EmptyState';
+import { Skeleton } from '../../../components/ui/Skeleton';
+import { Modal } from '../../../components/ui/Modal';
+import { Icon } from '../../../components/ui/Icon';
+
+type Reading = Record<string, unknown>;
+
+function num(v: unknown): number | undefined {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
+}
+
+/** Readiness ring — a plain stroke-dasharray circle, no library. */
+function ReadinessRing({ score }: { score: number | undefined }) {
+    const pct = Math.max(0, Math.min(100, score ?? 0));
+    const r = 34;
+    const c = 2 * Math.PI * r;
+    const offset = c - (pct / 100) * c;
+    return (
+        <svg width={92} height={92} viewBox="0 0 92 92" aria-hidden focusable={false}>
+            <circle cx={46} cy={46} r={r} fill="none" stroke="var(--border)" strokeWidth={8} />
+            <circle
+                cx={46}
+                cy={46}
+                r={r}
+                fill="none"
+                stroke="var(--primary)"
+                strokeWidth={8}
+                strokeLinecap="round"
+                strokeDasharray={c}
+                strokeDashoffset={offset}
+                transform="rotate(-90 46 46)"
+                style={{ transition: 'stroke-dashoffset var(--duration) var(--ease-out)' }}
+            />
+            <text x="46" y="52" textAnchor="middle" className="num" fontSize={26} fontWeight={800} fill="var(--foreground)">
+                {score ?? '—'}
+            </text>
+        </svg>
+    );
+}
 
 export default function PatientDashboard() {
     const { user } = useAuth();
     const toast = useToast();
     const [loading, setLoading] = useState(false);
+    const [initialLoading, setInitialLoading] = useState(true);
     const [monitoringSummary, setMonitoringSummary] = useState<MonitoringSummary | null>(null);
-    const [biometricHistory, setBiometricHistory] = useState<Array<Record<string, unknown>>>([]);
+    const [biometricHistory, setBiometricHistory] = useState<Reading[]>([]);
     const [bookings, setBookings] = useState<Booking[]>([]);
     const [wearable, setWearable] = useState<TerraStatus | null>(null);
+    const [triageCases, setTriageCases] = useState<PatientTriageCase[]>([]);
+    const [vitalsModalOpen, setVitalsModalOpen] = useState(false);
     const [biometricData, setBiometricData] = useState<BiometricReading>({
         heartRate: undefined,
         bloodPressure: { systolic: 0, diastolic: 0 },
@@ -38,7 +94,7 @@ export default function PatientDashboard() {
     const loadBiometricHistory = useCallback(async () => {
         try {
             const res = await patientApi.getBiometricHistory(20);
-            const list = (res?.data?.history ?? res?.history ?? res) as Array<Record<string, unknown>>;
+            const list = (res?.data?.history ?? res?.history ?? res) as Reading[];
             setBiometricHistory(Array.isArray(list) ? list : []);
         } catch (error) {
             console.error('Failed to load biometric history:', error);
@@ -54,12 +110,28 @@ export default function PatientDashboard() {
         }
     }, []);
 
+    // New in Phase 3: a lightweight status preview of the patient's most
+    // recent triage case (the full flow already lives at /patient/ai-doctor —
+    // this just surfaces where the newest one stands). Read-only, uses the
+    // same endpoint that page already calls; adds no new backend behavior.
+    const loadTriageCases = useCallback(async () => {
+        try {
+            const data = await patientApi.getMyTriageCases();
+            setTriageCases(Array.isArray(data?.cases) ? data.cases : []);
+        } catch (error) {
+            console.error('Failed to load triage cases:', error);
+        }
+    }, []);
+
     useEffect(() => {
-        loadMonitoringSummary();
-        loadBiometricHistory();
-        loadBookings();
+        Promise.all([
+            loadMonitoringSummary(),
+            loadBiometricHistory(),
+            loadBookings(),
+            loadTriageCases(),
+        ]).finally(() => setInitialLoading(false));
         terraApi.getStatus().then(setWearable).catch(() => {});
-    }, [loadMonitoringSummary, loadBiometricHistory, loadBookings]);
+    }, [loadMonitoringSummary, loadBiometricHistory, loadBookings, loadTriageCases]);
 
     const handleBiometricSubmit = async () => {
         try {
@@ -73,6 +145,7 @@ export default function PatientDashboard() {
                 oxygenSaturation: undefined,
                 source: 'manual',
             });
+            setVitalsModalOpen(false);
             loadMonitoringSummary();
             loadBiometricHistory();
         } catch (error: unknown) {
@@ -84,349 +157,397 @@ export default function PatientDashboard() {
         }
     };
 
-    const alertColor = monitoringSummary?.alertLevel === 'GREEN'
-        ? '#059669' : monitoringSummary?.alertLevel === 'YELLOW' ? '#d97706' : '#dc2626';
-    const alertBg = monitoringSummary?.alertLevel === 'GREEN'
-        ? 'rgba(5,150,105,0.1)' : monitoringSummary?.alertLevel === 'YELLOW' ? 'rgba(217,119,6,0.1)' : 'rgba(220,38,38,0.1)';
+    // ---- Derived, real-data-only values (see docs/UI_UX_IMPLEMENTATION_BRIEF.md §1.1) ----
+
+    const latest = biometricHistory[0];
+    const previous = biometricHistory[1];
+    const chronological = useMemo(() => [...biometricHistory].reverse(), [biometricHistory]);
+    const hrSeries = useMemo(() => chronological.map((r) => num(r.heartRate ?? r.heartRateResting)).filter((v): v is number => v != null), [chronological]);
+    const spo2Series = useMemo(() => chronological.map((r) => num(r.oxygenSaturation)).filter((v): v is number => v != null), [chronological]);
+    const bpSeries = useMemo(() => chronological.map((r) => num(r.bloodPressureSystolic)).filter((v): v is number => v != null), [chronological]);
+
+    const latestHr = num(latest?.heartRate ?? latest?.heartRateResting);
+    const previousHr = num(previous?.heartRate ?? previous?.heartRateResting);
+    const latestSpo2 = num(latest?.oxygenSaturation);
+    const previousSpo2 = num(previous?.oxygenSaturation);
+    const latestBpSys = num(latest?.bloodPressureSystolic);
+    const latestBpDia = num(latest?.bloodPressureDiastolic);
+
+    const formatDelta = (curr: number | undefined, prev: number | undefined, unit: string): { text: string; tone: 'up' | 'down' | 'neutral' } | undefined => {
+        if (curr == null || prev == null) return undefined;
+        const diff = Math.round((curr - prev) * 10) / 10;
+        if (diff === 0) return { text: `No change ${unit}`, tone: 'neutral' };
+        return { text: `${diff > 0 ? '+' : ''}${diff} ${unit} vs last reading`, tone: diff > 0 ? 'up' : 'down' };
+    };
+    const hrDelta = formatDelta(latestHr, previousHr, 'bpm');
+    const spo2Delta = formatDelta(latestSpo2, previousSpo2, '%');
+
+    // The badge/sentence below uses this endpoint's own alertLevel, which per
+    // the current backend (services/monitoring.ts) can only be GREEN, YELLOW
+    // or Unknown — never RED. A true RED state lives on individual readings
+    // (biometricHistory items carry their own alertLevel, including RED) and
+    // on the separate Early Warning endpoint, not this summary. Handled
+    // below without assuming RED can appear here.
+    const alertLevel = monitoringSummary?.alertLevel;
+    const latestReadingAlertLevel = latest?.alertLevel as string | undefined;
+    const badgeVariant = latestReadingAlertLevel === 'RED' || alertLevel === 'RED'
+        ? 'danger'
+        : alertLevel === 'YELLOW' || latestReadingAlertLevel === 'YELLOW'
+        ? 'warning'
+        : alertLevel === 'GREEN'
+        ? 'success'
+        : 'neutral';
+
+    const sentence = (() => {
+        if (latestReadingAlertLevel === 'RED') {
+            return 'Your most recent reading was flagged as high-priority — please review it and consider contacting a doctor.';
+        }
+        if (!monitoringSummary?.baselineEstablished) {
+            return `We're still learning your normal — ${biometricHistory.length} of 14 readings so far.`;
+        }
+        if (alertLevel === 'YELLOW' || latestReadingAlertLevel === 'YELLOW') {
+            return 'One of your recent readings was outside your usual range — see Recent readings below for detail.';
+        }
+        if (alertLevel === 'GREEN') {
+            return 'Nothing needs your attention today.';
+        }
+        return 'Log a reading to see how you\'re doing today.';
+    })();
+
+    // Review timeline for the most recent triage case only — real timestamps,
+    // no invented "AI drafted at" step (that timestamp isn't exposed to
+    // patients by the API).
+    const latestCase = triageCases[0];
+    const timelineSteps: TimelineStep[] | null = latestCase ? [
+        {
+            label: 'You described your symptoms',
+            detail: new Date(latestCase.createdAt).toLocaleString(),
+            state: 'done',
+        },
+        {
+            label: latestCase.status === 'RELEASED' ? 'A doctor reviewed your case' : 'A doctor is reviewing it',
+            state: latestCase.status === 'RELEASED' ? 'done' : 'current',
+        },
+        {
+            label: 'You get the result',
+            detail: latestCase.releasedAt ? new Date(latestCase.releasedAt).toLocaleString() : undefined,
+            state: latestCase.status === 'RELEASED' ? 'done' : 'pending',
+        },
+    ] : null;
+
+    const nextBooking = bookings.find((b) => {
+        const status = (b as unknown as { status?: string }).status;
+        return status !== 'CANCELLED' && status !== 'COMPLETED' && new Date(b.scheduledDate).getTime() >= Date.now();
+    }) ?? bookings[0];
+
+    const readingsColumns: DataTableColumn<Reading>[] = [
+        { key: 'when', header: 'When', render: (r) => r.createdAt ? new Date(r.createdAt as string).toLocaleString() : '—' },
+        { key: 'hr', header: 'HR', numeric: true, render: (r) => (r.heartRate ?? r.heartRateResting) != null ? String(r.heartRate ?? r.heartRateResting) : '—' },
+        { key: 'bp', header: 'BP', numeric: true, render: (r) => (r.bloodPressureSystolic != null ? `${r.bloodPressureSystolic}/${r.bloodPressureDiastolic ?? '—'}` : '—') },
+        { key: 'spo2', header: 'SpO₂', numeric: true, render: (r) => r.oxygenSaturation != null ? `${r.oxygenSaturation}%` : '—' },
+        { key: 'score', header: 'Score', numeric: true, render: (r) => r.readinessScore != null ? String(r.readinessScore) : '—' },
+    ];
+
+    const lastReadingTime = latest?.createdAt ? new Date(latest.createdAt as string) : null;
 
     return (
         <RoleGuard allowedRoles={[UserRole.PATIENT]}>
             <DashboardLayout>
-                <div style={{ background: 'var(--background)', minHeight: '100vh' }}>
+                <PageHeader
+                    title={`Good morning, ${user?.firstName ?? ''}`}
+                    subtitle={
+                        new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }) +
+                        (lastReadingTime ? ` · last reading ${lastReadingTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : '')
+                    }
+                />
 
-                    {/* ── Hero banner ── */}
-                    <div style={{ background: 'linear-gradient(135deg,#0a1628 0%,#0d2f5e 55%,#0a3d3a 100%)', padding: '32px 40px 28px', position: 'relative', overflow: 'hidden' }}>
-                        <div style={{ position: 'absolute', top: -60, right: -60, width: 220, height: 220, borderRadius: '50%', background: 'radial-gradient(circle,rgba(13,148,136,0.18),transparent 70%)', pointerEvents: 'none' }} />
-                        <div style={{ maxWidth: 1100, margin: '0 auto' }}>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-                                <div>
-                                    <p style={{ color: 'rgba(94,234,212,0.8)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6 }}>Patient Portal</p>
-                                    <h1 style={{ color: 'white', fontSize: 'clamp(22px,3vw,30px)', fontWeight: 900, margin: 0 }}>
-                                        Welcome back, {user?.firstName} 👋
-                                    </h1>
-                                    <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginTop: 4 }}>Track your health, log biometrics, and get AI-powered care.</p>
-                                </div>
-                                {monitoringSummary && (
-                                    <div style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 16, padding: '14px 22px', textAlign: 'center', minWidth: 140 }}>
-                                        <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>Readiness</div>
-                                        <div style={{ fontSize: 32, fontWeight: 900, color: 'white', lineHeight: 1 }}>{monitoringSummary.readinessScore ?? '—'}</div>
-                                        <div style={{ fontSize: 11, fontWeight: 700, marginTop: 6, padding: '3px 10px', borderRadius: 20, background: alertBg, color: alertColor, display: 'inline-block' }}>
-                                            {monitoringSummary.alertLevel ?? 'N/A'}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
+                {/* Email verification — preserved exactly */}
+                {user && !user.isVerified && (
+                    <div className="flex flex-wrap items-center gap-3 border-b px-6 py-3" style={{ background: '#fffbeb', borderColor: '#fde68a' }}>
+                        <Icon name="mail" size={18} />
+                        <span className="flex-1 text-sm font-semibold" style={{ color: '#92400e' }}>
+                            Please verify your email address to unlock all features.
+                        </span>
+                        <a
+                            href="/auth/verify-email"
+                            onClick={async (e) => {
+                                e.preventDefault();
+                                try {
+                                    const { authApi: api } = await import('../../../lib/api');
+                                    await api.resendVerification(user.email);
+                                    toast.success('Verification email sent! Check your inbox.');
+                                } catch { toast.error('Could not resend. Try again later.'); }
+                            }}
+                            className="text-sm font-bold underline"
+                            style={{ color: '#d97706', cursor: 'pointer' }}
+                        >
+                            Resend verification email
+                        </a>
                     </div>
+                )}
 
-                    {/* ── Email verification banner ── */}
-                    {user && !user.isVerified && (
-                        <div style={{ background: '#fffbeb', borderBottom: '1px solid #fde68a', padding: '12px 40px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                            <span style={{ fontSize: 18 }}>📧</span>
-                            <span style={{ fontSize: 14, color: '#92400e', fontWeight: 600, flex: 1 }}>
-                                Please verify your email address to unlock all features.
-                            </span>
-                            <a
-                                href={`/auth/verify-email`}
-                                onClick={async (e) => {
-                                    e.preventDefault();
-                                    try {
-                                        const { authApi: api } = await import('../../../lib/api');
-                                        await api.resendVerification(user.email);
-                                        toast.success('Verification email sent! Check your inbox.');
-                                    } catch { toast.error('Could not resend. Try again later.'); }
-                                }}
-                                style={{ fontSize: 13, fontWeight: 700, color: '#d97706', textDecoration: 'underline', cursor: 'pointer' }}
-                            >
-                                Resend verification email
-                            </a>
+                <div className="mx-auto max-w-6xl space-y-6 p-6 sm:p-8">
+                    {initialLoading ? (
+                        <div className="space-y-4">
+                            <Skeleton height={140} />
+                            <Skeleton height={200} />
                         </div>
-                    )}
-
-                    <div className="p-6 sm:p-8">
-                    <div className="max-w-6xl mx-auto">
-
-                        {/* ML Early Warning strip */}
-                        <Link
-                            href="/patient/early-warning"
-                            className="flex items-center justify-between gap-3 mb-6 px-4 py-3 rounded-xl border-2 w-full text-left transition hover:opacity-95"
-                            style={{ borderColor: 'var(--primary)', backgroundColor: 'var(--primary-soft)' }}
-                        >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <span style={{ fontSize: 16 }}>⚠️</span>
-                                <span className="text-sm font-semibold text-[var(--primary)] uppercase tracking-wide">
-                                    ML Early Warning Service
-                                </span>
-                            </div>
-                            <span className="text-sm font-medium text-[var(--foreground)]">
-                                Cardiovascular &amp; wellness risk scores →
-                            </span>
-                        </Link>
-
-                        {/* Early Warning — prominent card */}
-                        <Link
-                            href="/patient/early-warning"
-                            className="card-interactive block mb-8 p-6 rounded-[var(--radius-lg)] border-2"
-                            style={{ borderColor: 'var(--primary)', backgroundColor: 'var(--card)', boxShadow: 'var(--shadow)' }}
-                        >
-                            <div className="flex flex-wrap items-center justify-between gap-4">
-                                <div>
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <h2 className="text-xl font-bold text-[var(--foreground)]">
-                                            Early Warning — Cardiovascular &amp; Wellness
-                                        </h2>
-                                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[var(--primary-soft)] text-[var(--primary)]">
-                                            ML service
-                                        </span>
+                    ) : (
+                        <>
+                            {/* One-glance card */}
+                            <Card>
+                                <div className="grid gap-6 md:grid-cols-[auto_1fr_auto]">
+                                    {/* Left: readiness ring + pill */}
+                                    <div className="flex flex-col items-center gap-2 justify-self-center md:justify-self-start">
+                                        <ReadinessRing score={monitoringSummary?.readinessScore} />
+                                        <StatusBadge variant={badgeVariant}>{alertLevel ?? 'Unknown'}</StatusBadge>
                                     </div>
-                                    <p className="text-sm text-[var(--muted)]">
-                                        View your risk scores (Framingham, QRISK3, ML), metrics (HR, HRV, sleep, ECG, temperature trend), and recommendations.
-                                    </p>
-                                </div>
-                                <span className="btn-primary inline-flex items-center gap-2 px-5 py-3 rounded-xl font-semibold shrink-0">
-                                    Open Early Warning →
-                                </span>
-                            </div>
-                        </Link>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                            {/* Health Status – KPI-style card */}
-                            <Card className="card-interactive">
-                                <CardHeader>
-                                    <CardTitle>Health Status</CardTitle>
-                                </CardHeader>
-                                <div className="flex items-center justify-between mb-4">
-                                    <div>
-                                        <p className="text-sm font-medium text-[var(--muted)]">Readiness Score</p>
-                                        <p className="text-3xl font-bold text-[var(--foreground)] mt-1">
-                                            {monitoringSummary?.readinessScore ?? 'N/A'}
-                                        </p>
-                                    </div>
-                                    <StatusBadge
-                                        variant={
-                                            monitoringSummary?.alertLevel === 'GREEN'
-                                                ? 'success'
-                                                : monitoringSummary?.alertLevel === 'YELLOW'
-                                                ? 'warning'
-                                                : 'danger'
-                                        }
-                                    >
-                                        {monitoringSummary?.alertLevel ?? 'Unknown'}
-                                    </StatusBadge>
-                                </div>
-                                <p className="text-sm font-medium text-[var(--muted)]">
-                                    {monitoringSummary?.baselineEstablished
-                                        ? 'Baseline established'
-                                        : biometricHistory.length === 0
-                                        ? 'Submit your first reading above to get started.'
-                                        : `Collecting data (${biometricHistory.length} reading${biometricHistory.length === 1 ? '' : 's'} so far). Need 14+ for full baseline.`}
-                                </p>
-                            </Card>
-
-                            {/* Biometric Entry */}
-                            <Card className="card-interactive">
-                                <CardHeader>
-                                    <CardTitle>Record Biometrics</CardTitle>
-                                </CardHeader>
-                            <div className="space-y-3" role="form" aria-label="Record biometrics">
-                                <div className="grid grid-cols-2 gap-2">
-                                    <input
-                                        id="biometric-heart-rate"
-                                        name="heartRate"
-                                        type="number"
-                                        placeholder="Heart Rate"
-                                        className="w-full px-3 py-2.5 border rounded-xl text-[var(--foreground)] placeholder:text-[var(--muted)] focus:ring-2 focus:ring-[var(--primary)] outline-none transition"
-                                        style={{ borderColor: 'var(--border)' }}
-                                        value={biometricData.heartRate || ''}
-                                        onChange={(e) => setBiometricData({
-                                            ...biometricData,
-                                            heartRate: e.target.value ? Number(e.target.value) : undefined,
-                                        })}
-                                    />
-                                    <input
-                                        id="biometric-temperature"
-                                        name="temperature"
-                                        type="number"
-                                        placeholder="Temp (°C)"
-                                        className="w-full px-3 py-2.5 border rounded-xl text-[var(--foreground)] placeholder:text-[var(--muted)] focus:ring-2 focus:ring-[var(--primary)] outline-none transition"
-                                        style={{ borderColor: 'var(--border)' }}
-                                        value={biometricData.temperature || ''}
-                                        onChange={(e) => setBiometricData({
-                                            ...biometricData,
-                                            temperature: e.target.value ? Number(e.target.value) : undefined,
-                                        })}
-                                    />
-                                </div>
-                                <div className="grid grid-cols-2 gap-2">
-                                    <input
-                                        id="biometric-systolic"
-                                        name="bloodPressureSystolic"
-                                        type="number"
-                                        placeholder="Systolic"
-                                        className="w-full px-3 py-2.5 border rounded-xl text-[var(--foreground)] placeholder:text-[var(--muted)] focus:ring-2 focus:ring-[var(--primary)] outline-none transition"
-                                        style={{ borderColor: 'var(--border)' }}
-                                        value={biometricData.bloodPressure?.systolic || ''}
-                                        onChange={(e) => setBiometricData({
-                                            ...biometricData,
-                                            bloodPressure: {
-                                                ...biometricData.bloodPressure!,
-                                                systolic: Number(e.target.value) || 0,
-                                            },
-                                        })}
-                                    />
-                                    <input
-                                        id="biometric-diastolic"
-                                        name="bloodPressureDiastolic"
-                                        type="number"
-                                        placeholder="Diastolic"
-                                        className="w-full px-3 py-2.5 border rounded-xl text-[var(--foreground)] placeholder:text-[var(--muted)] focus:ring-2 focus:ring-[var(--primary)] outline-none transition"
-                                        style={{ borderColor: 'var(--border)' }}
-                                        value={biometricData.bloodPressure?.diastolic || ''}
-                                        onChange={(e) => setBiometricData({
-                                            ...biometricData,
-                                            bloodPressure: {
-                                                ...biometricData.bloodPressure!,
-                                                diastolic: Number(e.target.value) || 0,
-                                            },
-                                        })}
-                                    />
-                                </div>
-                                <input
-                                    id="biometric-spo2"
-                                    name="oxygenSaturation"
-                                    type="number"
-                                    placeholder="SpO2 (%)"
-                                    className="w-full px-3 py-2.5 border rounded-xl text-[var(--foreground)] placeholder:text-[var(--muted)] focus:ring-2 focus:ring-[var(--primary)] outline-none transition"
-                                    style={{ borderColor: 'var(--border)' }}
-                                    value={biometricData.oxygenSaturation || ''}
-                                    onChange={(e) => setBiometricData({
-                                        ...biometricData,
-                                        oxygenSaturation: e.target.value ? Number(e.target.value) : undefined,
-                                    })}
-                                />
-                                <button
-                                    type="button"
-                                    id="biometric-submit"
-                                    onClick={handleBiometricSubmit}
-                                    disabled={loading}
-                                    className="btn-primary w-full py-2.5 rounded-xl font-semibold disabled:opacity-50"
-                                >
-                                    Submit
-                                </button>
-                            </div>
-                            </Card>
-
-                            {/* Link to AI Doctor Assistant (separate service) */}
-                            <Card className="card-interactive flex flex-col justify-center">
-                                <CardHeader>
-                                    <CardTitle>AI Doctor Assistant</CardTitle>
-                                </CardHeader>
-                                <p className="text-sm text-[var(--muted)] mb-4">
-                                    Describe symptoms and get AI-assisted triage recommendations. For decision support only — not a medical diagnosis.
-                                </p>
-                                <Link
-                                    href="/patient/ai-doctor"
-                                    className="btn-primary inline-flex items-center justify-center py-2.5 rounded-xl font-semibold"
-                                >
-                                    Open AI Doctor Assistant →
-                                </Link>
-                            </Card>
-                        </div>
-
-                        {/* Wearable connect card */}
-                        <Link
-                            href="/patient/wearable"
-                            className="flex items-center justify-between gap-3 mb-6 px-5 py-4 rounded-2xl border w-full text-left transition hover:opacity-90"
-                            style={{ borderColor: wearable?.connected ? 'var(--success)' : 'var(--border)', backgroundColor: wearable?.connected ? 'rgba(5,150,105,0.06)' : 'var(--card)', boxShadow: 'var(--shadow)' }}
-                        >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                                <div style={{ width: 40, height: 40, borderRadius: 12, background: wearable?.connected ? 'rgba(5,150,105,0.12)' : 'rgba(148,163,184,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
-                                    ⌚
-                                </div>
-                                <div>
-                                    <p className="text-sm font-bold text-[var(--foreground)]">
-                                        {wearable?.connected ? 'Smartwatch Connected' : 'Connect Your Smartwatch'}
-                                    </p>
-                                    <p className="text-xs text-[var(--muted)] mt-0.5">
-                                        {wearable?.connected
-                                            ? `${wearable.devices.join(', ')} · syncing automatically`
-                                            : 'Apple Watch, Fitbit, Garmin, Samsung & more — enable auto biometric sync'}
-                                    </p>
-                                </div>
-                            </div>
-                            <span className="text-sm font-semibold shrink-0" style={{ color: wearable?.connected ? 'var(--success)' : 'var(--primary)' }}>
-                                {wearable?.connected ? 'Manage →' : 'Set up →'}
-                            </span>
-                        </Link>
-
-                        {/* Recent biometric readings */}
-                        <Card className="card-interactive mb-8">
-                            <CardHeader>
-                                <CardTitle>Recent readings</CardTitle>
-                            </CardHeader>
-                            {biometricHistory.length === 0 ? (
-                                <p className="text-sm font-medium text-[var(--muted)]">No readings yet. Use the form above to submit your first biometrics.</p>
-                            ) : (
-                                <div className="space-y-3">
-                                    {biometricHistory.slice(0, 10).map((r: Record<string, unknown>, i: number) => (
-                                        <div
-                                            key={(r.id as string) ?? i}
-                                            className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2 border-b last:border-b-0 text-sm"
-                                            style={{ borderColor: 'var(--border)' }}
-                                        >
-                                            <span className="text-[var(--muted)]">
-                                                {r.createdAt ? new Date(r.createdAt as string).toLocaleString() : '—'}
-                                            </span>
-                                            {(r.heartRate != null || r.heartRateResting != null) && (
-                                                <span>HR: {String(r.heartRate ?? r.heartRateResting ?? '—')}</span>
-                                            )}
-                                            {(r.bloodPressureSystolic != null || r.bloodPressureDiastolic != null) && (
-                                                <span>BP: {String(r.bloodPressureSystolic ?? '—')}/{String(r.bloodPressureDiastolic ?? '—')}</span>
-                                            )}
-                                            {r.oxygenSaturation != null && <span>SpO2: {String(r.oxygenSaturation)}%</span>}
-                                            {r.temperature != null && <span>Temp: {String(r.temperature)}°C</span>}
-                                            {r.readinessScore != null && (
-                                                <span className="font-medium">Score: {String(r.readinessScore)}</span>
-                                            )}
+                                    {/* Centre: sentence + stat cards */}
+                                    <div className="min-w-0">
+                                        <p className="text-[15px] font-medium text-[var(--foreground)]">{sentence}</p>
+                                        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                            <StatCard
+                                                label="Heart rate"
+                                                value={latestHr ?? '—'}
+                                                unit={latestHr != null ? 'bpm' : undefined}
+                                                delta={hrDelta?.text}
+                                                deltaTone={hrDelta?.tone}
+                                                sparklineValues={hrSeries.length >= 2 ? hrSeries : undefined}
+                                            />
+                                            <StatCard
+                                                label="Blood pressure"
+                                                value={latestBpSys != null ? `${latestBpSys}/${latestBpDia ?? '—'}` : '—'}
+                                                sparklineValues={bpSeries.length >= 2 ? bpSeries : undefined}
+                                            />
+                                            <StatCard
+                                                label="Oxygen"
+                                                value={latestSpo2 ?? '—'}
+                                                unit={latestSpo2 != null ? '%' : undefined}
+                                                delta={spo2Delta?.text}
+                                                deltaTone={spo2Delta?.tone}
+                                                sparklineValues={spo2Series.length >= 2 ? spo2Series : undefined}
+                                            />
                                         </div>
-                                    ))}
-                                </div>
-                            )}
-                        </Card>
+                                    </div>
 
-                        {/* Bookings */}
-                        <Card className="card-interactive">
-                            <CardHeader>
-                                <CardTitle>My Bookings</CardTitle>
-                            </CardHeader>
-                            {bookings.length === 0 ? (
-                                <p className="font-medium text-[var(--muted)]">No bookings yet. Book a visit to get started.</p>
-                            ) : (
-                                <div className="space-y-4">
-                                    {bookings.map((booking) => (
-                                        <div key={booking.id} className="p-4 rounded-lg border" style={{ borderColor: 'var(--border)' }}>
-                                            <div className="flex justify-between items-start gap-4">
-                                                <div>
-                                                    <p className="font-semibold text-[var(--foreground)]">
-                                                        {new Date(booking.scheduledDate).toLocaleDateString()}
-                                                    </p>
-                                                    <p className="text-sm text-[var(--muted)] mt-1">{booking.encryptedAddress ?? '—'}</p>
-                                                </div>
-                                                <StatusBadge
-                                                    variant={booking.status === 'CONFIRMED' ? 'success' : 'warning'}
-                                                    className="text-xs shrink-0"
-                                                >
-                                                    {booking.status}
+                                    {/* Right: exactly one primary action, one secondary, one text link */}
+                                    <div className="flex flex-col gap-2 md:w-48">
+                                        <button
+                                            type="button"
+                                            onClick={() => setVitalsModalOpen(true)}
+                                            className="btn-primary flex items-center justify-center gap-2 rounded-xl py-2.5 font-semibold"
+                                            style={{ minHeight: 'var(--tap-primary)' }}
+                                        >
+                                            <Icon name="pulse" size={16} /> Log today&apos;s vitals
+                                        </button>
+                                        <Link
+                                            href="/patient/book-visit"
+                                            className="flex items-center justify-center gap-2 rounded-xl border py-2.5 font-semibold text-[var(--foreground)]"
+                                            style={{ borderColor: 'var(--border)', minHeight: 'var(--tap-min)' }}
+                                        >
+                                            <Icon name="calendar" size={16} /> Book a nurse visit
+                                        </Link>
+                                        <Link href="/patient/early-warning" className="text-center text-sm font-semibold text-[var(--primary)]">
+                                            See full risk detail →
+                                        </Link>
+                                    </div>
+                                </div>
+                            </Card>
+
+                            {/* Row of two: review timeline + next visit */}
+                            <div className="grid gap-6 md:grid-cols-2">
+                                <Card>
+                                    <CardHeader><CardTitle>Your symptom check</CardTitle></CardHeader>
+                                    {timelineSteps ? (
+                                        <Timeline steps={timelineSteps} />
+                                    ) : (
+                                        <EmptyState
+                                            icon="stethoscope"
+                                            message="No symptom checks yet"
+                                            action={
+                                                <Link href="/patient/ai-doctor" className="text-sm font-semibold text-[var(--primary)]">
+                                                    Describe your symptoms →
+                                                </Link>
+                                            }
+                                        />
+                                    )}
+                                </Card>
+                                <Card>
+                                    <CardHeader><CardTitle>Next visit</CardTitle></CardHeader>
+                                    {nextBooking ? (
+                                        <div>
+                                            <p className="text-sm font-semibold text-[var(--foreground)]">
+                                                {new Date(nextBooking.scheduledDate).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
+                                            </p>
+                                            <p className="mt-1 text-sm text-[var(--muted)]">{nextBooking.encryptedAddress ?? '—'}</p>
+                                            <div className="mt-3">
+                                                <StatusBadge variant={(nextBooking as unknown as { status?: string }).status === 'CONFIRMED' ? 'success' : 'warning'}>
+                                                    {(nextBooking as unknown as { status?: string }).status ?? 'PENDING'}
                                                 </StatusBadge>
                                             </div>
                                         </div>
-                                    ))}
-                                </div>
-                            )}
-                        </Card>
-                    </div>{/* max-w-6xl */}
-                    </div>{/* p-6 sm:p-8 */}
-                </div>{/* outer bg */}
+                                    ) : (
+                                        <EmptyState
+                                            icon="calendar"
+                                            message="No upcoming visits"
+                                            action={
+                                                <Link href="/patient/book-visit" className="text-sm font-semibold text-[var(--primary)]">
+                                                    Book a nurse visit →
+                                                </Link>
+                                            }
+                                        />
+                                    )}
+                                </Card>
+                            </div>
+
+                            {/* Recent readings */}
+                            <Card padding="sm">
+                                <CardHeader><CardTitle>Recent readings</CardTitle></CardHeader>
+                                {biometricHistory.length === 0 ? (
+                                    <EmptyState icon="pulse" message="No readings yet" action={
+                                        <button type="button" onClick={() => setVitalsModalOpen(true)} className="text-sm font-semibold text-[var(--primary)]">
+                                            Log your first reading →
+                                        </button>
+                                    } />
+                                ) : (
+                                    <DataTable rowKey={(r) => String(r.id ?? Math.random())} columns={readingsColumns} data={biometricHistory.slice(0, 10)} />
+                                )}
+                            </Card>
+
+                            {/* Secondary: wearable connect + AI doctor — real, distinct features, kept but de-emphasised */}
+                            <div className="grid gap-4 md:grid-cols-2">
+                                <Link
+                                    href="/patient/wearable"
+                                    className="flex items-center justify-between gap-3 rounded-2xl border p-4 transition hover:opacity-90"
+                                    style={{ borderColor: wearable?.connected ? 'var(--success)' : 'var(--border)', backgroundColor: wearable?.connected ? 'rgba(5,150,105,0.06)' : 'var(--card)' }}
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <span
+                                            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+                                            style={{ background: wearable?.connected ? 'rgba(5,150,105,0.12)' : 'rgba(148,163,184,0.1)', color: wearable?.connected ? 'var(--success)' : 'var(--muted)' }}
+                                        >
+                                            <Icon name="watch" size={18} />
+                                        </span>
+                                        <div>
+                                            <p className="text-sm font-bold text-[var(--foreground)]">
+                                                {wearable?.connected ? 'Smartwatch Connected' : 'Connect Your Smartwatch'}
+                                            </p>
+                                            <p className="mt-0.5 text-xs text-[var(--muted)]">
+                                                {wearable?.connected
+                                                    ? `${wearable.devices.join(', ')} · syncing automatically`
+                                                    : 'Apple Watch, Fitbit, Garmin, Samsung & more'}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <span className="shrink-0 text-sm font-semibold" style={{ color: wearable?.connected ? 'var(--success)' : 'var(--primary)' }}>
+                                        {wearable?.connected ? 'Manage →' : 'Set up →'}
+                                    </span>
+                                </Link>
+
+                                <Card className="flex items-center justify-between gap-3">
+                                    <div>
+                                        <p className="text-sm font-bold text-[var(--foreground)]">AI Doctor Assistant</p>
+                                        <p className="mt-0.5 text-xs text-[var(--muted)]">
+                                            For decision support only — not a medical diagnosis.
+                                        </p>
+                                    </div>
+                                    <Link href="/patient/ai-doctor" className="shrink-0 text-sm font-semibold text-[var(--primary)]">
+                                        Open →
+                                    </Link>
+                                </Card>
+                            </div>
+                        </>
+                    )}
+                </div>
+
+                {/* Biometric entry — moved out of the page flow into a modal */}
+                <Modal
+                    open={vitalsModalOpen}
+                    onClose={() => setVitalsModalOpen(false)}
+                    title="Log today's vitals"
+                    primaryLabel={loading ? 'Submitting…' : 'Submit'}
+                    onPrimary={handleBiometricSubmit}
+                    primaryDisabled={loading}
+                >
+                    <div className="space-y-3" role="form" aria-label="Record biometrics">
+                        <div className="grid grid-cols-2 gap-2">
+                            <input
+                                id="biometric-heart-rate"
+                                name="heartRate"
+                                type="number"
+                                placeholder="Heart Rate"
+                                className="w-full rounded-xl border px-3 py-2.5 text-[var(--foreground)] outline-none transition placeholder:text-[var(--muted)] focus:ring-2 focus:ring-[var(--primary)]"
+                                style={{ borderColor: 'var(--border)' }}
+                                value={biometricData.heartRate || ''}
+                                onChange={(e) => setBiometricData({
+                                    ...biometricData,
+                                    heartRate: e.target.value ? Number(e.target.value) : undefined,
+                                })}
+                            />
+                            <input
+                                id="biometric-temperature"
+                                name="temperature"
+                                type="number"
+                                placeholder="Temp (°C)"
+                                className="w-full rounded-xl border px-3 py-2.5 text-[var(--foreground)] outline-none transition placeholder:text-[var(--muted)] focus:ring-2 focus:ring-[var(--primary)]"
+                                style={{ borderColor: 'var(--border)' }}
+                                value={biometricData.temperature || ''}
+                                onChange={(e) => setBiometricData({
+                                    ...biometricData,
+                                    temperature: e.target.value ? Number(e.target.value) : undefined,
+                                })}
+                            />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                            <input
+                                id="biometric-systolic"
+                                name="bloodPressureSystolic"
+                                type="number"
+                                placeholder="Systolic"
+                                className="w-full rounded-xl border px-3 py-2.5 text-[var(--foreground)] outline-none transition placeholder:text-[var(--muted)] focus:ring-2 focus:ring-[var(--primary)]"
+                                style={{ borderColor: 'var(--border)' }}
+                                value={biometricData.bloodPressure?.systolic || ''}
+                                onChange={(e) => setBiometricData({
+                                    ...biometricData,
+                                    bloodPressure: {
+                                        ...biometricData.bloodPressure!,
+                                        systolic: Number(e.target.value) || 0,
+                                    },
+                                })}
+                            />
+                            <input
+                                id="biometric-diastolic"
+                                name="bloodPressureDiastolic"
+                                type="number"
+                                placeholder="Diastolic"
+                                className="w-full rounded-xl border px-3 py-2.5 text-[var(--foreground)] outline-none transition placeholder:text-[var(--muted)] focus:ring-2 focus:ring-[var(--primary)]"
+                                style={{ borderColor: 'var(--border)' }}
+                                value={biometricData.bloodPressure?.diastolic || ''}
+                                onChange={(e) => setBiometricData({
+                                    ...biometricData,
+                                    bloodPressure: {
+                                        ...biometricData.bloodPressure!,
+                                        diastolic: Number(e.target.value) || 0,
+                                    },
+                                })}
+                            />
+                        </div>
+                        <input
+                            id="biometric-spo2"
+                            name="oxygenSaturation"
+                            type="number"
+                            placeholder="SpO2 (%)"
+                            className="w-full rounded-xl border px-3 py-2.5 text-[var(--foreground)] outline-none transition placeholder:text-[var(--muted)] focus:ring-2 focus:ring-[var(--primary)]"
+                            style={{ borderColor: 'var(--border)' }}
+                            value={biometricData.oxygenSaturation || ''}
+                            onChange={(e) => setBiometricData({
+                                ...biometricData,
+                                oxygenSaturation: e.target.value ? Number(e.target.value) : undefined,
+                            })}
+                        />
+                    </div>
+                </Modal>
             </DashboardLayout>
         </RoleGuard>
     );
