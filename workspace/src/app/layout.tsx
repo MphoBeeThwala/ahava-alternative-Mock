@@ -3,6 +3,7 @@ import { Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "../contexts/AuthContext";
 import { ToastProvider } from "../contexts/ToastContext";
+import { ServiceWorkerRegistration } from "../components/ServiceWorkerRegistration";
 
 const plusJakarta = Plus_Jakarta_Sans({
   variable: "--font-jakarta",
@@ -14,6 +15,11 @@ const plusJakarta = Plus_Jakarta_Sans({
 export const metadata: Metadata = {
   title: "Ahava Healthcare",
   description: "AI-Powered Healthcare Platform for South Africa",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Ahava",
+  },
 };
 
 export const viewport: Viewport = {
@@ -21,6 +27,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
+  themeColor: "#0a1628",
 };
 
 export default function RootLayout({
@@ -31,6 +38,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${plusJakarta.variable} font-sans antialiased`}>
+        <ServiceWorkerRegistration />
         <AuthProvider>
           <ToastProvider>
             {children}

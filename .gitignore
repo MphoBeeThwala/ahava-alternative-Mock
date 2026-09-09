@@ -88,9 +88,11 @@ jspm_packages/
 # Nuxt.js build / generate output
 .nuxt
 
-# Gatsby files
+# Gatsby files (this repo has no Gatsby app, but scope this to root-only
+# regardless — an unscoped "public" would also match, and silently drop,
+# workspace/public/, which is Next.js's real static-assets folder)
 .cache/
-public
+/public
 
 # Storybook build outputs
 .out
