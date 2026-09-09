@@ -30,7 +30,17 @@ export interface TriageCase {
   attachments?: TriageAttachment[];
   medicalPassport?: MedicalPassportSummary | null;
   reviewSafety?: SafetySummary | null;
-  patient?: { id: string; firstName: string; lastName: string; email?: string; phone?: string | null };
+  patient?: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    email?: string;
+    phone?: string | null;
+    // Present in the actual API response (triageCaseReview.ts's
+    // triageCaseInclude selects both) but not previously declared here.
+    dateOfBirth?: string | null;
+    gender?: string | null;
+  };
 }
 
 export interface PatientTriageCase {

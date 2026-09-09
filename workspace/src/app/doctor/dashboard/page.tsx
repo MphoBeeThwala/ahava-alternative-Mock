@@ -7,11 +7,14 @@ import { useAuth } from '../../../contexts/AuthContext';
 import { useToast } from '../../../contexts/ToastContext';
 import DashboardLayout from '../../../components/DashboardLayout';
 import { Card } from '../../../components/ui/Card';
+import { PageHeader } from '../../../components/ui/PageHeader';
+import { StatusBadge } from '../../../components/ui/StatusBadge';
+import { Worklist } from './_components/Worklist';
+import { ReviewPane } from './_components/ReviewPane';
 import { ReviewModal } from './_components/ReviewModal';
 import { PrescriptionModal } from './_components/PrescriptionModal';
 import { ReferralModal } from './_components/ReferralModal';
 import { FollowUpRequestModal } from './_components/FollowUpRequestModal';
-import { TriageCaseCard } from './_components/TriageCaseCard';
 import { NurseVisitCard } from './_components/NurseVisitCard';
 import {
   blankMed,
@@ -26,6 +29,7 @@ export default function DoctorDashboard() {
     const toast = useToast();
     const [triageQueue, setTriageQueue] = useState<Visit[]>([]);
     const [triageCases, setTriageCases] = useState<TriageCase[]>([]);
+    const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [reviewModal, setReviewModal] = useState<ReviewModalState | null>(null);
     const [releasing, setReleasing] = useState<string | null>(null);
@@ -247,40 +251,22 @@ export default function DoctorDashboard() {
     };
 
     const totalPending = triageQueue.length + triageCases.length;
+    const selectedCase = triageCases.find((c) => c.id === selectedCaseId) ?? null;
 
     return (
         <RoleGuard allowedRoles={[UserRole.DOCTOR]}>
             <DashboardLayout>
-                <div style={{ background: 'var(--background)', minHeight: '100vh' }}>
+                <PageHeader
+                    title={`Good day, Dr. ${user?.lastName ?? ''}`}
+                    subtitle={`${totalPending} case${totalPending === 1 ? '' : 's'} waiting for review`}
+                    right={<StatusBadge variant={totalPending > 0 ? 'warning' : 'success'}>{totalPending} pending</StatusBadge>}
+                />
 
-                    {/* ── Hero banner ── */}
-                    <div style={{ background: 'linear-gradient(135deg,#0a1628 0%,#0d2f5e 55%,#1e3a5f 100%)', padding: '32px 40px 28px', position: 'relative', overflow: 'hidden' }}>
-                        <div style={{ position: 'absolute', top: -50, right: -50, width: 200, height: 200, borderRadius: '50%', background: 'radial-gradient(circle,rgba(37,99,235,0.2),transparent 70%)', pointerEvents: 'none' }} />
-                        <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-                            <div>
-                                <p style={{ color: 'rgba(147,197,253,0.8)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6 }}>Doctor Portal</p>
-                                <h1 style={{ color: 'white', fontSize: 'clamp(22px,3vw,30px)', fontWeight: 900, margin: 0 }}>
-                                    Welcome, Dr. {user?.lastName} 👨‍⚕️
-                                </h1>
-                                <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginTop: 4 }}>Review AI triage cases, approve diagnoses, and manage patient care.</p>
-                            </div>
-                            <div style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 16, padding: '16px 24px', textAlign: 'center', minWidth: 140 }}>
-                                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4 }}>Active Queue</div>
-                                <div style={{ fontSize: 36, fontWeight: 900, color: totalPending > 0 ? '#fbbf24' : '#34d399', lineHeight: 1 }}>{totalPending}</div>
-                                <div style={{ fontSize: 11, fontWeight: 600, marginTop: 6, padding: '3px 10px', borderRadius: 20, background: totalPending > 0 ? 'rgba(251,191,36,0.15)' : 'rgba(52,211,153,0.15)', color: totalPending > 0 ? '#fbbf24' : '#34d399', display: 'inline-block' }}>
-                                    {totalPending} pending
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                <div className="p-6 sm:p-8">
-
-                {/* ── HPCSA onboarding banner ── */}
+                {/* HPCSA onboarding banner — preserved exactly */}
                 {hcpsaStatus !== null && (
-                    <div className={`mb-6 rounded-xl border px-5 py-4 flex flex-wrap items-center gap-4 ${hcpsaStatus.hcpsaVerified ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-300'}`}>
+                    <div className={`flex flex-wrap items-center gap-4 border-b px-5 py-4 ${hcpsaStatus.hcpsaVerified ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-300'}`}>
                         <span className="text-2xl">{hcpsaStatus.hcpsaVerified ? '✅' : '⚠️'}</span>
-                        <div className="flex-1 min-w-0">
+                        <div className="min-w-0 flex-1">
                             {hcpsaStatus.hcpsaVerified ? (
                                 <p className="text-sm font-semibold text-green-800">
                                     HPCSA Practice No. <span className="font-mono">{hcpsaStatus.hcpsaNumber}</span> — Verified
@@ -300,7 +286,7 @@ export default function DoctorDashboard() {
                                 <input
                                     type="text"
                                     placeholder="e.g. MP0123456"
-                                    className="rounded-lg border px-3 py-2 text-sm font-mono w-36"
+                                    className="w-36 rounded-lg border px-3 py-2 font-mono text-sm"
                                     style={{ borderColor: 'var(--border)' }}
                                     value={hcpsaInput}
                                     onChange={e => setHcpsaInput(e.target.value.toUpperCase())}
@@ -309,7 +295,7 @@ export default function DoctorDashboard() {
                                 <button
                                     onClick={handleSaveHcpsa}
                                     disabled={savingHcpsa || !hcpsaInput.trim()}
-                                    className="px-4 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
+                                    className="rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
                                     style={{ background: '#d97706' }}
                                 >
                                     {savingHcpsa ? 'Saving…' : 'Submit'}
@@ -319,47 +305,50 @@ export default function DoctorDashboard() {
                     </div>
                 )}
 
-                {/* AI-assisted remote triage (sent from patient dashboard) */}
+                {/* AI triage console — three panes: sidebar (DashboardLayout) + worklist + review */}
                 {triageCases.length > 0 && (
-                    <section className="mb-10">
-                        <h2 className="text-xl font-bold text-[var(--foreground)] mb-4">AI Triage Queue (remote)</h2>
-                        <div className="grid gap-6">
-                            {triageCases.map((tc) => (
-                                <TriageCaseCard
-                                    key={tc.id}
-                                    tc={tc}
-                                    releasing={releasing}
-                                    onClaim={handleClaim}
-                                    onOpenReview={(c) => setReviewModal({ caseId: c.id, aiTriageLevel: c.aiTriageLevel, doctorNotes: '', doctorDiagnosis: '', doctorRecommendations: '', finalTriageLevel: c.aiTriageLevel, overrideReason: '' })}
-                                    onOpenFollowUp={(c) => setFollowUpModal({
-                                        caseId: c.id,
-                                        requestType: 'MORE_INFO',
-                                        message: c.followUpRequestMessage || '',
-                                        questionsText: (c.followUpQuestions || []).join('\n'),
-                                        investigationsText: (c.requestedInvestigations || []).join('\n'),
-                                    })}
-                                    onRelease={handleRelease}
-                                    onOpenPrescription={(c) => setPrescriptionModal({ caseId: c.id, diagnosis: c.doctorDiagnosis || '', medications: [blankMed()], doctorNotes: '' })}
-                                    onOpenReferral={(c) => setReferralModal({ caseId: c.id, referralType: 'EMERGENCY', provisionalDiagnosis: c.doctorDiagnosis || '', clinicalNotes: '', recommendedFacility: 'HOSPITAL' })}
-                                />
-                            ))}
-                        </div>
-                    </section>
+                    <div className="flex" style={{ height: 'calc(100vh - 180px)', minHeight: 480, borderBottom: '1px solid var(--border)' }}>
+                        <Worklist
+                            cases={triageCases}
+                            selectedId={selectedCaseId}
+                            onSelect={setSelectedCaseId}
+                            currentDoctorId={user?.id}
+                        />
+                        <ReviewPane
+                            triageCase={selectedCase}
+                            releasing={releasing}
+                            onClaim={handleClaim}
+                            onOpenReview={(c) => setReviewModal({ caseId: c.id, aiTriageLevel: c.aiTriageLevel, doctorNotes: '', doctorDiagnosis: '', doctorRecommendations: '', finalTriageLevel: c.aiTriageLevel, overrideReason: '' })}
+                            onOpenFollowUp={(c) => setFollowUpModal({
+                                caseId: c.id,
+                                requestType: 'MORE_INFO',
+                                message: c.followUpRequestMessage || '',
+                                questionsText: (c.followUpQuestions || []).join('\n'),
+                                investigationsText: (c.requestedInvestigations || []).join('\n'),
+                            })}
+                            onRelease={handleRelease}
+                            onOpenPrescription={(c) => setPrescriptionModal({ caseId: c.id, diagnosis: c.doctorDiagnosis || '', medications: [blankMed()], doctorNotes: '' })}
+                            onOpenReferral={(c) => setReferralModal({ caseId: c.id, referralType: 'EMERGENCY', provisionalDiagnosis: c.doctorDiagnosis || '', clinicalNotes: '', recommendedFacility: 'HOSPITAL' })}
+                        />
+                    </div>
                 )}
 
-                {/* Nurse visit queue */}
+                {/* Nurse visit queue — a distinct workflow (physical home visits with
+                    real captured vitals) from the AI-triage console above; not part
+                    of the brief's Phase 4 scope, kept exactly as before. */}
+                <div className="p-6 sm:p-8">
                 <section>
-                    <h2 className="text-xl font-bold text-[var(--foreground)] mb-4">Visit queue (nurse reports)</h2>
+                    <h2 className="mb-4 text-xl font-bold text-[var(--foreground)]">Visit queue (nurse reports)</h2>
                 {loading ? (
-                    <div className="text-center py-12">
+                    <div className="py-12 text-center">
                         <p className="font-medium text-[var(--muted)]">Loading pending reviews...</p>
                     </div>
                 ) : triageQueue.length === 0 && triageCases.length === 0 ? (
-                    <Card className="text-center py-12">
+                    <Card className="py-12 text-center">
                         <p className="text-xl font-medium text-[var(--muted)]">All caught up! No pending reviews.</p>
                     </Card>
                 ) : triageQueue.length === 0 ? (
-                    <Card className="text-center py-8">
+                    <Card className="py-8 text-center">
                         <p className="text-[var(--muted)]">No pending nurse visits.</p>
                     </Card>
                 ) : (
@@ -375,6 +364,7 @@ export default function DoctorDashboard() {
                     </div>
                 )}
                 </section>
+                </div>
 
                 <PrescriptionModal
                     state={prescriptionModal}
@@ -383,7 +373,6 @@ export default function DoctorDashboard() {
                     onSubmit={handleIssuePrescription}
                     submitting={submittingDoc}
                 />
-
                 <FollowUpRequestModal
                     state={followUpModal}
                     onChange={setFollowUpModal}
@@ -391,7 +380,6 @@ export default function DoctorDashboard() {
                     onSubmit={handleRequestFollowUp}
                     submitting={submittingDoc}
                 />
-
                 <ReferralModal
                     state={referralModal}
                     onChange={setReferralModal}
@@ -399,15 +387,12 @@ export default function DoctorDashboard() {
                     onSubmit={handleIssueReferral}
                     submitting={submittingDoc}
                 />
-
                 <ReviewModal
                     state={reviewModal}
                     onChange={setReviewModal}
                     onClose={() => setReviewModal(null)}
                     onSubmit={handleSaveReview}
                 />
-                </div>{/* p-6 */}
-                </div>{/* outer bg */}
             </DashboardLayout>
         </RoleGuard>
     );

@@ -1,40 +1,35 @@
 // Shared types and pure helpers for the doctor dashboard, split out of
 // page.tsx so the page itself only holds state/effects/composition.
+import type { AcuityLevel } from '../../../components/ui/AcuityRow';
 
-export function getUrgencyLevel(createdAt: string): { level: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT'; color: string; hoursAgo: number; label: string } {
-  const created = new Date(createdAt).getTime();
-  const now = new Date().getTime();
-  const hoursAgo = Math.floor((now - created) / (1000 * 60 * 60));
-
-  let level: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT' = 'LOW';
-  let color = '#4caf50'; // green
-  let label = 'ROUTINE';
-
-  if (hoursAgo >= 24) {
-    level = 'URGENT';
-    color = '#d32f2f'; // red
-    label = '[URGENT]';
-  } else if (hoursAgo >= 6) {
-    level = 'HIGH';
-    color = '#ff6f00'; // orange
-    label = '[HIGH]';
-  } else if (hoursAgo >= 1) {
-    level = 'MEDIUM';
-    color = '#fbc02d'; // yellow
-    label = '[MEDIUM]';
-  } else {
-    label = '[NEW]';
-  }
-
-  return { level, color, hoursAgo, label };
+/**
+ * Maps the SATS 1-5 triage scale to the acuity display scale (Phase 4).
+ * 1-2 (Resuscitation/Emergency) -> emergency, 3 (Urgent) -> urgent,
+ * 4-5 (Less-Urgent/Non-Urgent) -> routine. The underlying aiTriageLevel/
+ * finalTriageLevel values are unchanged — this is a display-only mapping.
+ */
+export function triageLevelToAcuity(level: number): AcuityLevel {
+  if (level <= 2) return 'emergency';
+  if (level === 3) return 'urgent';
+  return 'routine';
 }
 
-export function formatTimeAgo(hours: number): string {
-  if (hours === 0) return 'just now';
-  if (hours < 1) return '< 1 hour ago';
-  if (hours === 1) return '1 hour ago';
-  if (hours < 24) return `${hours} hours ago`;
-  return `${Math.floor(hours / 24)} days ago`;
+/** Precise "Xh Ym" / "Xm" waiting-clock display, from a real createdAt. */
+export function formatWaitingClock(createdAt: string): string {
+  const ms = Date.now() - new Date(createdAt).getTime();
+  const totalMinutes = Math.max(0, Math.floor(ms / 60000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours === 0) return `${minutes}m`;
+  return `${hours}h ${String(minutes).padStart(2, '0')}m`;
+}
+
+/** Age in whole years from a real dateOfBirth — omit display entirely if absent, never guess. */
+export function ageFromDateOfBirth(dateOfBirth: string | null | undefined): number | null {
+  if (!dateOfBirth) return null;
+  const dob = new Date(dateOfBirth).getTime();
+  if (Number.isNaN(dob)) return null;
+  return Math.floor((Date.now() - dob) / (365.25 * 24 * 60 * 60 * 1000));
 }
 
 export type ReviewModalState = {
