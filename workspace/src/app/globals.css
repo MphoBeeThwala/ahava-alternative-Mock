@@ -22,6 +22,49 @@
   /* Motion */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --duration: 200ms;
+
+  /* Role accents — used by DashboardLayout instead of an inline object */
+  --role-patient: #0d9488;
+  --role-doctor: #2563eb;
+  --role-nurse: #059669;
+  --role-admin: #7c3aed;
+
+  /* Acuity — semantic, distinct from status. Colour is never the only
+     signal (see AcuityRow): always paired with a glyph and a word. */
+  --acuity-emergency: #dc2626;
+  --acuity-emergency-ink: #b91c1c;
+  --acuity-emergency-bg: rgba(220, 38, 38, 0.045);
+  --acuity-urgent: #d97706;
+  --acuity-urgent-ink: #b45309;
+  --acuity-urgent-bg: rgba(217, 119, 6, 0.05);
+  --acuity-routine: #0d9488;
+  --acuity-routine-ink: #0f766e;
+  --acuity-routine-bg: rgba(13, 148, 136, 0.045);
+
+  /* Surfaces & ink */
+  --card-sunken: #fdfcfb;
+  --ink-2: #44403c;
+  --ink-3: #78716c;
+  --border-strong: #d6d3d1;
+
+  /* Type ramp */
+  --text-page: 25px;
+  --text-section: 19px;
+  --text-card: 15px;
+  --text-body: 14px; /* floor for patient-facing copy */
+  --text-meta: 12px;
+  --text-eyebrow: 11px; /* uppercase eyebrow labels only */
+
+  /* Hit targets */
+  --tap-min: 44px;
+  --tap-primary: 56px;
+}
+
+/* Every vital sign, score, timestamp, duration, ID and currency value gets
+   this — without it, digits jitter as values update. */
+.num {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
 }
 
 @theme inline {
@@ -89,4 +132,32 @@ button:focus-visible,
 a:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
+}
+
+/* Skip link — visually hidden until focused, first focusable element */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  background: var(--primary);
+  color: white;
+  padding: 10px 16px;
+  border-radius: 0 0 var(--radius) 0;
+  font-weight: 600;
+  font-size: 14px;
+}
+.skip-link:focus {
+  left: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn-primary,
+  .btn-primary:hover,
+  .btn-primary:active,
+  .card-interactive,
+  .card-interactive:hover {
+    transition: none;
+    transform: none;
+  }
 }
