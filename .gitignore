@@ -179,6 +179,11 @@ apps/ml-service/models/
 
 # Single lockfile for monorepo (use pnpm-lock.yaml at root); avoids Next.js "multiple lockfiles" warning
 workspace/package-lock.json
+# The workspace root itself is pnpm-only (packageManager: pnpm@9.0.0) — an
+# npm/yarn run here regenerates one of these by accident; neither is read
+# by any build or CI step (apps/backend/ has its own, Docker-only lockfile).
+/package-lock.json
+.yarn/
 
 # Claude Code local settings/worktrees — personal, not shared
 .claude/
