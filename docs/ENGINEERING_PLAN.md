@@ -674,8 +674,11 @@ for apps requesting Health Connect data), the actual Health Connect
 plugin wiring in `AndroidManifest.xml` and `capacitor.settings.gradle`, a
 `FileProvider` (needed for the triage image-upload flow), a
 `network_security_config.xml` scoped to allow cleartext only to the
-Android emulator's `10.0.2.2` loopback alias, and branded launcher/splash
-assets — none of which `cap add android` regenerates. It's moved to
+Android emulator's `10.0.2.2` loopback alias — none of which
+`cap add android` regenerates. (Correction to an earlier version of this
+note: its launcher/splash assets are Capacitor's generic default mark,
+not real Ahava branding — confirmed visually while sourcing the PWA
+icons in §9; both platforms need real branding, not just iOS.) It's moved to
 `workspace/android/` (git-mv'd, history preserved) so it sits next to the
 `capacitor.config.ts` that now drives it, `@capacitor/device` and
 `capacitor-health` are installed to match what it already referenced, and
@@ -707,12 +710,66 @@ file changes.
 - **iOS entirely.** Building, running, or even opening the scaffolded
   Xcode project requires a Mac with Xcode — categorically unavailable
   here, not just unconfigured.
-- **Branding.** iOS's icons/launch screen are Capacitor's defaults, not
-  the app's actual mark. Android's are real assets already in the
-  scaffold; nothing to redo there.
+- **Branding.** Both platforms' icons/launch screens are Capacitor's
+  generic default mark, not the app's actual branding (corrected above —
+  an earlier version of this doc wrongly called Android's real).
 - **Push notifications.** `android/app/build.gradle` already
   conditionally applies the `google-services` Gradle plugin if
   `google-services.json` is present, but no such file exists yet — Push
   is guarded off, not broken.
 - **Store listings, signing keys, and submission** — all a separate,
   largely non-code workstream.
+
+---
+
+## 9. PWA support — 2026-09-09
+
+Separate from and much lighter than the Capacitor mobile work in §8: the
+web app is now installable straight from the browser ("Add to Home
+Screen"), no app store or native build tooling involved.
+
+- `workspace/src/app/manifest.ts` — Next.js's file-based manifest
+  convention; auto-served at `/manifest.webmanifest` and auto-linked
+  from every page's `<head>`.
+- `workspace/public/sw.js` — deliberately conservative. This app is
+  cookie-session-authenticated and every read/write goes through
+  `/api/*` carrying PHI, so the worker never intercepts `/api/*` or any
+  non-GET request — those hit the network exactly as if no service
+  worker were installed. It only cache-first serves same-origin static
+  assets (content-hashed by Next.js, safe to cache aggressively) and
+  falls back to a static offline page for navigations when the network
+  is unreachable.
+- `workspace/src/app/offline/page.tsx` — that fallback page; static, no
+  auth check, no data fetch.
+- `workspace/src/components/ServiceWorkerRegistration.tsx` — registers
+  the worker on mount. Checks `document.readyState` first: registering
+  only on the `window.load` event misses it entirely once React
+  hydrates after `load` has already fired, which is the common case for
+  a client-rendered app — caught via an actual browser check (Browser
+  tool, not just reading the code), not assumed.
+- Icons: 192px/512px/maskable-512px PNGs generated from the existing
+  Capacitor placeholder mark, purely so the install prompt and home-
+  screen icon aren't blank — explicitly provisional pending real
+  branding (see §8's branding note above; it's the *same* gap).
+
+**Also surfaced a real, previously-latent bug while committing this**:
+`.gitignore`'s `public` rule (from an unused Gatsby-template section)
+had no leading slash, so it silently ignored *any* directory named
+`public/` at any depth — including `workspace/public/`, Next.js's real
+static-assets folder. Nothing had ever been placed there before this,
+so it caused no prior data loss, but would have silently dropped these
+new PWA files (and anything else placed there later) from every future
+commit, never reaching Railway. Scoped to `/public`.
+
+**Verified:** `tsc --noEmit` and `eslint` clean; a full production build
+(`NEXT_OUTPUT_STANDALONE=false`, matching CI) succeeds, producing 26
+routes instead of 24. Checked live in a real browser: the manifest
+serves correctly, the service worker registers and activates, an
+`/api/*` call is confirmed *not* intercepted (the request still reached
+the — unavailable in this test — backend rather than any cache), and
+the worker's cache contains only the offline page and static assets, no
+API or PHI data.
+
+**Not done:** no push-notification support (a separate, larger feature —
+Web Push needs its own backend subscription-management endpoints, not
+just a manifest entry), and the icons are placeholder as noted above.
