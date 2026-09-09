@@ -472,72 +472,86 @@ export default function PatientDashboard() {
                 >
                     <div className="space-y-3" role="form" aria-label="Record biometrics">
                         <div className="grid grid-cols-2 gap-2">
-                            <input
-                                id="biometric-heart-rate"
-                                name="heartRate"
-                                type="number"
-                                placeholder="Heart Rate"
-                                className="w-full rounded-xl border px-3 py-2.5 text-[var(--foreground)] outline-none transition placeholder:text-[var(--muted)] focus:ring-2 focus:ring-[var(--primary)]"
-                                style={{ borderColor: 'var(--border)' }}
-                                value={biometricData.heartRate || ''}
-                                onChange={(e) => setBiometricData({
-                                    ...biometricData,
-                                    heartRate: e.target.value ? Number(e.target.value) : undefined,
-                                })}
-                            />
-                            <input
-                                id="biometric-temperature"
-                                name="temperature"
-                                type="number"
-                                placeholder="Temp (°C)"
-                                className="w-full rounded-xl border px-3 py-2.5 text-[var(--foreground)] outline-none transition placeholder:text-[var(--muted)] focus:ring-2 focus:ring-[var(--primary)]"
-                                style={{ borderColor: 'var(--border)' }}
-                                value={biometricData.temperature || ''}
-                                onChange={(e) => setBiometricData({
-                                    ...biometricData,
-                                    temperature: e.target.value ? Number(e.target.value) : undefined,
-                                })}
-                            />
+                            <div>
+                                <label htmlFor="biometric-heart-rate" className="mb-1 block text-xs font-semibold text-[var(--muted)]">Heart rate (bpm)</label>
+                                <input
+                                    id="biometric-heart-rate"
+                                    name="heartRate"
+                                    type="number"
+                                    placeholder="e.g. 72"
+                                    className="w-full rounded-xl border px-3 py-2.5 text-[var(--foreground)] outline-none transition placeholder:text-[var(--muted)] focus:ring-2 focus:ring-[var(--primary)]"
+                                    style={{ borderColor: 'var(--border)' }}
+                                    value={biometricData.heartRate || ''}
+                                    onChange={(e) => setBiometricData({
+                                        ...biometricData,
+                                        heartRate: e.target.value ? Number(e.target.value) : undefined,
+                                    })}
+                                />
+                            </div>
+                            <div>
+                                <label htmlFor="biometric-temperature" className="mb-1 block text-xs font-semibold text-[var(--muted)]">Temperature (°C)</label>
+                                <input
+                                    id="biometric-temperature"
+                                    name="temperature"
+                                    type="number"
+                                    placeholder="e.g. 36.8"
+                                    className="w-full rounded-xl border px-3 py-2.5 text-[var(--foreground)] outline-none transition placeholder:text-[var(--muted)] focus:ring-2 focus:ring-[var(--primary)]"
+                                    style={{ borderColor: 'var(--border)' }}
+                                    value={biometricData.temperature || ''}
+                                    onChange={(e) => setBiometricData({
+                                        ...biometricData,
+                                        temperature: e.target.value ? Number(e.target.value) : undefined,
+                                    })}
+                                />
+                            </div>
                         </div>
                         <div className="grid grid-cols-2 gap-2">
-                            <input
-                                id="biometric-systolic"
-                                name="bloodPressureSystolic"
-                                type="number"
-                                placeholder="Systolic"
-                                className="w-full rounded-xl border px-3 py-2.5 text-[var(--foreground)] outline-none transition placeholder:text-[var(--muted)] focus:ring-2 focus:ring-[var(--primary)]"
-                                style={{ borderColor: 'var(--border)' }}
-                                value={biometricData.bloodPressure?.systolic || ''}
-                                onChange={(e) => setBiometricData({
-                                    ...biometricData,
-                                    bloodPressure: {
-                                        ...biometricData.bloodPressure!,
-                                        systolic: Number(e.target.value) || 0,
-                                    },
-                                })}
-                            />
-                            <input
-                                id="biometric-diastolic"
-                                name="bloodPressureDiastolic"
-                                type="number"
-                                placeholder="Diastolic"
-                                className="w-full rounded-xl border px-3 py-2.5 text-[var(--foreground)] outline-none transition placeholder:text-[var(--muted)] focus:ring-2 focus:ring-[var(--primary)]"
-                                style={{ borderColor: 'var(--border)' }}
-                                value={biometricData.bloodPressure?.diastolic || ''}
-                                onChange={(e) => setBiometricData({
-                                    ...biometricData,
-                                    bloodPressure: {
-                                        ...biometricData.bloodPressure!,
-                                        diastolic: Number(e.target.value) || 0,
-                                    },
-                                })}
-                            />
+                            <div>
+                                <label htmlFor="biometric-systolic" className="mb-1 block text-xs font-semibold text-[var(--muted)]">Systolic (mmHg)</label>
+                                <input
+                                    id="biometric-systolic"
+                                    name="bloodPressureSystolic"
+                                    type="number"
+                                    placeholder="e.g. 120"
+                                    className="w-full rounded-xl border px-3 py-2.5 text-[var(--foreground)] outline-none transition placeholder:text-[var(--muted)] focus:ring-2 focus:ring-[var(--primary)]"
+                                    style={{ borderColor: 'var(--border)' }}
+                                    value={biometricData.bloodPressure?.systolic || ''}
+                                    onChange={(e) => setBiometricData({
+                                        ...biometricData,
+                                        bloodPressure: {
+                                            ...biometricData.bloodPressure!,
+                                            systolic: Number(e.target.value) || 0,
+                                        },
+                                    })}
+                                />
+                            </div>
+                            <div>
+                                <label htmlFor="biometric-diastolic" className="mb-1 block text-xs font-semibold text-[var(--muted)]">Diastolic (mmHg)</label>
+                                <input
+                                    id="biometric-diastolic"
+                                    name="bloodPressureDiastolic"
+                                    type="number"
+                                    placeholder="e.g. 80"
+                                    className="w-full rounded-xl border px-3 py-2.5 text-[var(--foreground)] outline-none transition placeholder:text-[var(--muted)] focus:ring-2 focus:ring-[var(--primary)]"
+                                    style={{ borderColor: 'var(--border)' }}
+                                    value={biometricData.bloodPressure?.diastolic || ''}
+                                    onChange={(e) => setBiometricData({
+                                        ...biometricData,
+                                        bloodPressure: {
+                                            ...biometricData.bloodPressure!,
+                                            diastolic: Number(e.target.value) || 0,
+                                        },
+                                    })}
+                                />
+                            </div>
                         </div>
+                        <div>
+                        <label htmlFor="biometric-spo2" className="mb-1 block text-xs font-semibold text-[var(--muted)]">Oxygen saturation (%)</label>
                         <input
                             id="biometric-spo2"
                             name="oxygenSaturation"
                             type="number"
-                            placeholder="SpO2 (%)"
+                            placeholder="e.g. 98"
                             className="w-full rounded-xl border px-3 py-2.5 text-[var(--foreground)] outline-none transition placeholder:text-[var(--muted)] focus:ring-2 focus:ring-[var(--primary)]"
                             style={{ borderColor: 'var(--border)' }}
                             value={biometricData.oxygenSaturation || ''}
@@ -546,6 +560,7 @@ export default function PatientDashboard() {
                                 oxygenSaturation: e.target.value ? Number(e.target.value) : undefined,
                             })}
                         />
+                        </div>
                     </div>
                 </Modal>
             </DashboardLayout>

@@ -48,8 +48,8 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       {children}
       {state && (
         <div
-          role="alert"
-          aria-live="polite"
+          role={state.type === "error" ? "alert" : "status"}
+          aria-live={state.type === "error" ? "assertive" : "polite"}
           className="fixed bottom-4 right-4 z-[100] max-w-sm rounded-[var(--radius)] border px-4 py-3 shadow-lg"
           style={{
             borderColor: state.type === "error" ? "var(--danger)" : state.type === "success" ? "var(--success)" : "var(--border)",

@@ -287,7 +287,7 @@ export default function WearablePage() {
               </div>
             )}
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+            <div className="grid grid-cols-1 lg:grid-cols-2" style={{ gap: 24 }}>
 
               {/* ── How it works ── */}
               <div style={{ background: "var(--card)", borderRadius: 20, border: "1.5px solid var(--border)", padding: "28px" }}>

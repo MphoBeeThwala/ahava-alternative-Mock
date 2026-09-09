@@ -55,7 +55,7 @@ export default function Home() {
         <div style={{ position: 'absolute', top: -120, right: -120, width: 500, height: 500, borderRadius: '50%', background: 'radial-gradient(circle,rgba(13,148,136,0.18),transparent 70%)', pointerEvents: 'none' }} />
         <div style={{ position: 'absolute', bottom: -100, left: -80, width: 400, height: 400, borderRadius: '50%', background: 'radial-gradient(circle,rgba(0,74,173,0.2),transparent 70%)', pointerEvents: 'none' }} />
 
-        <div style={{ maxWidth: 1200, margin: '0 auto', padding: '80px 24px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 60, alignItems: 'center', width: '100%' }}>
+        <div className="grid grid-cols-1 lg:grid-cols-2" style={{ maxWidth: 1200, margin: '0 auto', padding: '80px 24px', gap: 60, alignItems: 'center', width: '100%' }}>
           {/* Left */}
           <div>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: 'rgba(13,148,136,0.15)', border: '1px solid rgba(13,148,136,0.3)', borderRadius: 30, padding: '6px 16px', marginBottom: 28 }}>
@@ -155,7 +155,7 @@ export default function Home() {
 
       {/* ── STATS ── */}
       <section style={{ background: 'linear-gradient(135deg,#0d9488,#059669)', padding: '32px 24px' }}>
-        <div style={{ maxWidth: 1200, margin: '0 auto', display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 24, textAlign: 'center' }}>
+        <div className="grid grid-cols-2 sm:grid-cols-4" style={{ maxWidth: 1200, margin: '0 auto', gap: 24, textAlign: 'center' }}>
           {stats.map(({ icon, value, label }) => (
             <div key={value} style={{ textAlign: 'center' }}>
               <div style={{ fontSize: 22, marginBottom: 6 }}>{icon}</div>

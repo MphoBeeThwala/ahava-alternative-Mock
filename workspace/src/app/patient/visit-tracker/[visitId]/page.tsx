@@ -226,7 +226,7 @@ export default function VisitTrackerPage({ params }: { params: Promise<{ visitId
             {/* Visit details card */}
             <div style={{ background: 'white', border: '1px solid var(--border)', borderRadius: 20, padding: '20px 24px', boxShadow: 'var(--shadow)' }}>
               <h2 style={{ fontSize: 14, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 16 }}>Visit Details</h2>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 20px' }}>
+              <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: '12px 20px' }}>
                 <div>
                   <p style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>Scheduled</p>
                   <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--foreground)' }}>{scheduledAt}</p>

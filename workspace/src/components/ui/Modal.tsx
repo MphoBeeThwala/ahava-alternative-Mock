@@ -2,6 +2,9 @@
 
 import React, { useEffect, useRef } from "react";
 
+const FOCUSABLE_SELECTOR =
+  'input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
+
 /**
  * Modal wrapper – overlay + panel, title, optional footer. Presentation only (Phase 3).
  * Same trigger/close logic; use for refer, override, etc.
@@ -28,16 +31,47 @@ export function Modal({
   onSecondary?: () => void;
 }) {
   const contentRef = useRef<HTMLDivElement>(null);
+  const previouslyFocused = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
+    previouslyFocused.current = document.activeElement as HTMLElement | null;
     const el = contentRef.current;
     if (!el) return;
-    const firstFocusable = el.querySelector<HTMLElement>(
-      'input:not([type="hidden"]), select, textarea, button, [href], [tabindex]:not([tabindex="-1"])'
-    );
+    const firstFocusable = el.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
     (firstFocusable ?? el).focus({ preventScroll: true });
+
+    // Restore focus to whatever opened the modal once it closes/unmounts —
+    // otherwise focus silently drops to <body> and a keyboard user loses
+    // their place.
+    return () => {
+      previouslyFocused.current?.focus?.({ preventScroll: true });
+    };
   }, [open]);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      onClose();
+      return;
+    }
+    if (e.key !== "Tab") return;
+    const el = contentRef.current;
+    if (!el) return;
+    const focusable = Array.from(el.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    // Focus trap: wrap Tab/Shift+Tab at the modal's edges so keyboard focus
+    // can never escape to the page behind the overlay.
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  };
 
   if (!open) return null;
 
@@ -57,6 +91,7 @@ export function Modal({
         className="w-full max-w-md rounded-[var(--radius)] border bg-[var(--card)] shadow-[var(--shadow)] outline-none"
         style={{ borderColor: "var(--border)" }}
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={handleKeyDown}
       >
         <div className="border-b p-6" style={{ borderColor: "var(--border)" }}>
           <h3 id="modal-title" className="text-lg font-bold text-[var(--foreground)]">

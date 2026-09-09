@@ -276,7 +276,7 @@ export default function AdminDashboard() {
                             </div>
                             
                             <form onSubmit={handleAddUser} style={{ padding: 30 }}>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+                                <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: 16, marginBottom: 16 }}>
                                     <div>
                                         <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 6, textTransform: 'uppercase' }}>First Name</label>
                                         <input required value={newUser.firstName} onChange={e => setNewUser({...newUser, firstName: e.target.value})} style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1.5px solid #e2e8f0', outline: 'none' }} placeholder="Jane" />
