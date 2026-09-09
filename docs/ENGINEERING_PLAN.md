@@ -773,3 +773,75 @@ API or PHI data.
 **Not done:** no push-notification support (a separate, larger feature —
 Web Push needs its own backend subscription-management endpoints, not
 just a manifest entry), and the icons are placeholder as noted above.
+
+## 10. UI/UX redesign — `docs/UI_UX_IMPLEMENTATION_BRIEF.md`, 2026-09-09
+
+Applied phase-by-phase, in order, per the brief. Standing rule enforced
+throughout: no existing feature or handler was ever dropped — every
+phase preserved every prior API call, prop, and behavior exactly, adding
+or restyling only.
+
+- **Phase 1 — Foundations**: design tokens (role/acuity colors, type
+  ramp, tap targets), the `Icon` component replacing emoji, viewport
+  zoom re-enabled for accessibility, a skip link.
+- **Phase 2 — Shared components**: `PageHeader`, `Sparkline`, `StatCard`,
+  `AcuityRow`, `Timeline`, `RangeBar`, `Skeleton`, `EmptyState`,
+  `DataTable`; `Card`/`StatusBadge` extended backward-compatibly;
+  unused `KpiCard` removed.
+- **Phase 3 — Patient dashboard**: rewritten around the real
+  `getMonitoringSummary`/`getBiometricHistory`/`getMyTriageCases`
+  endpoints; a readiness ring and real reading-to-reading deltas
+  replace nothing invented — every number traces to an existing field.
+- **Phase 4 — Doctor dashboard**: worklist + review-pane layout with
+  E/P/M keyboard shortcuts; vitals/confidence/nurse-dispatch UI the
+  brief called for was *not* built because the backing data doesn't
+  exist yet — omitted rather than faked, flagged in the phase commit.
+- **Phase 5 — Nurse dashboard**: visit-status flow map, prominent
+  active-visit card; an in-visit vitals-entry screen was scoped out for
+  the same reason (no backend support) and proposed only, not built.
+- **Phase 6 — Responsive & accessibility sweep**: the last 5 fixed
+  inline grids converted to responsive Tailwind grids; `Modal` gained
+  focus trap, Esc-to-close, and focus restoration; `Toast` ARIA roles
+  now vary correctly by severity; biometric form fields gained real
+  `<label>`s.
+- **Phase 7 — Offline (patient biometrics only)**: the brief calls this
+  phase "explore first, propose, don't build from the brief directly."
+  Investigation found:
+  - the service worker (§9) never intercepts `/api/*`, so it does
+    nothing for offline writes on its own;
+  - `POST /patient/biometrics` already honors an `Idempotency-Key`
+    header (`apps/backend/src/middleware/idempotency.ts`) — a retried
+    submission with the same key can never double-write, even if Redis
+    later replays it;
+  - triage submission and prescriptions carry **no** such guarantee —
+    confirmed by absence of `idempotencyMiddleware` on those routes —
+    so they are explicitly never queued;
+  - no SMS channel exists anywhere in the backend, ruling that out as a
+    fallback.
+
+  Built the smallest safe slice on that basis: manual biometric
+  submissions that fail with no server response (`error.request` set,
+  `error.response` unset — a real network failure, not a validation
+  rejection) are queued in IndexedDB
+  (`workspace/src/lib/offlineBiometricQueue.ts`) with a generated UUID
+  used as the `Idempotency-Key`, scoped per-user so a shared browser
+  can never replay one patient's queued reading under another's
+  session. `workspace/src/hooks/useOfflineBiometricSync.ts` replays the
+  queue in capture order on the `online` event: entries older than one
+  hour are discarded (monitoring assumes near-real-time readings — see
+  inline comment) before any network attempt; a genuine second network
+  failure stops the replay and leaves the remainder queued for next
+  time; a non-network rejection (would never succeed on retry) is
+  discarded. Triage, prescriptions, and everything else are unaffected
+  — untouched by this change.
+
+  **Verified:** `tsc --noEmit` and `eslint` clean; full production
+  build succeeds. End-to-end logic verified live in a disposable
+  preview page (deleted before commit) against the real queue/hook
+  modules with `patientApi.submitBiometrics` swapped for a controllable
+  stub: offline submission enqueues correctly; a stale (2h-old) entry
+  is dropped on the next sync attempt before any network call; a fresh
+  entry survives a failed sync attempt and remains queued; once the
+  stub is switched to succeed, the queued entry replays with the exact
+  `Idempotency-Key` generated at enqueue time and is removed from the
+  queue, and the dashboard's data-refresh callback fires.

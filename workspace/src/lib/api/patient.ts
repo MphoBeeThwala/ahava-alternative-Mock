@@ -169,8 +169,10 @@ export interface ApiError {
 }
 
 export const patientApi = {
-  submitBiometrics: async (data: BiometricReading) => {
-    const res = await apiClient.post('/patient/biometrics', data);
+  submitBiometrics: async (data: BiometricReading, idempotencyKey?: string) => {
+    const res = await apiClient.post('/patient/biometrics', data, {
+      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
+    });
     return res.data;
   },
   getBiometricHistory: async (limit = 30) => {

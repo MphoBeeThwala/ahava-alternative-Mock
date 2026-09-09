@@ -26,6 +26,8 @@ import { EmptyState } from '../../../components/ui/EmptyState';
 import { Skeleton } from '../../../components/ui/Skeleton';
 import { Modal } from '../../../components/ui/Modal';
 import { Icon } from '../../../components/ui/Icon';
+import { enqueueBiometricReading } from '../../../lib/offlineBiometricQueue';
+import { useOfflineBiometricSync } from '../../../hooks/useOfflineBiometricSync';
 
 type Reading = Record<string, unknown>;
 
@@ -133,25 +135,50 @@ export default function PatientDashboard() {
         terraApi.getStatus().then(setWearable).catch(() => {});
     }, [loadMonitoringSummary, loadBiometricHistory, loadBookings, loadTriageCases]);
 
+    const resetBiometricForm = () => {
+        setBiometricData({
+            heartRate: undefined,
+            bloodPressure: { systolic: 0, diastolic: 0 },
+            temperature: undefined,
+            oxygenSaturation: undefined,
+            source: 'manual',
+        });
+    };
+
+    const onQueuedReadingSynced = useCallback(() => {
+        loadMonitoringSummary();
+        loadBiometricHistory();
+    }, [loadMonitoringSummary, loadBiometricHistory]);
+    useOfflineBiometricSync(user?.id, onQueuedReadingSynced);
+
     const handleBiometricSubmit = async () => {
         try {
             setLoading(true);
             await patientApi.submitBiometrics(biometricData);
             toast.success('Biometrics submitted successfully!');
-            setBiometricData({
-                heartRate: undefined,
-                bloodPressure: { systolic: 0, diastolic: 0 },
-                temperature: undefined,
-                oxygenSaturation: undefined,
-                source: 'manual',
-            });
+            resetBiometricForm();
             setVitalsModalOpen(false);
             loadMonitoringSummary();
             loadBiometricHistory();
         } catch (error: unknown) {
-            const e = error as { response?: { data?: { error?: string } } };
-            console.error("Biometric submission failed", error);
-            toast.error(e.response?.data?.error || "Failed to submit biometrics. Please try again.");
+            const e = error as { response?: { data?: { error?: string } }; request?: unknown };
+            if (e.request && !e.response) {
+                // No response reached us — likely offline. Safe to queue: the
+                // biometrics endpoint honors an Idempotency-Key on replay
+                // (apps/backend/src/middleware/idempotency.ts), so a later
+                // retry with this same reading can never double-write.
+                if (user?.id) {
+                    await enqueueBiometricReading(user.id, biometricData);
+                    toast.info("No connection — saved offline. It will sync automatically once you're back online.");
+                    resetBiometricForm();
+                    setVitalsModalOpen(false);
+                } else {
+                    toast.error('Failed to submit biometrics. Please try again.');
+                }
+            } else {
+                console.error("Biometric submission failed", error);
+                toast.error(e.response?.data?.error || "Failed to submit biometrics. Please try again.");
+            }
         } finally {
             setLoading(false);
         }
