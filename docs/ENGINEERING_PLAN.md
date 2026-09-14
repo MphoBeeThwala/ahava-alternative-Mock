@@ -1436,3 +1436,53 @@ Claude or Gemini when the no-AI-provider fallback fires, and does contain
 "fallback" explicitly. Full backend suite (148 tests) passes; `tsc`,
 `eslint` (0 new errors — same 5 pre-existing warnings), and full build
 clean.
+
+## 19. Visit/booking address never decrypted — patients, nurses and doctors saw raw ciphertext or nothing, 2026-09-14
+
+The user reported this as a visual bug — a "Next visit" card on the patient
+dashboard with text overflowing its box — and asked for the overlap fixed.
+The text overflowing was `v3:default:<base64 iv>:<base64 tag>:<base64
+ciphertext>`: `Booking.encryptedAddress` rendered straight to the screen.
+That ruled out CSS as the real fix; the actual bug is that no backend route
+ever decrypted the address before sending it to a client.
+
+Three routes were affected, each failing differently:
+- `routes/bookings.ts` (GET `/` and GET `/:id`) — selected the field (Prisma
+  returns every scalar column by default when a model's own fields aren't
+  narrowed with `select`) and returned it raw. Patients saw ciphertext.
+- `routes/nurse.ts` (GET `/visits`) — never selected `encryptedAddress` at
+  all, so the nurse assigned to a visit could never see where to go; the
+  frontend's "Address on file" fallback showed on every visit, always.
+- `routes/visits.ts` (GET `/` and GET `/:id`, shared by patient/nurse/doctor)
+  — same omission as `nurse.ts`.
+
+Fixed by adding `safeDecrypt(value, aad?)` to `utils/encryption.ts` — wraps
+`decryptData`, returns `null` on a genuine failure (rotated/wrong key,
+corrupted row) instead of throwing and taking down the whole request over
+one bad record, and passes a value through unchanged if it doesn't look
+like ciphertext in the first place (covers any legacy plaintext row). All
+three routes now select `encryptedAddress`, decrypt it server-side, and
+return a plain `address` field with the ciphertext stripped from the
+response entirely — there's no reason to ship ciphertext to a browser that
+can't do anything with it. `routes/bookings.ts`'s `POST /` (booking
+creation, encrypts on the way in) was already correct and untouched; it
+encrypts with no AAD, so `safeDecrypt` is likewise called with no AAD on
+the way out to match.
+
+Frontend: the doctor dashboard's `NurseVisitCard`, the nurse dashboard
+(active-visit banner and visit list), the patient dashboard's "Next visit"
+card, and the patient visit-tracker page all read `booking.encryptedAddress`
+directly — updated all five to read the new `address` field instead, and
+added `wordBreak: 'break-word'` where it was missing so a long address
+can't overflow its container again regardless of source. Removed the now-
+dead `encryptedAddress` field from the `Booking`/`Visit` TypeScript types
+(kept on `CreateBookingData`, which is the outbound field name the create
+endpoint expects — unrelated to this bug).
+
+**Verified:** `tsc --noEmit` clean on both `apps/backend` and `workspace`
+(one pre-existing generic-type strictness issue in the new
+`withDecryptedBookingAddress` helper was tightened to resolve, and one
+stale `.next/types` reference to a deleted dev-only page was cleared —
+neither caused by this change). `eslint` on every changed file: 0 errors,
+only pre-existing warnings. Full backend Jest suite and both production
+builds run clean.

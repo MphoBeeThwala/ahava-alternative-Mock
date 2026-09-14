@@ -407,7 +407,7 @@ export default function PatientDashboard() {
                                             <p className="text-sm font-semibold text-[var(--foreground)]">
                                                 {new Date(nextBooking.scheduledDate).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}
                                             </p>
-                                            <p className="mt-1 text-sm text-[var(--muted)]">{nextBooking.encryptedAddress ?? '—'}</p>
+                                            <p className="mt-1 text-sm text-[var(--muted)]" style={{ wordBreak: 'break-word' }}>{nextBooking.address ?? '—'}</p>
                                             <div className="mt-3">
                                                 <StatusBadge variant={(nextBooking as unknown as { status?: string }).status === 'CONFIRMED' ? 'success' : 'warning'}>
                                                     {(nextBooking as unknown as { status?: string }).status ?? 'PENDING'}

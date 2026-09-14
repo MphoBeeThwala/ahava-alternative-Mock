@@ -18,7 +18,6 @@ export interface Booking {
   scheduledDate: string;
   status: string;
   address?: string;
-  encryptedAddress?: string;
   amountInCents: number;
   createdAt: string;
   updatedAt: string;

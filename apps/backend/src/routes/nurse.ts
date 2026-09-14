@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { UserRole } from '@prisma/client';
 import { AuthenticatedRequest, authMiddleware, requireNurse } from '../middleware/auth';
 import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
+import { safeDecrypt } from '../utils/encryption';
 import prisma from '../lib/prisma';
 
 const router: Router = Router();
@@ -38,11 +39,20 @@ router.get('/visits', requireNurse, async (req: AuthenticatedRequest, res, next)
   try {
     const visits = await prisma.visit.findMany({
       where: { nurseId: req.user!.id },
-      include: { booking: { select: { scheduledDate: true, amountInCents: true, patient: { select: { id: true, firstName: true, lastName: true, phone: true } } } } },
+      include: { booking: { select: { scheduledDate: true, amountInCents: true, encryptedAddress: true, patient: { select: { id: true, firstName: true, lastName: true, phone: true } } } } },
       orderBy: { scheduledStart: 'desc' }
     });
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'LIST', resource: 'Nurse', metadata: { entity: 'Visit', count: visits.length }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
-    res.json({ success: true, visits });
+    // Found via a real user report, 2026-09-14: this query never selected
+    // encryptedAddress at all, so the nurse assigned to go to a patient
+    // could never actually see the visit address — the frontend always
+    // showed its generic "Address on file" fallback text.
+    const decryptedVisits = visits.map((visit) => {
+      if (!visit.booking) return visit;
+      const { encryptedAddress, ...bookingRest } = visit.booking;
+      return { ...visit, booking: { ...bookingRest, address: safeDecrypt(encryptedAddress) } };
+    });
+    res.json({ success: true, visits: decryptedVisits });
   } catch (error) { next(error); }
 });
 

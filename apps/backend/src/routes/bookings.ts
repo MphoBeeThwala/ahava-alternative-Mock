@@ -3,7 +3,7 @@ import { UserRole } from '@prisma/client';
 import { AuthenticatedRequest, authMiddleware, requirePatient } from '../middleware/auth';
 import { idempotencyMiddleware } from '../middleware/idempotency';
 import { notifyNearbyNurses } from '../services/websocket';
-import { encryptData, isEncryptedPayload } from '../utils/encryption';
+import { encryptData, isEncryptedPayload, safeDecrypt } from '../utils/encryption';
 import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 import Joi from 'joi';
 import prisma from '../lib/prisma';
@@ -163,7 +163,16 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res, next) => 
       userAgent: req.get('User-Agent'),
     });
 
-    return res.json({ success: true, bookings });
+    // Decrypt for every authorized viewer of this list (already scoped to
+    // the requester's own bookings above) — previously the raw ciphertext
+    // (encryptData's output) was sent straight to the client and rendered
+    // as-is in the UI, instead of the actual visit address.
+    const decryptedBookings = bookings.map((booking) => {
+      const { encryptedAddress, ...rest } = booking;
+      return { ...rest, address: safeDecrypt(encryptedAddress) };
+    });
+
+    return res.json({ success: true, bookings: decryptedBookings });
   } catch (error: any) {
     console.error('[Bookings] Failed to fetch:', error?.message || error);
     return res.status(503).json({ success: false, error: 'Unable to load bookings. Database may be unavailable.' });
@@ -207,7 +216,8 @@ router.get('/:id', authMiddleware, async (req: AuthenticatedRequest, res, next) 
       userAgent: req.get('User-Agent'),
     });
 
-    res.json({ success: true, booking });
+    const { encryptedAddress, ...bookingWithoutCiphertext } = booking;
+    res.json({ success: true, booking: { ...bookingWithoutCiphertext, address: safeDecrypt(encryptedAddress) } });
   } catch (error) {
     return next(error);
   }

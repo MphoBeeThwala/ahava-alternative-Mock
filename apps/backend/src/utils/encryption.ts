@@ -197,6 +197,29 @@ export function decryptData(encryptedData: string, aad?: string, key?: string): 
   throw new Error('Invalid encrypted data format');
 }
 
+/**
+ * Found via a real user report, 2026-09-14: `bookings.ts` and other routes
+ * returned `booking.encryptedAddress` straight from Prisma with no
+ * decryption step at all, so patients, nurses and doctors saw the raw
+ * ciphertext (`v2:...:...==` etc.) rendered directly in the UI instead of
+ * the actual visit address — in the nurse/doctor views, some queries didn't
+ * even select the column, so the address was simply never shown at all.
+ *
+ * Never throws: returns null on a genuine decryption failure (wrong/rotated
+ * key, corrupted data) rather than crashing the whole request over one bad
+ * record, and passes a legacy plaintext value through unchanged if it never
+ * looks like ciphertext in the first place.
+ */
+export function safeDecrypt(value: string | null | undefined, aad?: string): string | null {
+  if (!value) return null;
+  if (!isEncryptedPayload(value)) return value;
+  try {
+    return decryptData(value, aad);
+  } catch {
+    return null;
+  }
+}
+
 export function hashSensitiveData(data: string): string {
   return crypto.createHash('sha256').update(data).digest('hex');
 }

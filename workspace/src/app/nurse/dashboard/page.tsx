@@ -282,7 +282,7 @@ export default function NurseDashboard() {
                     {activeVisit && (
                         <Card padding="sm" style={{ borderColor: 'var(--role-nurse)' }}>
                             <p className="text-[var(--text-eyebrow)] font-bold uppercase text-[var(--role-nurse)]">Visit in progress</p>
-                            <p className="mt-1 text-sm font-semibold text-[var(--foreground)]">{activeVisit.booking?.encryptedAddress ?? 'Address on file'}</p>
+                            <p className="mt-1 text-sm font-semibold text-[var(--foreground)]" style={{ wordBreak: 'break-word' }}>{activeVisit.booking?.address ?? 'Address on file'}</p>
                             <button
                                 onClick={() => handleVisitStatusUpdate(activeVisit.id, 'COMPLETED')}
                                 className="btn-primary mt-3 w-full rounded-xl font-bold"
@@ -327,7 +327,7 @@ export default function NurseDashboard() {
                                                     <p className="text-sm text-[var(--muted)]">
                                                         {visit.booking?.scheduledDate ? new Date(visit.booking.scheduledDate).toLocaleString() : 'Date TBD'}
                                                     </p>
-                                                    <p className="truncate text-sm text-[var(--muted)]">{visit.booking?.encryptedAddress ?? 'Address on file'}</p>
+                                                    <p className="truncate text-sm text-[var(--muted)]" title={visit.booking?.address}>{visit.booking?.address ?? 'Address on file'}</p>
                                                 </div>
                                                 <StatusBadge variant={visit.status === 'COMPLETED' ? 'success' : 'warning'} className="shrink-0 text-xs">
                                                     {visit.status}

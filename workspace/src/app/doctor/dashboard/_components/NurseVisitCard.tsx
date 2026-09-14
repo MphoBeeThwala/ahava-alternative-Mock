@@ -21,7 +21,7 @@ export function NurseVisitCard({
           <p className="text-sm text-[var(--muted)]">
             {visit.createdAt ? new Date(visit.createdAt).toLocaleString() : 'Date TBD'}
           </p>
-          <p className="text-sm text-[var(--muted)] mt-1">{visit.booking?.encryptedAddress ?? 'Address on file'}</p>
+          <p className="text-sm text-[var(--muted)] mt-1" style={{ wordBreak: 'break-word' }}>{visit.booking?.address ?? 'Address on file'}</p>
         </div>
         <StatusBadge variant={visit.triageLevel != null && visit.triageLevel <= 2 ? 'danger' : 'warning'}>
           {visit.triageLevel ? `Level ${visit.triageLevel}` : visit.status}

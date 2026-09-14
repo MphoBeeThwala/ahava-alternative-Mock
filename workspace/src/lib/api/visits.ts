@@ -19,7 +19,6 @@ export interface Visit {
   nurseReport?: string;
   booking?: {
     address?: string;
-    encryptedAddress?: string;
     patient?: { firstName?: string; lastName?: string };
     scheduledDate?: string;
   };

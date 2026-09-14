@@ -28,7 +28,7 @@ interface VisitData {
   actualEnd?: string;
   nurse?: { id: string; firstName: string; lastName: string; email?: string };
   booking?: {
-    encryptedAddress?: string;
+    address?: string;
     scheduledDate?: string;
     estimatedDuration?: number;
     amountInCents?: number;
@@ -241,7 +241,7 @@ export default function VisitTrackerPage({ params }: { params: Promise<{ visitId
                 </div>
                 <div>
                   <p style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>Address</p>
-                  <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground)', wordBreak: 'break-word' }}>{visit.booking?.encryptedAddress ?? '—'}</p>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--foreground)', wordBreak: 'break-word' }}>{visit.booking?.address ?? '—'}</p>
                 </div>
               </div>
             </div>
