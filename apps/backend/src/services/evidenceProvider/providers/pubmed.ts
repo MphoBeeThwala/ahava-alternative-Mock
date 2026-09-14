@@ -5,7 +5,7 @@
  * Uses NCBI E-utilities API with optional API key for higher rate limits
  */
 
-import { EvidenceProvider, EvidenceProviderConfig, ClinicalQuery, EvidenceResult } from '../types';
+import { EvidenceProvider, EvidenceProviderConfig, ClinicalQuery, EvidenceResult, EvidenceProviderNetworkError } from '../types';
 
 interface PubMedSearchResult {
   esearchresult?: {
@@ -73,6 +73,9 @@ export function pubmedProvider(config: EvidenceProviderConfig): EvidenceProvider
         return results;
       } catch (error: any) {
         console.warn('[PubMed] Query failed:', error.message);
+        // AH-46: a genuine network/HTTP failure must be visible to
+        // combineEvidence's sourcesFailed, not swallowed into "no results".
+        if (error instanceof EvidenceProviderNetworkError) throw error;
         return [];
       }
     },
@@ -117,13 +120,12 @@ function extractSearchTerms(symptoms: string): string {
  * Search PubMed for relevant articles
  */
 async function searchPubMed(terms: string, baseUrl: string, apiKey: string, timeoutMs: number, maxResults: number): Promise<string[]> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-    let url = baseUrl + '/esearch.fcgi?db=pubmed&term=' + encodeURIComponent(terms) + 
+    let url = baseUrl + '/esearch.fcgi?db=pubmed&term=' + encodeURIComponent(terms) +
       '&retmode=json&retmax=' + maxResults + '&sort=relevance';
-    
+
     if (apiKey) {
       url += '&api_key=' + apiKey;
     }
@@ -132,22 +134,24 @@ async function searchPubMed(terms: string, baseUrl: string, apiKey: string, time
       signal: controller.signal,
     });
 
-    clearTimeout(timeout);
-
     if (!response.ok) {
-      console.warn('[PubMed] Search failed with status:', response.status);
-      return [];
+      // A real HTTP failure (e.g. 503) is a source outage, not "no results" —
+      // see AH-46. Surfaced so combineEvidence records it in sourcesFailed.
+      throw new EvidenceProviderNetworkError('pubmed', 'HTTP ' + response.status);
     }
 
     // fetch's .json() is typed as Promise<unknown> under strict mode —
     // NCBI's response shape is trusted the same way it always was here.
     const data = (await response.json()) as PubMedSearchResult;
     const idList = data.esearchresult?.idlist || [];
-    
+
     return idList;
   } catch (error: any) {
-    console.warn('[PubMed] Search error:', error.message);
-    return [];
+    if (error instanceof EvidenceProviderNetworkError) throw error;
+    // Timeout/abort, DNS failure, etc. are equally real outages.
+    throw new EvidenceProviderNetworkError('pubmed', error?.message || String(error));
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

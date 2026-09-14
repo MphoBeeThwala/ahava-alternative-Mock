@@ -1,6 +1,6 @@
 /**
  * Africa CDC / WHO AFRO Provider
- * Tier: literature
+ * Tier: context (static local data — never counts as evidence; see AH-46)
  * Purpose: SA/regional epidemiological context (TB, HIV, malaria-by-province)
  * Uses pre-ingested structured JSON data, refreshed periodically
  */
@@ -92,7 +92,10 @@ export function africaCdcProvider(config: EvidenceProviderConfig): EvidenceProvi
 
   return {
     id: config.id,
-    tier: 'literature',
+    // AH-46 gap report: this provider is hardcoded local data with no network
+    // call — it must never count toward hasSufficientEvidence the way a real
+    // literature source does. See registry.ts's config comment for detail.
+    tier: 'context',
     config,
 
     async query(query: ClinicalQuery): Promise<EvidenceResult[]> {

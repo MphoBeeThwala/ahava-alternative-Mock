@@ -845,3 +845,117 @@ or restyling only.
   stub is switched to succeed, the queued entry replays with the exact
   `Idempotency-Key` generated at enqueue time and is removed from the
   queue, and the dashboard's data-refresh callback fires.
+
+## 11. Clinical safety hardening — scenario test findings, 2026-09-14
+
+A clinical scenario test harness (`test/clinical-scenario-harness`, not
+merged — Anthropic call intercepted with scripted responses, Timescale
+swapped for an in-memory store; every deterministic/statistical code
+path is real) ran 26 cases against `analyzeSymptoms()` and
+`EarlyWarningEngine.full_analysis()` and surfaced 10 findings (AH-41
+through AH-50). Every finding was independently re-verified by reading
+the exact referenced code before any fix — all 8 spot-checked in detail
+matched precisely. Fixed here, in the report's own suggested order:
+
+- **AH-41 (P0)** — `POST /api/patient/triage` (`routes/patient.ts`)
+  returned the full AI result — level, conditions, reasoning — straight
+  to the patient with no doctor gate, directly contradicting
+  `routes/triage.ts`'s deliberate withhold-until-doctor-releases design.
+  Traced every frontend call site first: nothing calls this route — it
+  was dead code from before the AH-32 queue redesign. Deleted outright,
+  along with its now-unused schema, imports, and the `AI_TRIAGE_PREVIEW`
+  audit path.
+- **AH-42 (P0)** — `requiresDoctorReview` in `aiTriage.ts`'s
+  `mergeGuardrails` was derived from `mergedLevel <= 2 || flags.length
+  > 0 || confidence < 0.7` — three values the model itself can report,
+  so a prompt injection convincing the model to claim a low-risk level
+  at high confidence with no flags could set every one false. Traced
+  every consumer of this field: nothing in the frontend reads it, and
+  the real release gate (`triageCaseReview.ts`) already requires
+  `triageCase.doctorId === req.user.id` regardless of it — so with
+  AH-41 closed there was no live bypass left, but the field itself was
+  still a live footgun for any future consumer. Hard-coded to `true`
+  at this single choke point every `analyzeSymptoms()` return path
+  funnels through, rather than trusting a value the model can talk its
+  way out of.
+- **AH-43 / AH-44 (P0)** — `apps/ml-service/engine.py`: a new user's
+  first reading defaulted to GREEN regardless of content
+  (`if not history: return GREEN`), and anomaly severity was *counted*
+  rather than weighted (`+= 2 if >2.5σ else 1`, RED needs `>= 3`), so no
+  single catastrophic vital could ever reach RED alone — an isolated
+  SpO2 80 scored only YELLOW. Added `_absolute_floor()`, a SATS-aligned
+  absolute threshold check (adapted from the same table already used in
+  `triageSafety.ts`, for HR/RR/SpO2 — the only vitals this engine's
+  `BiometricData` model carries) that runs before baseline comparison,
+  survives having no history, and survives exercise-context suppression
+  when the breach is RED-level (a critical desaturation during exertion
+  is still dangerous) but not for a merely-elevated YELLOW-level reading
+  (preserving the already-validated marathon-runner suppression case).
+  Inherits the same adult-only limitation as AH-47 below — not safe for
+  paediatric vitals, flagged in the code.
+- **AH-46 (P1)** — `africa-cdc` (a hardcoded local fact-sheet, zero
+  network calls) was tagged `tier: 'literature'`, so it alone satisfied
+  `hasSufficientEvidence()` even with WHO/PubMed/StatPearls all down —
+  and separately, every real provider's `query()` swallowed its own
+  HTTP/network failures into a plain `[]`, indistinguishable from "found
+  nothing," so `sourcesFailed` stayed empty through a total outage.
+  Reclassified `africa-cdc` to a new `'context'` tier (still injected
+  into model prompts, never counted as evidence). Added
+  `EvidenceProviderNetworkError`, thrown by each real provider's search
+  call specifically on a non-2xx response or a network/timeout failure
+  (not on a legitimate "zero results" response), and re-thrown through
+  each provider's `query()` so `combineEvidence`'s existing try/catch —
+  already correct — actually receives it.
+- **AH-48 (P1)** — red-flag regexes had no negation awareness: "no
+  numbness, no problems passing urine" matched identically to the
+  affirmed symptom. Added a NegEx-style pass that masks the clause
+  following a negation trigger (no/not/denies/without/ruled out/absence
+  of) up to the next clause boundary before pattern matching runs.
+  First pass broke the existing `not breathing` and `no pulse` red-flag
+  patterns (the negation word is part of the symptom there, not a
+  denial) — caught by the pre-existing `triageSafety.test.ts` suite,
+  fixed with a negative-lookahead exclusion for those two phrases. All
+  31 existing tests plus 2 disposable verification tests (denied
+  symptom no longer escalates; a real, non-negated one still does) pass.
+- **AH-49 (P2)** — `enrichWithFallbackOpinion` replaced
+  `possibleConditions`/`recommendedAction` with a generic fallback
+  whenever *either* the conditions were generic *or* the model's
+  reasoning text was under 60 characters — so a specific, correct
+  differential (e.g. "Tension-type headache") got silently discarded
+  over unrelated short reasoning, with no record of what was replaced.
+  Now only replaces content when the conditions are actually generic;
+  brief reasoning on an otherwise-specific result adds a
+  `BRIEF_MODEL_REASONING` flag instead of discarding real content.
+
+**Deliberately not fixed — need clinical/product sign-off, not an
+engineering guess:**
+
+- **AH-45 (P1)** — `_fusion_trajectory` reads only the hand-tuned
+  `_custom_ml_risk` heuristic, ignoring the Framingham- and
+  QRISK3-adapted scores computed right next to it. Needs a decision on
+  how the three should actually be combined/weighted, not a unilateral
+  pick.
+- **AH-47 (P1, clinical)** — `assessDeterministicRisk` takes no age;
+  adult HR/RR thresholds hard-flag a normal paediatric vital
+  (HR 148 / RR 34 in a 3-year-old) as CRITICAL, routing children to
+  resuscitation as a class. Real paediatric reference ranges need to
+  come from a clinician, not be invented here. Same gap now exists in
+  both the TS deterministic-risk table and the newly-added Python
+  absolute floor (AH-43/44), since the floor intentionally reused the
+  existing (adult-only) table rather than inventing paediatric numbers.
+- **AH-50 (P2)** — `_calculate_blended_baseline` uses a wearer's own
+  7-day σ with no floor, so a very consistent wearer's ordinary
+  day-to-day variation reads as multi-sigma noise. Needs a clinically
+  safe per-metric σ floor in real units, not a guessed constant.
+
+**Verified:** `tsc --noEmit`, `eslint` (0 errors — pre-existing
+`no-explicit-any`/unused-var warnings only, none new), and a full
+`npm run build` all clean on the backend. The full backend Jest suite
+(124 tests, 13 suites, including the pre-existing `triageSafety.test.ts`
+that caught the negation regression above) passes. `engine.py` could
+**not** be executed — no Python interpreter is installed on this
+machine, and the Railway deploy pipeline (`.github/workflows/deploy.yml`)
+has no test/syntax gate before it builds and deploys the container —
+verified instead by careful manual re-reading of the full diff across
+several passes. Run the ml-service test suite (or re-run the scenario
+harness) against this change before merging to close that gap.

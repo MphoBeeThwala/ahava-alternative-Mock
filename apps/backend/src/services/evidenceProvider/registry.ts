@@ -34,7 +34,12 @@ const DEFAULT_CONFIGS: Record<string, EvidenceProviderConfig> = {
   },
   'africa-cdc': {
     id: 'africa-cdc',
-    tier: 'literature',
+    // AH-46 gap report: this is a hardcoded local fact-sheet with no network
+    // call (see providers/africaCdc.ts) — it always "succeeds", so tagging it
+    // 'literature' let it single-handedly satisfy hasSufficientEvidence even
+    // when every real external source was down. Reclassified as 'context':
+    // still injected into model prompts, never counted as evidence.
+    tier: 'context',
     enabled: true,
     timeoutMs: 5000,
     weight: 0.95, // High weight for SA-specific epidemiological context

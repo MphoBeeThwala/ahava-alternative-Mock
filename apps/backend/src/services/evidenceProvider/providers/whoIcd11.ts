@@ -4,7 +4,7 @@
  * Purpose: Normalize symptoms, diagnoses, and risk flags to canonical ICD-11 codes
  */
 
-import { EvidenceProvider, EvidenceProviderConfig, ClinicalQuery, EvidenceResult } from '../types';
+import { EvidenceProvider, EvidenceProviderConfig, ClinicalQuery, EvidenceResult, EvidenceProviderNetworkError } from '../types';
 
 interface ICD11SearchResult {
   destinationTitle: string;
@@ -55,6 +55,10 @@ export function whoIcd11Provider(config: EvidenceProviderConfig): EvidenceProvid
           }
         } catch (error: any) {
           console.warn('[WHO-ICD11] Failed to normalize term "' + term + '":', error.message);
+          // AH-46: a network/HTTP failure means the source is down for every
+          // remaining term too — stop and surface it rather than silently
+          // retrying into the same outage and reporting "no codes found".
+          if (error instanceof EvidenceProviderNetworkError) throw error;
         }
       }
 
@@ -80,39 +84,39 @@ export function whoIcd11Provider(config: EvidenceProviderConfig): EvidenceProvid
 }
 
 async function searchICD11(term: string, baseUrl: string, timeoutMs: number): Promise<string | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let response: Response;
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
     const searchUrl = baseUrl + '/icd/search?q=' + encodeURIComponent(term) + '&limit=5';
-    const response = await fetch(searchUrl, {
+    response = await fetch(searchUrl, {
       signal: controller.signal,
     });
-
-    clearTimeout(timeout);
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const data: any = await response.json();
-
-    if (!data.destinationEntities || data.destinationEntities.length === 0) {
-      return null;
-    }
-
-    const firstResult = data.destinationEntities[0];
-    const uri = firstResult.destinationUri || firstResult.uri || '';
-
-    // URI format: /icd/release/11/2024-01/mms/12345678
-    const codeMatch = uri.match(/\/mms\/([A-Z0-9]+)/);
-    if (codeMatch) {
-      return codeMatch[1];
-    }
-
-    return null;
   } catch (error: any) {
-    console.warn('[WHO-ICD11] Search failed for term "' + term + '":', error.message);
+    // Timeout/abort, DNS failure, etc. — a real outage, not "no match" (AH-46).
+    throw new EvidenceProviderNetworkError('who-icd11', error?.message || String(error));
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!response.ok) {
+    throw new EvidenceProviderNetworkError('who-icd11', 'HTTP ' + response.status);
+  }
+
+  const data: any = await response.json();
+
+  if (!data.destinationEntities || data.destinationEntities.length === 0) {
     return null;
   }
+
+  const firstResult = data.destinationEntities[0];
+  const uri = firstResult.destinationUri || firstResult.uri || '';
+
+  // URI format: /icd/release/11/2024-01/mms/12345678
+  const codeMatch = uri.match(/\/mms\/([A-Z0-9]+)/);
+  if (codeMatch) {
+    return codeMatch[1];
+  }
+
+  return null;
 }

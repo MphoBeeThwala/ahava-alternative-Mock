@@ -5,7 +5,7 @@
  * Now implements the EvidenceProvider interface for consistency
  */
 
-import { EvidenceProvider, EvidenceProviderConfig, ClinicalQuery, EvidenceResult } from '../types';
+import { EvidenceProvider, EvidenceProviderConfig, ClinicalQuery, EvidenceResult, EvidenceProviderNetworkError } from '../types';
 import * as cheerio from "cheerio";
 
 const NCBI_ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi";
@@ -74,6 +74,7 @@ export function statPearlsProvider(config: EvidenceProviderConfig): EvidenceProv
         }];
       } catch (error: any) {
         console.warn('[StatPearls] Query failed:', error.message);
+        if (error instanceof EvidenceProviderNetworkError) throw error;
         return [];
       }
     },
@@ -101,22 +102,28 @@ export function statPearlsProvider(config: EvidenceProviderConfig): EvidenceProv
  * Search NCBI StatPearls and return top results
  */
 async function searchNcbiStatPearls(query: string, apiKey: string, timeoutMs: number): Promise<{title: string, url: string}[]> {
-  const searchUrl = NCBI_ESEARCH_URL + '?db=books&term=' + encodeURIComponent(query) + 
+  const searchUrl = NCBI_ESEARCH_URL + '?db=books&term=' + encodeURIComponent(query) +
     '+AND+NBK430685[book]&retmode=json' + (apiKey ? '&api_key=' + apiKey : '');
-  
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  
-  const res = await fetch(searchUrl, {
-    signal: controller.signal,
-  });
-  
-  clearTimeout(timeout);
-  
-  if (!res.ok) {
-    return [];
+
+  let res: Response;
+  try {
+    res = await fetch(searchUrl, {
+      signal: controller.signal,
+    });
+  } catch (error: any) {
+    // Timeout/abort, DNS failure, etc. — a real outage, not "no results" (AH-46).
+    throw new EvidenceProviderNetworkError('statpearls', error?.message || String(error));
+  } finally {
+    clearTimeout(timeout);
   }
-  
+
+  if (!res.ok) {
+    throw new EvidenceProviderNetworkError('statpearls', 'HTTP ' + res.status);
+  }
+
   const html = await res.text();
   const $ = cheerio.load(html);
   const results: {title: string, url: string}[] = [];

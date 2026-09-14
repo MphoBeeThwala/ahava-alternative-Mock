@@ -2,7 +2,23 @@
 // Abstraction layer for all clinical evidence sources
 // All sources implement this interface for consistent integration
 
-export type EvidenceTier = 'structural' | 'literature' | 'engine' | 'image';
+// 'context' (AH-46 gap report): locally-held reference data with no network
+// dependency (e.g. the SA epidemiological fact-sheet). Genuinely useful to
+// inject into model context, but must never satisfy hasSufficientEvidence —
+// it's always present regardless of whether any real external source is up.
+export type EvidenceTier = 'structural' | 'literature' | 'engine' | 'image' | 'context';
+
+// AH-46 gap report: thrown by a provider's network/HTTP layer specifically
+// (a non-2xx response, a timeout, a DNS/connection failure) so combineEvidence
+// can record a genuine outage in sourcesFailed. Providers still return an
+// empty array — not throw — for a call that succeeded but simply found no
+// matching results; that's not a failure.
+export class EvidenceProviderNetworkError extends Error {
+  constructor(public readonly providerId: string, detail: string) {
+    super(`[${providerId}] network/HTTP failure: ${detail}`);
+    this.name = 'EvidenceProviderNetworkError';
+  }
+}
 
 export interface EvidenceProviderConfig {
   id: string;

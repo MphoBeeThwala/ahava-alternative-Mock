@@ -113,6 +113,63 @@ class EarlyWarningEngine:
         self.SIGMA_RED = 2.5
         self.HIGH_ACTIVITY_STEPS_PERCENTILE = 90
 
+        # AH-43/AH-44 gap report: absolute, baseline-independent vital-sign
+        # floor, adapted from the SATS-aligned thresholds already used for
+        # deterministic symptom triage (apps/backend/src/services/triageSafety.ts).
+        # Runs unconditionally, including with no history — "no baseline yet"
+        # is not a reason to call a catastrophic first reading GREEN — and a
+        # RED-level breach is never suppressed by exercise context either,
+        # since desaturation or a critical rate during exertion is itself
+        # dangerous. Adult thresholds only: this engine has no patient-age
+        # input, so it inherits the same paediatric gap as AH-47 in the TS
+        # engine until that's fixed with real clinician-defined paediatric
+        # ranges — do not treat these numbers as safe for children.
+        self.SPO2_RED = 90
+        self.SPO2_YELLOW = 94
+        self.RR_RED_HIGH = 30
+        self.RR_RED_LOW = 8
+        self.RR_YELLOW_HIGH = 24
+        self.RR_YELLOW_LOW = 10
+        self.HR_RED_HIGH = 130
+        self.HR_RED_LOW = 40
+        self.HR_YELLOW_HIGH = 120
+        self.HR_YELLOW_LOW = 45
+        self._LEVEL_RANK = {AlertLevel.GREEN: 0, AlertLevel.YELLOW: 1, AlertLevel.RED: 2}
+
+    def _absolute_floor(self, data: BiometricData) -> Tuple[AlertLevel, List[str]]:
+        """Baseline-independent SATS-aligned floor — see __init__ comment."""
+        anomalies: List[str] = []
+        level = AlertLevel.GREEN
+
+        spo2 = data.spo2
+        if spo2 < self.SPO2_RED:
+            anomalies.append(f"spo2 ({spo2:.1f}) below critical floor (<{self.SPO2_RED}) — SEVERE_HYPOXEMIA")
+            level = AlertLevel.RED
+        elif spo2 < self.SPO2_YELLOW:
+            anomalies.append(f"spo2 ({spo2:.1f}) below floor (<{self.SPO2_YELLOW}) — LOW_SPO2")
+            if self._LEVEL_RANK[level] < self._LEVEL_RANK[AlertLevel.YELLOW]:
+                level = AlertLevel.YELLOW
+
+        rr = data.respiratory_rate
+        if rr >= self.RR_RED_HIGH or rr <= self.RR_RED_LOW:
+            anomalies.append(f"respiratory_rate ({rr:.1f}) at critical floor — CRITICAL_RESPIRATORY_RATE")
+            level = AlertLevel.RED
+        elif rr >= self.RR_YELLOW_HIGH or rr <= self.RR_YELLOW_LOW:
+            anomalies.append(f"respiratory_rate ({rr:.1f}) at floor — ABNORMAL_RESPIRATORY_RATE")
+            if self._LEVEL_RANK[level] < self._LEVEL_RANK[AlertLevel.YELLOW]:
+                level = AlertLevel.YELLOW
+
+        hr = data.heart_rate_resting
+        if hr >= self.HR_RED_HIGH or hr <= self.HR_RED_LOW:
+            anomalies.append(f"heart_rate_resting ({hr:.1f}) at critical floor — CRITICAL_HEART_RATE")
+            level = AlertLevel.RED
+        elif hr >= self.HR_YELLOW_HIGH or hr <= self.HR_YELLOW_LOW:
+            anomalies.append(f"heart_rate_resting ({hr:.1f}) at floor — ABNORMAL_HEART_RATE")
+            if self._LEVEL_RANK[level] < self._LEVEL_RANK[AlertLevel.YELLOW]:
+                level = AlertLevel.YELLOW
+
+        return level, anomalies
+
     def _estimate_uncertainty(
         self,
         history: List[dict],
@@ -190,13 +247,24 @@ class EarlyWarningEngine:
     # Evaluate (read-only)
     # ------------------------------------------------------------------
     def _evaluate(self, user_id: str, data: BiometricData) -> Tuple[AlertLevel, List[str]]:
+        floor_level, floor_anomalies = self._absolute_floor(data)
+
         history = db.load_biometrics(
             user_id, days=self.MIN_BASELINE_DAYS + self.ROLLING_WINDOW_DAYS + 1
         )
         if not history:
+            if floor_level != AlertLevel.GREEN:
+                return floor_level, floor_anomalies + ["No history yet — absolute floor triggered independent of any baseline"]
             return AlertLevel.GREEN, ["No history yet — using population baseline"]
 
         if self._is_exercise_context(history, data):
+            # A YELLOW-level floor breach (e.g. a borderline-elevated HR) can be a
+            # genuine, harmless product of exertion, which is exactly what this
+            # suppression exists to filter — only a RED-level breach (SATS-critical,
+            # not just borderline) survives, since desaturation or a critical rate
+            # during exercise is dangerous regardless of context.
+            if floor_level == AlertLevel.RED:
+                return floor_level, floor_anomalies + ["Exercise context detected but a critical vital floor was not suppressed"]
             return AlertLevel.GREEN, ["Suppressed: High physical activity detected"]
 
         ctx = db.load_context(user_id)
@@ -228,13 +296,15 @@ class EarlyWarningEngine:
                 significant_deviations += 2 if abs(z_score) > self.SIGMA_RED else 1
 
         if significant_deviations >= 3:
-            alert_level = AlertLevel.RED
+            relative_level = AlertLevel.RED
         elif significant_deviations >= 1:
-            alert_level = AlertLevel.YELLOW
+            relative_level = AlertLevel.YELLOW
         else:
-            alert_level = AlertLevel.GREEN
+            relative_level = AlertLevel.GREEN
 
-        return alert_level, anomalies
+        if self._LEVEL_RANK[floor_level] > self._LEVEL_RANK[relative_level]:
+            return floor_level, floor_anomalies + anomalies
+        return relative_level, anomalies
 
     # ------------------------------------------------------------------
     # Progressive blended baseline

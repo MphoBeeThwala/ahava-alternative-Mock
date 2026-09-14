@@ -6,7 +6,6 @@ import {
 } from "../middleware/auth";
 import { rateLimiter } from "../middleware/rateLimiter";
 import { idempotencyMiddleware } from "../middleware/idempotency";
-import { aiTriageBudgetMiddleware } from "../middleware/aiTriageBudget";
 import axios from "axios";
 import Joi from "joi";
 import {
@@ -15,10 +14,8 @@ import {
   detectEarlyWarningSigns,
 } from "../services/monitoring";
 import { startDemoStream } from "../services/demoStream";
-import { analyzeSymptoms } from "../services/aiTriage";
 import { mlServiceHeaders } from "../services/mlServiceAuth";
 import prisma from "../lib/prisma";
-import { randomUUID } from "crypto";
 import { hashValue, writeClinicalAudit } from "../services/clinicalAudit";
 
 const router: Router = Router();
@@ -56,12 +53,6 @@ const submitBiometricsSchema = Joi.object({
   // Source
   source: Joi.string().valid("wearable", "manual").default("manual"),
   deviceType: Joi.string().optional(), // e.g., 'apple_watch', 'fitbit', 'manual_entry'
-});
-
-const submitTriageWithBiometricsSchema = Joi.object({
-  symptoms: Joi.string().required(),
-  imageBase64: Joi.string().optional(),
-  biometrics: submitBiometricsSchema.optional(),
 });
 
 // Submit biometrics (from wearable or manual entry)
@@ -987,148 +978,6 @@ router.patch(
       return res.json({ success: true, riskProfile: persistedRiskProfile });
     } catch (e) {
       return next(e);
-    }
-  },
-);
-
-// Enhanced triage with biometrics
-router.post(
-  "/triage",
-  rateLimiter,
-  authMiddleware,
-  aiTriageBudgetMiddleware,
-  async (req: AuthenticatedRequest, res, next) => {
-    try {
-      const { error, value } = submitTriageWithBiometricsSchema.validate(
-        req.body,
-      );
-      if (error) {
-        return res.status(400).json({ error: error.details[0].message });
-      }
-
-      const { symptoms, imageBase64, biometrics } = value;
-      const patientId = req.user!.id;
-      const caseId = randomUUID();
-      const vitalsSnapshot = biometrics
-        ? {
-            heartRateResting:
-              biometrics.heartRateResting ?? biometrics.heartRate ?? null,
-            oxygenSaturation: biometrics.oxygenSaturation ?? null,
-            respiratoryRate: biometrics.respiratoryRate ?? null,
-            temperature: biometrics.temperature ?? null,
-            bloodPressureSystolic: biometrics.bloodPressure?.systolic ?? null,
-            bloodPressureDiastolic: biometrics.bloodPressure?.diastolic ?? null,
-            hrvRmssd: biometrics.hrvRmssd ?? null,
-          }
-        : undefined;
-
-      // Call AI triage service directly (avoids network self-call)
-      const triageResult = await analyzeSymptoms({
-        symptoms,
-        imageBase64,
-        patientId,
-        caseId,
-        vitalsSnapshot,
-      });
-
-      // If biometrics provided, enhance triage with biometric context
-      let biometricContext: {
-        vitalSigns: {
-          heartRate: any;
-          bloodPressure: any;
-          oxygenSaturation: any;
-          temperature: any;
-          respiratoryRate: any;
-        };
-        abnormal: string[];
-      } | null = null;
-      if (biometrics) {
-        // Analyze biometrics for additional context
-        const biometricAnalysis = {
-          vitalSigns: {
-            heartRate: biometrics.heartRate || biometrics.heartRateResting,
-            bloodPressure: biometrics.bloodPressure,
-            oxygenSaturation: biometrics.oxygenSaturation,
-            temperature: biometrics.temperature,
-            respiratoryRate: biometrics.respiratoryRate,
-          },
-          abnormal: [] as string[],
-        };
-
-        // Check for abnormal values
-        if (
-          biometricAnalysis.vitalSigns.heartRate &&
-          (biometricAnalysis.vitalSigns.heartRate > 100 ||
-            biometricAnalysis.vitalSigns.heartRate < 60)
-        ) {
-          biometricAnalysis.abnormal.push("Heart rate outside normal range");
-        }
-        if (biometricAnalysis.vitalSigns.bloodPressure) {
-          const { systolic, diastolic } =
-            biometricAnalysis.vitalSigns.bloodPressure;
-          if (systolic > 140 || diastolic > 90) {
-            biometricAnalysis.abnormal.push("Elevated blood pressure");
-          }
-        }
-        if (
-          biometricAnalysis.vitalSigns.oxygenSaturation &&
-          biometricAnalysis.vitalSigns.oxygenSaturation < 95
-        ) {
-          biometricAnalysis.abnormal.push("Low oxygen saturation");
-        }
-        if (
-          biometricAnalysis.vitalSigns.temperature &&
-          biometricAnalysis.vitalSigns.temperature > 37.5
-        ) {
-          biometricAnalysis.abnormal.push("Elevated temperature");
-        }
-
-        biometricContext = biometricAnalysis;
-
-        // Conservative override: never reduce urgency, only escalate if abnormalities exist.
-        if (
-          biometricAnalysis.abnormal.length > 0 &&
-          triageResult.triageLevel > 2
-        ) {
-          triageResult.triageLevel = Math.max(
-            1,
-            triageResult.triageLevel - 1,
-          ) as any;
-          triageResult.reasoning += ` Note: Additional biometric red flags: ${biometricAnalysis.abnormal.join(", ")}.`;
-          triageResult.requiresDoctorReview = true;
-        }
-      }
-
-      await writeClinicalAudit({
-        userId: patientId,
-        userRole: req.user?.role,
-        action: "AI_TRIAGE_PREVIEW",
-        resource: "patient_triage",
-        resourceId: caseId,
-        metadata: {
-          triageLevel: triageResult.triageLevel,
-          confidence: triageResult.confidence,
-          requiresDoctorReview: triageResult.requiresDoctorReview,
-          uncertaintyFlags: triageResult.uncertaintyFlags,
-          evidenceSources: triageResult.evidenceSources,
-          symptomsHash: hashValue(symptoms),
-          hasBiometrics: Boolean(biometrics),
-        },
-      });
-
-      return res.json({
-        success: true,
-        data: {
-          ...triageResult,
-          biometricContext,
-        },
-        meta: {
-          disclaimer:
-            "Not a medical diagnosis. Tool for decision support only.",
-        },
-      });
-    } catch (error) {
-      return next(error);
     }
   },
 );

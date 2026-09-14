@@ -249,8 +249,23 @@ function hasOnlyGenericConditions(conditions: string[]): boolean {
 }
 
 function enrichWithFallbackOpinion(candidate: TriageResult, request: TriageRequest): TriageResult {
-    if (!hasOnlyGenericConditions(candidate.possibleConditions) && candidate.reasoning.trim().length >= 60) {
-        return candidate;
+    const reasoningIsBrief = candidate.reasoning.trim().length < 60;
+
+    // AH-49 gap report: this used to replace possibleConditions/recommendedAction
+    // whenever EITHER signal fired, so a specific, correct differential (e.g.
+    // "Tension-type headache") got silently discarded and replaced with the
+    // generic fallback ("Acute undifferentiated illness") just because the
+    // model's reasoning text happened to be short — the doctor never saw what
+    // was substituted or why. Brief reasoning on an otherwise-specific result
+    // is a real but separate signal: flag it, don't discard good content for it.
+    if (!hasOnlyGenericConditions(candidate.possibleConditions)) {
+        if (!reasoningIsBrief) {
+            return candidate;
+        }
+        return {
+            ...candidate,
+            uncertaintyFlags: [...new Set([...candidate.uncertaintyFlags, 'BRIEF_MODEL_REASONING'])],
+        };
     }
 
     const fallbackOpinion = deriveFallbackOpinion(request.symptoms);
@@ -300,10 +315,16 @@ min(1, enrichedCandidate.confidence)) : 0;
         combinedFlags.push('NO_ALLOWED_EVIDENCE_SOURCE');
     }
 
-    const requiresDoctorReview = mergedLevel <= 2 || combinedFlags.length > 0 || confidence < 0.7;
-    const actionPrefix = requiresDoctorReview
-        ? 'Doctor review required before patient-facing interpretation.'
-        : 'Proceed with standard doctor review workflow.';
+    // AH-42 gap report: this used to be `mergedLevel <= 2 || combinedFlags.length > 0
+    // || confidence < 0.7` — three values the model itself controls (mergedLevel is
+    // capped by risk.minTriageLevel, but can still equal the model's own claim;
+    // confidence and flags are reported by the model with no independent check).
+    // A prompt injection that gets the model to claim a low-risk level at high
+    // confidence with no flags could set every one of those false. Every AI triage
+    // result requires doctor review before any patient-facing use, unconditionally —
+    // this is not a value the model, or anything derived from it, gets a vote on.
+    const requiresDoctorReview = true;
+    const actionPrefix = 'Doctor review required before patient-facing interpretation.';
 
     return {
         ...enrichedCandidate,

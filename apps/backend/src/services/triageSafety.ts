@@ -18,11 +18,32 @@ function hasAnyPattern(input: string, patterns: RegExp[]): boolean {
     return patterns.some((p) => p.test(input));
 }
 
+// AH-48 gap report: the patterns below are plain substring/regex matches with
+// no negation awareness, so "no numbness, no problems passing urine" matched
+// identically to "numbness" and "problems passing urine" being present. This
+// masks the clause following a negation trigger (up to the next clause
+// boundary) before any red-flag pattern runs against it — a lightweight,
+// NegEx-style approach, not a full parse. It has the same known blind spot
+// every simple negation detector has: a phrase like "not able to move my arm"
+// negates ability, not a symptom, and can be masked along with genuine
+// denials. That tradeoff is accepted here because the alternative — no
+// negation handling at all — is strictly worse (a plain denial escalating a
+// case identically to the real symptom).
+// "not breathing" and "no pulse" are themselves red-flag phrases below (the
+// negation word IS the symptom, not a denial of one) — excluded so this
+// doesn't mask the very phrase it's meant to protect.
+const NEGATION_TRIGGER = /\b(?:no(?!\s+pulse\b)|not(?!\s+breathing\b)|denies|denied|without|negative for|ruled out|absence of)\b[^,.;!?]*/gi;
+
+function stripNegatedSpans(text: string): string {
+    return text.replace(NEGATION_TRIGGER, (match) => ' '.repeat(match.length));
+}
+
 export function assessDeterministicRisk(
     symptoms: string,
     vitals?: TriageVitalsSnapshot | null
 ): DeterministicRiskAssessment {
     const normalizedSymptoms = symptoms.toLowerCase();
+    const negationScrubbedSymptoms = stripNegatedSpans(normalizedSymptoms);
     const hardFlags: string[] = [];
     const cautionFlags: string[] = [];
     let minTriageLevel: 1 | 2 | 3 | 4 | 5 = 5;
@@ -134,25 +155,25 @@ export function assessDeterministicRisk(
     };
 
     // Check Level 1 patterns first (highest priority)
-    if (hasAnyPattern(normalizedSymptoms, level1Patterns)) {
+    if (hasAnyPattern(negationScrubbedSymptoms, level1Patterns)) {
         hardFlags.push('CRITICAL_SYMPTOM_PATTERN');
         minTriageLevel = 1;
     }
 
     // Check SA-specific Level 1 patterns
-    if (hasAnyPattern(normalizedSymptoms, saSpecificPatterns.level1 || [])) {
+    if (hasAnyPattern(negationScrubbedSymptoms, saSpecificPatterns.level1 || [])) {
         hardFlags.push('SA_CRITICAL_CONDITION');
         minTriageLevel = 1;
     }
 
     // Check Level 2 patterns
-    if (minTriageLevel > 2 && hasAnyPattern(normalizedSymptoms, level2Patterns)) {
+    if (minTriageLevel > 2 && hasAnyPattern(negationScrubbedSymptoms, level2Patterns)) {
         cautionFlags.push('HIGH_RISK_SYMPTOM_PATTERN');
         minTriageLevel = 2;
     }
 
     // Check SA-specific Level 2 patterns
-    if (minTriageLevel > 2 && hasAnyPattern(normalizedSymptoms, saSpecificPatterns.level2 || [])) {
+    if (minTriageLevel > 2 && hasAnyPattern(negationScrubbedSymptoms, saSpecificPatterns.level2 || [])) {
         cautionFlags.push('SA_HIGH_RISK_CONDITION');
         minTriageLevel = 2;
     }
