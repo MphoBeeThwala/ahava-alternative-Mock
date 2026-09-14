@@ -1,3 +1,5 @@
+import { scoreTews, tewsColorToSatsLevel, tewsFlagName, type Avpu, type Mobility } from './triageThresholds/tews';
+
 export interface TriageVitalsSnapshot {
     heartRateResting?: number | null;
     oxygenSaturation?: number | null;
@@ -6,6 +8,18 @@ export interface TriageVitalsSnapshot {
     bloodPressureSystolic?: number | null;
     bloodPressureDiastolic?: number | null;
     hrvRmssd?: number | null;
+    // AH-47: SATS TEWS parameters not carried by any existing wearable or
+    // manual-entry field. Optional because nothing in the product collects
+    // them yet — when absent, that TEWS parameter scores as "not assessed"
+    // (contributes 0, flagged TEWS_MISSING_*), not assumed normal.
+    avpu?: Avpu | null;
+    mobility?: Mobility | null;
+    trauma?: boolean | null;
+}
+
+export interface DeterministicRiskPatient {
+    ageYears?: number | null;
+    heightCm?: number | null;
 }
 
 export interface DeterministicRiskAssessment {
@@ -40,7 +54,8 @@ function stripNegatedSpans(text: string): string {
 
 export function assessDeterministicRisk(
     symptoms: string,
-    vitals?: TriageVitalsSnapshot | null
+    vitals?: TriageVitalsSnapshot | null,
+    patient?: DeterministicRiskPatient | null
 ): DeterministicRiskAssessment {
     const normalizedSymptoms = symptoms.toLowerCase();
     const negationScrubbedSymptoms = stripNegatedSpans(normalizedSymptoms);
@@ -54,6 +69,14 @@ export function assessDeterministicRisk(
     // "he is having seizures" or "she collapsed" (vs. "is collapsing") was
     // never escalated. Every countable-noun / verb-tense pattern below now
     // accepts the plural or the other common inflection.
+    //
+    // AH-47 §47.4: this list (plus saSpecificPatterns.level1 below) IS the
+    // SATS "emergency signs" (ABCccD) override — any match here already
+    // forces level 1 unconditionally, ahead of any vital-sign scoring, which
+    // is exactly the override architecture SATS specifies. Added stridor and
+    // severe respiratory distress, named explicitly in the gap report as
+    // signs this list was missing (a TEWS score alone can under-triage a
+    // child with stridor — the override is what catches it instead).
     const level1Patterns = [
         /\bunconscious\b/,
         /\bunresponsive\b/,
@@ -72,6 +95,8 @@ export function assessDeterministicRisk(
         /\bchok(?:ing|ed)\b/,
         /\bcollaps(?:ed|ing)\b/,
         /\bno pulse\b/,
+        /\bstridor\b/,
+        /\bsevere respiratory distress\b/,
     ];
 
     // Level 2 (Emergency) - High-risk conditions requiring urgent care
@@ -178,123 +203,100 @@ export function assessDeterministicRisk(
         minTriageLevel = 2;
     }
 
-    // Vital signs assessment
+    // Vital signs assessment — AH-47/AH-44: replaced the old independent,
+    // adult-only if/elif thresholds with a scored TEWS (the actual SATS
+    // composite score), selected by age/height band. See
+    // triageThresholds/tews.ts and paediatricTews.json — NOT YET
+    // clinician-signed (that file's reviewedBy/reviewedOn are null).
     if (vitals) {
-        const hr = Number(vitals.heartRateResting ?? NaN);
+        const ageYears = patient?.ageYears ?? null;
+        const heightCm = patient?.heightCm ?? null;
+
+        // §47.1: an unknown-age patient is an incomplete assessment, not an
+        // adult — never silently apply the adult chart. Only applies when
+        // there are vitals to score in the first place; a symptom-only
+        // submission with no age isn't misapplying any chart.
+        if (ageYears == null && heightCm == null) {
+            hardFlags.push('AGE_UNKNOWN');
+            if (minTriageLevel > 2) minTriageLevel = 2;
+        } else {
+            const tewsResult = scoreTews(ageYears, heightCm, {
+                respiratoryRate: vitals.respiratoryRate ?? null,
+                heartRate: vitals.heartRateResting ?? null,
+                temperature: vitals.temperature ?? null,
+                systolicBp: vitals.bloodPressureSystolic ?? null,
+                avpu: vitals.avpu ?? null,
+                mobility: vitals.mobility ?? null,
+                trauma: vitals.trauma ?? null,
+            });
+
+            if (!('ageUnknown' in tewsResult)) {
+                const tewsLevel = tewsColorToSatsLevel(tewsResult.color, tewsResult.total);
+                if (tewsLevel < minTriageLevel) minTriageLevel = tewsLevel;
+
+                if (tewsResult.color === 'RED' || tewsResult.color === 'ORANGE') {
+                    hardFlags.push(`TEWS_${tewsResult.color}_${tewsResult.band.toUpperCase()}`);
+                } else if (tewsResult.color === 'YELLOW') {
+                    cautionFlags.push(`TEWS_${tewsResult.color}_${tewsResult.band.toUpperCase()}`);
+                }
+
+                for (const [param, score] of Object.entries(tewsResult.perParameterScore)) {
+                    if (score == null || score === 0) continue;
+                    // Physiological parameters (HR/RR/temp/SBP) score both
+                    // directions of abnormality, so any nonzero score is
+                    // worth flagging. AVPU/mobility/trauma are ordinal with
+                    // one canonical best-possible value each ("alert",
+                    // "normal", no trauma) that can still land on a negative
+                    // score by design (see contributionOf in tews.ts) — that
+                    // specific best value is a reassuring finding, not a
+                    // discriminator, so it's the only categorical case
+                    // excluded here. A non-floor value that happens to still
+                    // be negative (e.g. AVPU "voice") is still flagged: it's
+                    // worse than the best state even though its score isn't
+                    // positive.
+                    const isBestPossibleOrdinal =
+                        (param === 'avpu' && vitals.avpu === 'alert') ||
+                        (param === 'mobility' && vitals.mobility === 'normal') ||
+                        (param === 'trauma' && vitals.trauma === false);
+                    if (isBestPossibleOrdinal) continue;
+                    (Math.abs(score) >= 3 ? hardFlags : cautionFlags).push(tewsFlagName(param, score));
+                }
+                for (const missingParam of tewsResult.missingParameters) {
+                    cautionFlags.push(`TEWS_MISSING_${missingParam.replace(/([A-Z])/g, '_$1').toUpperCase()}`);
+                }
+            }
+        }
+
+        // SpO2 — AH-50 §50.4: NEWS2 Scale 1, absolute only, no baseline or
+        // band dependence. A 42-study review found pulse oximeters
+        // consistently overestimate saturation in darker skin tones, worst
+        // at low readings — the bias runs in the dangerous direction for
+        // this population — but self-reported race is not a valid proxy for
+        // skin colour, so this builds in margin instead of a race-based
+        // correction. A 92–96% reading from a consumer device is treated as
+        // indeterminate, not reassuring: it escalates alongside any
+        // respiratory-rate deviation already flagged by TEWS, rather than
+        // being cleared on its own.
         const spo2 = Number(vitals.oxygenSaturation ?? NaN);
-        const rr = Number(vitals.respiratoryRate ?? NaN);
-        const temp = Number(vitals.temperature ?? NaN);
-        const sys = Number(vitals.bloodPressureSystolic ?? NaN);
-        const dia = Number(vitals.bloodPressureDiastolic ?? NaN);
-        const hrv = Number(vitals.hrvRmssd ?? NaN);
-
-        // Hypoxemia thresholds (SATS-aligned)
         if (!Number.isNaN(spo2)) {
-            if (spo2 < 85) {
-                hardFlags.push('CRITICAL_HYPOXEMIA');
-                minTriageLevel = 1;
-            } else if (spo2 < 90) {
-                hardFlags.push('SEVERE_HYPOXEMIA');
-                minTriageLevel = 1;
-            } else if (spo2 < 94 && minTriageLevel > 2) {
-                cautionFlags.push('LOW_SPO2');
-                minTriageLevel = 2;
-            }
-        }
-
-        // Respiratory rate thresholds
-        if (!Number.isNaN(rr)) {
-            if (rr >= 35) {
-                hardFlags.push('CRITICAL_RESPIRATORY_RATE');
-                minTriageLevel = 1;
-            } else if (rr >= 30) {
-                hardFlags.push('CRITICAL_RESPIRATORY_RATE');
-                minTriageLevel = 1;
-            } else if (rr >= 25 && minTriageLevel > 2) {
-                cautionFlags.push('ELEVATED_RESPIRATORY_RATE');
-                minTriageLevel = 2;
-            } else if (rr >= 24 && minTriageLevel > 2) {
-                cautionFlags.push('ELEVATED_RESPIRATORY_RATE');
-                minTriageLevel = 2;
-            }
-            // Bradypnea
-            if (rr <= 8 && minTriageLevel > 1) {
-                hardFlags.push('CRITICAL_BRADYPNEA');
-                minTriageLevel = 1;
-            } else if (rr <= 10 && minTriageLevel > 2) {
-                cautionFlags.push('LOW_RESPIRATORY_RATE');
-                minTriageLevel = 2;
-            }
-        }
-
-        // Heart rate thresholds (SATS-aligned)
-        if (!Number.isNaN(hr)) {
-            if (hr >= 140 || hr <= 35) {
-                hardFlags.push('CRITICAL_HEART_RATE');
-                minTriageLevel = 1;
-            } else if (hr >= 130 || hr <= 40) {
-                hardFlags.push('CRITICAL_HEART_RATE');
-                minTriageLevel = 1;
-            } else if ((hr >= 120 || hr <= 45) && minTriageLevel > 2) {
-                cautionFlags.push('TACHYCARDIA');
-                minTriageLevel = 2;
-            } else if ((hr >= 110 || hr <= 50) && minTriageLevel > 2) {
-                cautionFlags.push('ABNORMAL_HEART_RATE');
-                minTriageLevel = 2;
-            }
-            // Bradycardia
-            if (hr <= 50 && hr > 40 && minTriageLevel > 3) {
-                cautionFlags.push('BRADYCARDIA');
-                minTriageLevel = 3;
-            }
-        }
-
-        // Temperature thresholds
-        if (!Number.isNaN(temp)) {
-            if (temp >= 41.0 && minTriageLevel > 1) {
-                hardFlags.push('CRITICAL_HYPERPYREXIA');
-                minTriageLevel = 1;
-            } else if (temp >= 39.5 && minTriageLevel > 2) {
-                cautionFlags.push('HIGH_FEVER');
-                minTriageLevel = 2;
-            } else if (temp >= 39.0 && minTriageLevel > 3) {
-                cautionFlags.push('FEVER');
-                minTriageLevel = 3;
-            }
-            // Hypothermia
-            if (temp <= 35.0 && minTriageLevel > 2) {
-                hardFlags.push('HYPOTHERMIA');
-                minTriageLevel = 2;
-            } else if (temp <= 35.5 && minTriageLevel > 3) {
-                cautionFlags.push('LOW_TEMPERATURE');
-                minTriageLevel = 3;
-            }
-        }
-
-        // Blood pressure thresholds (SATS-aligned)
-        if (!Number.isNaN(sys) || !Number.isNaN(dia)) {
-            // Hypertensive crisis
-            if ((!Number.isNaN(sys) && sys >= 220) || (!Number.isNaN(dia) && dia >= 130)) {
-                hardFlags.push('HYPERTENSIVE_CRISIS');
-                minTriageLevel = 1;
-            } else if ((!Number.isNaN(sys) && sys >= 180) || (!Number.isNaN(dia) && dia >= 120)) {
+            if (spo2 <= 91) {
+                hardFlags.push('NEWS2_SPO2_CRITICAL');
+                if (minTriageLevel > 1) minTriageLevel = 1;
+            } else if (spo2 <= 93) {
+                cautionFlags.push('NEWS2_SPO2_LOW');
                 if (minTriageLevel > 2) minTriageLevel = 2;
-                cautionFlags.push('SEVERE_HYPERTENSION');
-            } else if ((!Number.isNaN(sys) && sys >= 160) || (!Number.isNaN(dia) && dia >= 100)) {
-                if (minTriageLevel > 3) minTriageLevel = 3;
-                cautionFlags.push('MODERATE_HYPERTENSION');
-            }
-            // Hypotension
-            if ((!Number.isNaN(sys) && sys <= 80) && minTriageLevel > 2) {
-                hardFlags.push('SEVERE_HYPOTENSION');
-                minTriageLevel = 2;
-            } else if ((!Number.isNaN(sys) && sys <= 90) && minTriageLevel > 3) {
-                cautionFlags.push('LOW_BLOOD_PRESSURE');
-                minTriageLevel = 3;
+            } else if (spo2 <= 96) {
+                cautionFlags.push('SPO2_INDETERMINATE_CONSUMER_DEVICE');
+                const hasRespiratoryDeviation = [...hardFlags, ...cautionFlags].some((f) =>
+                    f.startsWith('TEWS_RESPIRATORY_RATE_SCORE_')
+                );
+                if (hasRespiratoryDeviation && minTriageLevel > 2) minTriageLevel = 2;
             }
         }
 
-        // HRV (Heart Rate Variability) - Low HRV indicates stress/illness
+        // HRV — not a TEWS parameter; kept as a supplementary caution signal
+        // exactly as before (unchanged by AH-47/AH-44/AH-50).
+        const hrv = Number(vitals.hrvRmssd ?? NaN);
         if (!Number.isNaN(hrv)) {
             if (hrv <= 15 && minTriageLevel > 2) {
                 cautionFlags.push('LOW_HRV');

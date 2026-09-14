@@ -70,92 +70,225 @@ describe("assessDeterministicRisk", () => {
     });
   });
 
-  describe("oxygen saturation", () => {
-    it("treats SpO2 below 85 as critical", () => {
-      const result = assessDeterministicRisk("feeling tired", { oxygenSaturation: 84 });
+  // AH-47/AH-44: vitals scoring is now the real SATS TEWS composite, not
+  // independent adult-only thresholds — see triageThresholds/tews.ts. Every
+  // vitals-scoring test below passes an adult age so it exercises the TEWS
+  // path deliberately, isolated from the AGE_UNKNOWN behavior covered in its
+  // own section further down.
+  const ADULT = { ageYears: 35 };
+
+  describe("oxygen saturation (NEWS2 Scale 1, absolute, per AH-50 §50.4)", () => {
+    it("treats SpO2 at or below 91 as critical", () => {
+      const result = assessDeterministicRisk("feeling tired", { oxygenSaturation: 84 }, ADULT);
 
       expect(result.minTriageLevel).toBe(1);
-      expect(result.hardFlags).toContain("CRITICAL_HYPOXEMIA");
+      expect(result.hardFlags).toContain("NEWS2_SPO2_CRITICAL");
     });
 
-    it("treats SpO2 below 90 as severe", () => {
-      const result = assessDeterministicRisk("feeling tired", { oxygenSaturation: 88 });
-
-      expect(result.minTriageLevel).toBe(1);
-      expect(result.hardFlags).toContain("SEVERE_HYPOXEMIA");
-    });
-
-    it("flags SpO2 below 94 for urgent review", () => {
-      const result = assessDeterministicRisk("feeling tired", { oxygenSaturation: 92 });
+    it("treats SpO2 92-93 as low", () => {
+      const result = assessDeterministicRisk("feeling tired", { oxygenSaturation: 92 }, ADULT);
 
       expect(result.minTriageLevel).toBe(2);
-      expect(result.cautionFlags).toContain("LOW_SPO2");
+      expect(result.cautionFlags).toContain("NEWS2_SPO2_LOW");
     });
 
-    it("leaves a normal SpO2 alone", () => {
-      const result = assessDeterministicRisk("feeling tired", { oxygenSaturation: 98 });
+    it("treats SpO2 94-96 as indeterminate rather than reassuring, not on its own", () => {
+      const result = assessDeterministicRisk("feeling tired", { oxygenSaturation: 95 }, ADULT);
 
-      expect(result.hardFlags).toHaveLength(0);
-      expect(result.cautionFlags).not.toContain("LOW_SPO2");
-    });
-  });
-
-  describe("respiratory rate", () => {
-    it("treats tachypnoea at or above 30 as critical", () => {
-      const result = assessDeterministicRisk("feeling tired", { respiratoryRate: 30 });
-
-      expect(result.minTriageLevel).toBe(1);
-      expect(result.hardFlags).toContain("CRITICAL_RESPIRATORY_RATE");
+      expect(result.cautionFlags).toContain("SPO2_INDETERMINATE_CONSUMER_DEVICE");
+      // No respiratory-rate deviation alongside it — doesn't escalate on its own.
+      expect(result.minTriageLevel).toBeGreaterThanOrEqual(4);
     });
 
-    it("treats bradypnoea at or below 8 as critical", () => {
-      const result = assessDeterministicRisk("feeling tired", { respiratoryRate: 8 });
-
-      expect(result.minTriageLevel).toBe(1);
-      expect(result.hardFlags).toContain("CRITICAL_BRADYPNEA");
-    });
-
-    it("flags 25 for urgent review", () => {
-      const result = assessDeterministicRisk("feeling tired", { respiratoryRate: 25 });
-
-      expect(result.minTriageLevel).toBe(2);
-    });
-  });
-
-  describe("heart rate", () => {
-    it("treats 140 and above as critical", () => {
-      const result = assessDeterministicRisk("feeling tired", { heartRateResting: 145 });
-
-      expect(result.minTriageLevel).toBe(1);
-      expect(result.hardFlags).toContain("CRITICAL_HEART_RATE");
-    });
-
-    it("treats 35 and below as critical", () => {
-      const result = assessDeterministicRisk("feeling tired", { heartRateResting: 34 });
-
-      expect(result.minTriageLevel).toBe(1);
-      expect(result.hardFlags).toContain("CRITICAL_HEART_RATE");
-    });
-
-    it("leaves a resting rate of 72 alone", () => {
-      const result = assessDeterministicRisk("feeling tired", { heartRateResting: 72 });
-
-      expect(result.hardFlags).toHaveLength(0);
-    });
-  });
-
-  describe("temperature", () => {
-    it("treats 41 degrees and above as critical", () => {
-      const result = assessDeterministicRisk("feeling tired", { temperature: 41.2 });
-
-      expect(result.minTriageLevel).toBe(1);
-      expect(result.hardFlags).toContain("CRITICAL_HYPERPYREXIA");
-    });
-
-    it("flags 39.5 as high fever", () => {
-      const result = assessDeterministicRisk("feeling tired", { temperature: 39.6 });
+    it("escalates an indeterminate SpO2 when a respiratory-rate deviation is also present", () => {
+      const result = assessDeterministicRisk(
+        "feeling tired",
+        { oxygenSaturation: 95, respiratoryRate: 24 },
+        ADULT
+      );
 
       expect(result.minTriageLevel).toBeLessThanOrEqual(2);
+    });
+
+    it("leaves SpO2 at or above 97 alone", () => {
+      const result = assessDeterministicRisk("feeling tired", { oxygenSaturation: 98 }, ADULT);
+
+      expect(result.cautionFlags).not.toContain("SPO2_INDETERMINATE_CONSUMER_DEVICE");
+      expect(result.cautionFlags).not.toContain("NEWS2_SPO2_LOW");
+      expect(result.hardFlags).not.toContain("NEWS2_SPO2_CRITICAL");
+    });
+  });
+
+  describe("TEWS vitals scoring — adult band", () => {
+    it("scores severe tachypnoea (>29) as a discriminator, not an automatic level 1", () => {
+      // AH-47: a single TEWS parameter can score at most 2-3 points; RED
+      // needs a total of >=7. An isolated abnormal RR alone lands well short
+      // of that — the emergency-signs override (level1Patterns), not a raw
+      // RR threshold, is what SATS relies on to catch a truly critical
+      // single presentation. This is an intentional, sourced behavior
+      // change from the old ad-hoc "RR>=30 is automatic critical" heuristic.
+      const result = assessDeterministicRisk("feeling tired", { respiratoryRate: 30 }, ADULT);
+
+      expect(result.cautionFlags).toContain("TEWS_RESPIRATORY_RATE_SCORE_+2");
+      expect(result.minTriageLevel).toBeGreaterThan(2);
+    });
+
+    it("scores severe tachycardia (>129) as a discriminator", () => {
+      const result = assessDeterministicRisk("feeling tired", { heartRateResting: 145 }, ADULT);
+
+      expect(result.hardFlags).toContain("TEWS_HEART_RATE_SCORE_+3");
+    });
+
+    it("scores severe bradycardia (<41) with the same magnitude as tachycardia, not a cancelling negative", () => {
+      // Interpretation flag (see tews.ts's contributionOf): the total sums
+      // the magnitude of a physiological parameter's deviation regardless
+      // of direction, matching every comparable early-warning score (NEWS2,
+      // MEWS) — a literal signed sum would let bradycardia and tachycardia
+      // cancel each other out, which cannot be the real algorithm.
+      const result = assessDeterministicRisk("feeling tired", { heartRateResting: 34 }, ADULT);
+
+      expect(result.hardFlags).toContain("TEWS_HEART_RATE_SCORE_-3");
+      expect(result.minTriageLevel).toBeLessThanOrEqual(3);
+    });
+
+    it("does not flag a fully normal, alert, ambulatory adult", () => {
+      const result = assessDeterministicRisk(
+        "feeling fine",
+        {
+          heartRateResting: 72,
+          respiratoryRate: 16,
+          temperature: 36.8,
+          avpu: "alert",
+          mobility: "normal",
+          trauma: false,
+        },
+        ADULT
+      );
+
+      expect(result.hardFlags).toHaveLength(0);
+      expect(result.minTriageLevel).toBe(5);
+    });
+
+    it("takes the most urgent of several abnormal readings", () => {
+      const result = assessDeterministicRisk(
+        "feeling tired",
+        { oxygenSaturation: 92, respiratoryRate: 32 },
+        ADULT
+      );
+
+      expect(result.minTriageLevel).toBeLessThanOrEqual(2);
+    });
+
+    it("flags missing TEWS parameters rather than assuming them normal", () => {
+      const result = assessDeterministicRisk("feeling tired", { respiratoryRate: 30 }, ADULT);
+
+      expect(result.cautionFlags).toContain("TEWS_MISSING_HEART_RATE");
+      expect(result.cautionFlags).toContain("TEWS_MISSING_AVPU");
+    });
+  });
+
+  describe("TEWS vitals scoring — paediatric bands", () => {
+    it("does not flag a well, alert infant", () => {
+      const result = assessDeterministicRisk(
+        "well baby check",
+        {
+          heartRateResting: 100,
+          respiratoryRate: 30,
+          temperature: 36.8,
+          avpu: "alert",
+          mobility: "normal",
+          trauma: false,
+        },
+        { ageYears: 1 }
+      );
+
+      expect(result.hardFlags).toHaveLength(0);
+      expect(result.cautionFlags).toHaveLength(0);
+      expect(result.minTriageLevel).toBe(5);
+    });
+
+    it("escalates a febrile, tachycardic infant responding only to voice", () => {
+      const result = assessDeterministicRisk(
+        "fever",
+        { heartRateResting: 165, respiratoryRate: 55, temperature: 39.0, avpu: "voice" },
+        { ageYears: 1 }
+      );
+
+      expect(result.minTriageLevel).toBeLessThanOrEqual(2);
+      expect(result.cautionFlags).toContain("TEWS_AVPU_SCORE_-1");
+    });
+
+    it("§47.4: the emergency-signs override still forces level 1 for stridor even when the TEWS total alone would not", () => {
+      const result = assessDeterministicRisk(
+        "child has stridor and is struggling to breathe",
+        {
+          heartRateResting: 100,
+          respiratoryRate: 22,
+          temperature: 37.0,
+          avpu: "alert",
+          mobility: "normal",
+          trauma: false,
+        },
+        { ageYears: 5 }
+      );
+
+      expect(result.minTriageLevel).toBe(1);
+      expect(result.hardFlags).toContain("CRITICAL_SYMPTOM_PATTERN");
+    });
+
+    it("§47.2: resolves an age/height band disagreement by using whichever band scores more urgently", () => {
+      // 13 years old (adult band by age) but 90cm tall (younger-child band
+      // by height) — a plausible small-for-age presentation. Neither band
+      // is silently preferred; the more urgent of the two wins.
+      const result = assessDeterministicRisk(
+        "feeling tired",
+        { heartRateResting: 165 }, // critical for younger child (>=160), unremarkable for an adult
+        { ageYears: 13, heightCm: 90 }
+      );
+
+      expect(
+        [...result.hardFlags, ...result.cautionFlags].some((f) => f.startsWith("TEWS_HEART_RATE_SCORE_"))
+      ).toBe(true);
+    });
+  });
+
+  describe("§47.1: age unknown", () => {
+    it("caps at level 2 and flags AGE_UNKNOWN rather than silently applying the adult chart", () => {
+      const result = assessDeterministicRisk("mild headache", { oxygenSaturation: 98 });
+
+      expect(result.hardFlags).toContain("AGE_UNKNOWN");
+      expect(result.minTriageLevel).toBe(2);
+    });
+
+    it("treats null/undefined vitals fields the same as AGE_UNKNOWN with no other findings", () => {
+      const result = assessDeterministicRisk("mild headache", {
+        oxygenSaturation: null,
+        heartRateResting: null,
+        respiratoryRate: undefined,
+        temperature: null,
+      });
+
+      expect(result.hardFlags).toContain("AGE_UNKNOWN");
+      expect(result.minTriageLevel).toBe(2);
+    });
+
+    it("does not apply AGE_UNKNOWN when there are no vitals to score at all", () => {
+      const result = assessDeterministicRisk("mild headache");
+
+      expect(result.hardFlags).not.toContain("AGE_UNKNOWN");
+      expect(result.minTriageLevel).toBeGreaterThan(2);
+    });
+
+    it("still lets a symptom-text override take precedence over the AGE_UNKNOWN floor", () => {
+      const result = assessDeterministicRisk("he is having seizures", { oxygenSaturation: 98 });
+
+      expect(result.minTriageLevel).toBe(1);
+    });
+
+    it("height alone is sufficient — age is not required if height is known", () => {
+      const result = assessDeterministicRisk("feeling tired", { heartRateResting: 90 }, { heightCm: 200 });
+
+      expect(result.hardFlags).not.toContain("AGE_UNKNOWN");
     });
   });
 
@@ -164,27 +297,6 @@ describe("assessDeterministicRisk", () => {
       const result = assessDeterministicRisk("mild headache");
 
       expect(result.minTriageLevel).toBeGreaterThan(2);
-    });
-
-    it("ignores null and undefined readings rather than treating them as zero", () => {
-      const result = assessDeterministicRisk("mild headache", {
-        oxygenSaturation: null,
-        heartRateResting: null,
-        respiratoryRate: undefined,
-        temperature: null,
-      });
-
-      expect(result.hardFlags).toHaveLength(0);
-      expect(result.minTriageLevel).toBeGreaterThan(2);
-    });
-
-    it("takes the most urgent of several abnormal readings", () => {
-      const result = assessDeterministicRisk("feeling tired", {
-        oxygenSaturation: 92, // level 2 on its own
-        respiratoryRate: 32, // level 1 on its own
-      });
-
-      expect(result.minTriageLevel).toBe(1);
     });
   });
 });

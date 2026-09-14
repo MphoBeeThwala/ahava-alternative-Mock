@@ -1,0 +1,140 @@
+{
+  "version": "1.0.0-unsigned",
+  "reviewedBy": null,
+  "reviewedOn": null,
+  "sourceCitation": "Emergency Medicine Society of South Africa. The South African Triage Scale — Training Manual 2012. Twomey M, et al. Vital signs for children at triage: a multicentre validation of the revised South African Triage Scale (SATS) for children. S Afr Med J 2013.",
+  "notes": "AH-47 gap report. Transcribed from a clinician-facing specification artifact (see docs/ENGINEERING_PLAN.md §11 follow-up), not yet reviewed against the primary SATS manual by a named, registered clinician. Do not treat as clinically authorized until reviewedBy/reviewedOn/version are filled in by that review. Numeric ranges use gte/lte/gt/lt (inclusive/exclusive) matching the source table's own symbols. Categorical parameters (avpu, mobility, trauma) score 0 when the value is unknown/not supplied — treated as 'not scored', not assumed normal. IMPORTANT INTERPRETATION FLAG for the reviewing clinician: the total score sums the ABSOLUTE VALUE of each numeric physiological parameter's matched score (heartRate/respiratoryRate/temperature/systolicBp), not the signed value — a literal signed sum would let severe bradycardia and severe tachycardia cancel each other out, which cannot be the real algorithm. AVPU/mobility/trauma keep their signed score as-is (ordinal, one best state and one worst, not bidirectional). Please confirm both of these against the primary manual — see tews.ts's contributionOf() for the exact logic.",
+  "colorBands": [
+    { "color": "RED", "gte": 7 },
+    { "color": "ORANGE", "gte": 5, "lte": 6 },
+    { "color": "YELLOW", "gte": 3, "lte": 4 },
+    { "color": "GREEN", "lte": 2 }
+  ],
+  "bands": {
+    "youngerChild": {
+      "label": "Younger child — under 3 years, or under 95 cm",
+      "parameters": {
+        "respiratoryRate": [
+          { "score": -3, "lt": 20 },
+          { "score": -1, "gte": 20, "lte": 25 },
+          { "score": 0, "gte": 26, "lte": 39 },
+          { "score": 1, "gte": 40, "lte": 49 },
+          { "score": 2, "gte": 50 }
+        ],
+        "heartRate": [
+          { "score": -3, "lt": 70 },
+          { "score": -1, "gte": 70, "lte": 79 },
+          { "score": 0, "gte": 80, "lte": 130 },
+          { "score": 1, "gte": 131, "lte": 159 },
+          { "score": 2, "gte": 160 }
+        ],
+        "temperature": [
+          { "score": -3, "lt": 35 },
+          { "score": 0, "gte": 35, "lte": 38.4 },
+          { "score": 2, "gt": 38.4 }
+        ],
+        "mobility": [
+          { "score": 0, "values": ["normal"] },
+          { "score": 2, "values": ["notMovingNormally"] }
+        ],
+        "avpu": [
+          { "score": -3, "values": ["alert"] },
+          { "score": -1, "values": ["voice"] },
+          { "score": 1, "values": ["pain"] },
+          { "score": 3, "values": ["unresponsive"] }
+        ],
+        "trauma": [
+          { "score": 0, "values": [false] },
+          { "score": 2, "values": [true] }
+        ]
+      }
+    },
+    "olderChild": {
+      "label": "Older child — 3 to 12 years, or 95–150 cm",
+      "parameters": {
+        "respiratoryRate": [
+          { "score": -3, "lt": 15 },
+          { "score": -1, "gte": 15, "lte": 16 },
+          { "score": 0, "gte": 17, "lte": 21 },
+          { "score": 1, "gte": 22, "lte": 26 },
+          { "score": 2, "gte": 27 }
+        ],
+        "heartRate": [
+          { "score": -3, "lt": 60 },
+          { "score": -1, "gte": 60, "lte": 79 },
+          { "score": 0, "gte": 80, "lte": 99 },
+          { "score": 1, "gte": 100, "lte": 129 },
+          { "score": 2, "gte": 130 }
+        ],
+        "temperature": [
+          { "score": -3, "lt": 35 },
+          { "score": 0, "gte": 35, "lte": 38.4 },
+          { "score": 2, "gt": 38.4 }
+        ],
+        "mobility": [
+          { "score": 0, "values": ["normal"] },
+          { "score": 2, "values": ["notMovingNormally"] }
+        ],
+        "avpu": [
+          { "score": -3, "values": ["confused"] },
+          { "score": -2, "values": ["alert"] },
+          { "score": 0, "values": ["voice"] },
+          { "score": 2, "values": ["pain"] },
+          { "score": 3, "values": ["unresponsive"] }
+        ],
+        "trauma": [
+          { "score": 0, "values": [false] },
+          { "score": 2, "values": [true] }
+        ]
+      }
+    },
+    "adult": {
+      "label": "Adult — over 12 years, or over 150 cm",
+      "parameters": {
+        "respiratoryRate": [
+          { "score": -3, "lt": 9 },
+          { "score": -1, "gte": 9, "lte": 14 },
+          { "score": 0, "gte": 15, "lte": 20 },
+          { "score": 1, "gte": 21, "lte": 29 },
+          { "score": 2, "gt": 29 }
+        ],
+        "heartRate": [
+          { "score": -3, "lt": 41 },
+          { "score": -1, "gte": 41, "lte": 50 },
+          { "score": 0, "gte": 51, "lte": 100 },
+          { "score": 1, "gte": 101, "lte": 110 },
+          { "score": 2, "gte": 111, "lte": 129 },
+          { "score": 3, "gt": 129 }
+        ],
+        "systolicBp": [
+          { "score": -3, "lt": 71 },
+          { "score": -1, "gte": 71, "lte": 80 },
+          { "score": 0, "gte": 81, "lte": 100 },
+          { "score": 1, "gte": 101, "lte": 199 },
+          { "score": 3, "gt": 199 }
+        ],
+        "temperature": [
+          { "score": -3, "lt": 35 },
+          { "score": 0, "gte": 35, "lte": 38.4 },
+          { "score": 2, "gt": 38.4 }
+        ],
+        "mobility": [
+          { "score": -1, "values": ["normal"] },
+          { "score": 1, "values": ["withHelp"] },
+          { "score": 2, "values": ["immobile"] }
+        ],
+        "avpu": [
+          { "score": -3, "values": ["confused"] },
+          { "score": -2, "values": ["alert"] },
+          { "score": 0, "values": ["voice"] },
+          { "score": 2, "values": ["pain"] },
+          { "score": 3, "values": ["unresponsive"] }
+        ],
+        "trauma": [
+          { "score": 0, "values": [false] },
+          { "score": 2, "values": [true] }
+        ]
+      }
+    }
+  }
+}

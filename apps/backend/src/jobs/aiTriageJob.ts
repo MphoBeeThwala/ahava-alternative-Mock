@@ -17,7 +17,7 @@ import { broadcastToUsers } from "../services/websocket";
 import prisma from "../lib/prisma";
 import { hashValue, writeClinicalAudit } from "../services/clinicalAudit";
 import { parseTriageAttachmentManifest } from "../services/triageAttachments";
-import type { TriageVitalsSnapshot } from "../services/triageSafety";
+import type { TriageVitalsSnapshot, DeterministicRiskPatient } from "../services/triageSafety";
 
 const SYMPTOM_PREVIEW_LENGTH = 280;
 
@@ -27,10 +27,11 @@ export interface AiTriageJobData {
   symptoms: string;
   patientContext?: string;
   vitalsSnapshot?: TriageVitalsSnapshot;
+  patient?: DeterministicRiskPatient;
 }
 
 export async function processAiTriageJob(data: AiTriageJobData): Promise<void> {
-  const { caseId, patientId, symptoms, patientContext, vitalsSnapshot } = data;
+  const { caseId, patientId, symptoms, patientContext, vitalsSnapshot, patient } = data;
 
   const triageCase = await prisma.triageCase.findUnique({ where: { id: caseId } });
   if (!triageCase) {
@@ -54,6 +55,7 @@ export async function processAiTriageJob(data: AiTriageJobData): Promise<void> {
     patientId,
     caseId,
     vitalsSnapshot,
+    patient,
   });
 
   const now = new Date();

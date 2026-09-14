@@ -2,7 +2,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import dotenv from 'dotenv';
 import crypto from 'crypto';
 import { combineEvidence, hasSufficientEvidence, getEvidenceSummary } from './evidenceProvider';
-import { assessDeterministicRisk, TriageVitalsSnapshot } from './triageSafety';
+import { assessDeterministicRisk, TriageVitalsSnapshot, DeterministicRiskPatient } from './triageSafety';
 import { withResilientHttp } from './resilientHttp';
 
 dotenv.config();
@@ -31,6 +31,7 @@ export interface TriageRequest {
     imageBase64?: string; // Optional image of the condition
     patientContext?: string; // Patient vitals, baselines, active alerts (injected by triage route)
     vitalsSnapshot?: TriageVitalsSnapshot; // Structured vitals for deterministic safety checks
+    patient?: DeterministicRiskPatient; // AH-47: age/height, so assessDeterministicRisk never silently applies the adult chart
     patientId?: string; // For audit and explicit case isolation instruction
     caseId?: string; // Generated per triage request to prevent cross-case blending
 }
@@ -295,7 +296,7 @@ function conservativeFallback(reason: string, symptoms: string): TriageResult {
 
 function mergeGuardrails(candidate: TriageResult, request: TriageRequest): TriageResult {
     const enrichedCandidate = enrichWithFallbackOpinion(candidate, request);
-    const risk = assessDeterministicRisk(request.symptoms, request.vitalsSnapshot);
+    const risk = assessDeterministicRisk(request.symptoms, request.vitalsSnapshot, request.patient);
     const confidence = Number.
 isFinite(enrichedCandidate.confidence) ? Math.max(0, Math.
 min(1, enrichedCandidate.confidence)) : 0;

@@ -361,6 +361,12 @@ router.post(
             hrvRmssd?: number | null;
           }
         | undefined;
+      // AH-47: age is the primary source for TEWS band selection; height (from
+      // the most recent biometric reading, when present) is only a fallback
+      // when age genuinely isn't on file — never silently applied over a
+      // known age.
+      let patientAgeYears: number | undefined;
+      let patientHeightCm: number | undefined;
       try {
         const [readings, alerts, baseline, userInfo] = await Promise.all([
           prisma.biometricReading.findMany({
@@ -375,6 +381,7 @@ router.post(
               respiratoryRate: true,
               temperature: true,
               hrvRmssd: true,
+              height: true,
               createdAt: true,
             },
           }),
@@ -408,6 +415,7 @@ router.post(
             (Date.now() - new Date(userInfo.dateOfBirth).getTime()) /
               (365.25 * 24 * 60 * 60 * 1000),
           );
+          patientAgeYears = age;
           lines.push(
             `Patient: ${age} years old, ${userInfo.gender ?? "gender unknown"}`,
           );
@@ -415,6 +423,9 @@ router.post(
 
         if (readings.length > 0) {
           const latest = readings[0];
+          if (patientHeightCm === undefined && latest.height != null) {
+            patientHeightCm = latest.height;
+          }
           latestVitalsSnapshot = {
             heartRateResting: latest.heartRate ?? null,
             oxygenSaturation: latest.oxygenSaturation ?? null,
@@ -494,7 +505,10 @@ router.post(
       // be *at least* this urgent (mergeGuardrails takes the min of the two
       // in services/aiTriage.ts), this interim level is never optimistic
       // relative to where the case will land once the AI job completes.
-      const risk = assessDeterministicRisk(symptoms, latestVitalsSnapshot);
+      const risk = assessDeterministicRisk(symptoms, latestVitalsSnapshot, {
+        ageYears: patientAgeYears,
+        heightCm: patientHeightCm,
+      });
       const now = new Date();
       const interimSlaDeadline = calculateSlaDeadline(risk.minTriageLevel, now);
       const interimFeeCents = getDoctorFee(risk.minTriageLevel);
@@ -545,6 +559,7 @@ router.post(
         symptoms,
         patientContext,
         vitalsSnapshot: latestVitalsSnapshot,
+        patient: { ageYears: patientAgeYears, heightCm: patientHeightCm },
       };
       const enqueued = await addAiTriageJob(jobData);
       if (!enqueued) {
