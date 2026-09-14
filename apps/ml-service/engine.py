@@ -665,6 +665,10 @@ class EarlyWarningEngine:
     # African cohorts). §45.4: refuses to score outside the chart's
     # validated 40-74 age range, and refuses on any missing required input
     # rather than imputing a default.
+    # Verified 2026-09-14 directly against the primary source: SA NDoH
+    # Appendix VII's own BMI-based risk chart rows run 40-44 through 70-74
+    # in 5-year bands, confirming this range against a real government
+    # document rather than the original (unverified) specification alone.
     WHO_2019_MIN_AGE = 40
     WHO_2019_MAX_AGE = 74
 
@@ -688,10 +692,17 @@ class EarlyWarningEngine:
 
         # The WHO 2019 non-laboratory CVD risk chart for Southern
         # sub-Saharan Africa (WHO CVD Risk Chart Working Group, Lancet Glob
-        # Health 2019) is a published table of age x SBP x BMI x sex x
-        # smoking-status cells, each mapping to one of five risk categories.
-        # The exact cell values were not supplied with the specification
-        # this fix was built from, and are not reproduced here from memory —
+        # Health 2019), as adopted by SA NDoH Appendix VII (verified
+        # directly against health.gov.za, 2026-09-14 — the actual mandated
+        # chart), is a published COLOUR GRID of age x SBP x BMI x sex x
+        # smoking-status cells, each mapping to one of four risk categories
+        # (<5% / 5-10% / 10-20% / >20% — SA's own four-band collapse of
+        # WHO's five-band default). It is an image, not a data table — the
+        # primary-source PDF itself confirms this, which is exactly why an
+        # automated extraction attempt (a parallel effort, see
+        # docs/ENGINEERING_PLAN.md §12) produced impossible, non-monotonic
+        # values on real cells and had to be abandoned rather than shipped.
+        # The exact cell values are not reproduced here from memory —
         # doing so would be exactly the kind of unsourced clinical number
         # this whole engagement exists to remove. Every input this function
         # validates above is real and wired end-to-end; only the final
@@ -735,7 +746,10 @@ class EarlyWarningEngine:
         # AH-45 §45.1: no more arithmetic trajectory projection — alert is
         # driven only by the categorical result (or a future discordance
         # flag), never a blended/averaged number.
-        high_risk = cvd_risk.computable and cvd_risk.risk_category in ("20-<30%", ">=30%")
+        # Verified 2026-09-14 against SA NDoH Appendix VII (health.gov.za):
+        # the mandated chart's top band is ">20%", not WHO's default
+        # 20-<30%/>=30% split — see CvdRiskCategory in models.py.
+        high_risk = cvd_risk.computable and cvd_risk.risk_category == ">20%"
         alert_triggered = high_risk or cvd_risk.discordance_flag
         message = None
         if high_risk:

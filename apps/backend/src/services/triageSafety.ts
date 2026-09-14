@@ -1,4 +1,18 @@
-import { scoreTews, tewsColorToSatsLevel, tewsFlagName, type Avpu, type Mobility } from './triageThresholds/tews';
+import { scoreTews, tewsColorToSatsLevel, tewsFlagName, type Avpu, type Mobility, type TewsBandName } from './triageThresholds/tews';
+
+// Gap-report follow-up (docs/ENGINEERING_PLAN.md §12): a clinician review of
+// the paediatric TEWS charts is a blocker on routing live paediatric
+// patients through them, not a parallel-track item like the rest of the
+// threshold work — unlike the adult chart, the two child charts have not
+// been through the double-entry transcription/sign-off process at all.
+// Defaults to false (unsigned) in every environment unless explicitly set,
+// so a missing env var fails safe rather than open. Read per-call, not
+// captured at module load, so it can't go stale across a long-running
+// process if this is ever flipped without a restart.
+function isPaediatricTewsSignedOff(): boolean {
+    return process.env.PAEDIATRIC_TEWS_SIGNED_OFF === 'true';
+}
+const PAEDIATRIC_TEWS_BANDS: ReadonlySet<TewsBandName> = new Set(['youngerChild', 'olderChild']);
 
 export interface TriageVitalsSnapshot {
     heartRateResting?: number | null;
@@ -230,7 +244,16 @@ export function assessDeterministicRisk(
                 trauma: vitals.trauma ?? null,
             });
 
-            if (!('ageUnknown' in tewsResult)) {
+            if (!('ageUnknown' in tewsResult) && PAEDIATRIC_TEWS_BANDS.has(tewsResult.band) && !isPaediatricTewsSignedOff()) {
+                // A child's vitals were assessed, but the paediatric charts
+                // aren't cleared to route live patients yet. This is NOT the
+                // AGE_UNKNOWN case (we know this is a child) and must not
+                // fall back to the adult chart (that's the exact bug AH-47
+                // fixed) — cap at the same conservative floor as an unknown
+                // age instead, and say plainly why.
+                hardFlags.push('PAEDIATRIC_TEWS_PENDING_CLINICIAN_SIGNOFF');
+                if (minTriageLevel > 2) minTriageLevel = 2;
+            } else if (!('ageUnknown' in tewsResult)) {
                 const tewsLevel = tewsColorToSatsLevel(tewsResult.color, tewsResult.total);
                 if (tewsLevel < minTriageLevel) minTriageLevel = tewsLevel;
 

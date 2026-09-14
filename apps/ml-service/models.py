@@ -68,7 +68,13 @@ class ReadinessScore(BaseModel):
 # the two could never disagree. Replaced with a single categorical WHO 2019
 # non-laboratory chart result (age/sex/smoking/SBP/BMI, Southern
 # sub-Saharan Africa region) — a real number this codebase never had.
-CvdRiskCategory = Literal["<5%", "5-<10%", "10-<20%", "20-<30%", ">=30%"]
+#
+# Four bands, not WHO's standard five — verified 2026-09-14 against the
+# actual SA National DoH Appendix VII (Cardiovascular Risk Assessment,
+# 2020-4_Version 1.0, 25 October 2024, health.gov.za): the chart SA
+# actually mandates collapses WHO's 20-<30%/>=30% split into a single
+# ">20%" band. Matching national policy's bands, not WHO's own default.
+CvdRiskCategory = Literal["<5%", "5-10%", "10-20%", ">20%"]
 
 class CvdRiskAssessment(BaseModel):
     instrument: str = "WHO_2019_NON_LAB_SOUTHERN_SUB_SAHARAN_AFRICA"

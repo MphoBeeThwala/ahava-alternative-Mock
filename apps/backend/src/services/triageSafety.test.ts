@@ -188,6 +188,20 @@ describe("assessDeterministicRisk", () => {
   });
 
   describe("TEWS vitals scoring — paediatric bands", () => {
+    // These tests exercise the paediatric TEWS math itself, which — per the
+    // §12 follow-up (docs/ENGINEERING_PLAN.md) — is gated off by default in
+    // production pending clinician sign-off. Enable it here so these tests
+    // verify the real scoring logic; the gate's own default-off behavior is
+    // covered separately in "paediatric TEWS sign-off gate" below.
+    const originalEnv = process.env.PAEDIATRIC_TEWS_SIGNED_OFF;
+    beforeEach(() => {
+      process.env.PAEDIATRIC_TEWS_SIGNED_OFF = "true";
+    });
+    afterEach(() => {
+      if (originalEnv === undefined) delete process.env.PAEDIATRIC_TEWS_SIGNED_OFF;
+      else process.env.PAEDIATRIC_TEWS_SIGNED_OFF = originalEnv;
+    });
+
     it("does not flag a well, alert infant", () => {
       const result = assessDeterministicRisk(
         "well baby check",
@@ -249,6 +263,50 @@ describe("assessDeterministicRisk", () => {
       expect(
         [...result.hardFlags, ...result.cautionFlags].some((f) => f.startsWith("TEWS_HEART_RATE_SCORE_"))
       ).toBe(true);
+    });
+  });
+
+  describe("paediatric TEWS sign-off gate (docs/ENGINEERING_PLAN.md §12)", () => {
+    const CHILD_VITALS = {
+      heartRateResting: 165,
+      respiratoryRate: 55,
+      temperature: 39.0,
+      avpu: "voice" as const,
+    };
+    afterEach(() => {
+      delete process.env.PAEDIATRIC_TEWS_SIGNED_OFF;
+    });
+
+    it("defaults OFF: caps at level 2 with a clear flag instead of applying paediatric TEWS", () => {
+      delete process.env.PAEDIATRIC_TEWS_SIGNED_OFF;
+      const result = assessDeterministicRisk("fever", CHILD_VITALS, { ageYears: 1 });
+
+      expect(result.hardFlags).toContain("PAEDIATRIC_TEWS_PENDING_CLINICIAN_SIGNOFF");
+      expect(result.minTriageLevel).toBe(2);
+      expect(result.hardFlags.some((f) => f.startsWith("TEWS_"))).toBe(false);
+    });
+
+    it("the emergency-signs override still fires regardless of the gate", () => {
+      delete process.env.PAEDIATRIC_TEWS_SIGNED_OFF;
+      const result = assessDeterministicRisk("child has stridor", CHILD_VITALS, { ageYears: 1 });
+
+      expect(result.minTriageLevel).toBe(1);
+      expect(result.hardFlags).toContain("CRITICAL_SYMPTOM_PATTERN");
+    });
+
+    it("adult scoring is unaffected by the gate", () => {
+      delete process.env.PAEDIATRIC_TEWS_SIGNED_OFF;
+      const result = assessDeterministicRisk("feeling tired", { heartRateResting: 145 }, { ageYears: 35 });
+
+      expect(result.hardFlags).toContain("TEWS_HEART_RATE_SCORE_+3");
+    });
+
+    it("enabling the flag restores real TEWS scoring for children", () => {
+      process.env.PAEDIATRIC_TEWS_SIGNED_OFF = "true";
+      const result = assessDeterministicRisk("fever", CHILD_VITALS, { ageYears: 1 });
+
+      expect(result.hardFlags).not.toContain("PAEDIATRIC_TEWS_PENDING_CLINICIAN_SIGNOFF");
+      expect(result.hardFlags.some((f) => f.startsWith("TEWS_"))).toBe(true);
     });
   });
 

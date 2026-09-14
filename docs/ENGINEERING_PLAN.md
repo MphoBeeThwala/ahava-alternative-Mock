@@ -1073,3 +1073,71 @@ the emergency-signs override, the age/height band rule, the WHO 2019
 instrument choice, the SpO2 indeterminate band, and the σ floors +
 persistence rule) before any of this reaches a patient in the sense the
 specification means "reaches."
+
+## 13. Follow-up from a parallel transcription effort, 2026-09-14
+
+A separate effort (branch `test/clinical-scenario-harness`, commit `e14fe66`,
+not yet merged or reachable from this branch — its report is what prompted
+this section) attempted the AH-45/47/50 threshold transcription work
+directly and reported back. Two of its claims were independently verified
+here before acting on them:
+
+- **SA National DoH policy, not just WHO default, governs AH-45.**
+  Fetched and read the actual primary source: *SA National Department of
+  Health, Appendix VII — Cardiovascular Risk Assessment, 2020-4_Version
+  1.0, 25 October 2024* (health.gov.za). Confirmed directly: the mandated
+  non-lab tool is exactly the WHO 2019 non-laboratory Southern
+  Sub-Saharan Africa chart already implemented here, but SA's own chart
+  collapses WHO's five risk bands into **four**: `<5%` / `5-10%` /
+  `10-20%` / `>20%`. Updated `CvdRiskCategory` (`models.py`) and the
+  `high_risk` check in `_fusion_from_cvd_risk` (`engine.py`) to match —
+  they previously carried WHO's default five-band split
+  (`20-<30%`/`>=30%`), which is not the chart South Africa actually uses.
+  Also independently confirmed the 40–74 age range against the real
+  chart's own row labels, and confirmed the chart genuinly is a
+  colour-coded image in the primary source (not a data table) —
+  corroborating the parallel effort's account of why an automated
+  extraction attempt produced non-monotonic (impossible) values on real
+  cells and had to be abandoned rather than shipped.
+- **The full lab-based Framingham table in that same NDoH document is
+  now known-real and complete** (age/cholesterol/HDL/smoker/diabetic/
+  systolic-BP-by-treatment-status points, and the points-to-10-year-risk-%
+  table) — read directly from the PDF, matches the parallel effort's
+  transcription exactly on every number checked. **Not yet implemented**
+  here — this is genuinely new capability (a laboratory-based upgrade
+  path needs HDL and BP-treatment-status fields this codebase doesn't
+  collect yet), not a correction to something already shipped, so it
+  wasn't built without being asked for.
+- **The git bundle the parallel effort's output was handed over in did
+  not transfer usably** — verified empirically (`git bundle verify`
+  reported the header as valid, since it only checks prerequisites, but
+  `git fetch` from the same file failed with "early EOF" / "index-pack
+  died": the actual pack data was never present). The branch is not on
+  the shared GitHub remote either. Its `sats_tews.json`, WHO/Fleming
+  transcription templates, validator, and README could not be inspected
+  or reconciled against `triageThresholds/paediatricTews.json` as a
+  result — asked the user to push the branch to the remote.
+
+**Correction accepted and acted on immediately**: the parallel effort's
+point that AH-47's clinician sign-off is a **blocker on routing live
+paediatric patients**, not a parallel-track item like the rest of the
+threshold work, is correct — the paediatric TEWS charts (unlike the adult
+one) haven't been through any independent review at all, and Phase-11's
+commit shipped them live with no gate. Added one: `triageSafety.ts` now
+checks `PAEDIATRIC_TEWS_SIGNED_OFF` (env var, defaults to unset/false —
+fails safe) before applying TEWS scoring to a case that resolves to the
+younger-child or older-child band. With the gate closed (the default in
+every environment today), a child's vitals assessment falls back to the
+same conservative floor as an unknown age — `minTriageLevel` capped at 2,
+flagged `PAEDIATRIC_TEWS_PENDING_CLINICIAN_SIGNOFF` — rather than either
+using the unsigned charts or silently falling back to the adult chart
+(the exact bug AH-47 exists to fix). The emergency-signs override and
+adult-band scoring are both unaffected by the gate, confirmed by test.
+
+**Verified:** full backend Jest suite (134 tests, including new coverage
+for the gate's default-off behavior, the override firing regardless of
+the gate, adult scoring being unaffected, and the flag correctly
+re-enabling paediatric scoring) passes; `tsc`, `eslint`, and full build
+clean. Python side: `py_compile` clean, and a real venv confirmed the
+updated `CvdRiskAssessment` Pydantic model accepts the new four-band
+values and correctly rejects the old five-band ones.
