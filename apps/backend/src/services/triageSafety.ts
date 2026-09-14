@@ -74,7 +74,13 @@ function hasAnyPattern(input: string, patterns: RegExp[]): boolean {
 // mask from the second trigger.
 const NEGATION_TRIGGER = /\b(?:no(?!\s+pulse\b)|not(?!\s+breathing\b)|denies|denied|without|negative for|ruled out|absence of)\b(?:(?!\b(?:but|however|although|yet|except|and)\b)[^,.;!?])*/gi;
 
-function stripNegatedSpans(text: string): string {
+// Exported: aiTriage.ts's deriveFallbackOpinion() does its own plain
+// substring keyword matching (includesAnySymptom) with no negation
+// awareness of its own — reusing this one canonical implementation instead
+// of a second copy, after finding it missing there via real testing
+// (2026-09-14: "No chest pain, no dizziness" matched the 'chest pain'
+// keyword and produced a false SATS-1 emergency read).
+export function stripNegatedSpans(text: string): string {
     return text.replace(NEGATION_TRIGGER, (match) => ' '.repeat(match.length));
 }
 

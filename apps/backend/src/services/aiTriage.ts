@@ -2,7 +2,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import dotenv from 'dotenv';
 import crypto from 'crypto';
 import { combineEvidence, hasSufficientEvidence, getEvidenceSummary } from './evidenceProvider';
-import { assessDeterministicRisk, TriageVitalsSnapshot, DeterministicRiskPatient } from './triageSafety';
+import { assessDeterministicRisk, TriageVitalsSnapshot, DeterministicRiskPatient, stripNegatedSpans } from './triageSafety';
 import { withResilientHttp } from './resilientHttp';
 
 dotenv.config();
@@ -159,7 +159,16 @@ function includesAnySymptom(text: string, terms: string[]): boolean {
 }
 
 function deriveFallbackOpinion(symptoms: string): Pick<TriageResult, 'triageLevel' | 'possibleConditions' | 'recommendedAction' | 'reasoning'> {
-    const text = symptoms.toLowerCase();
+    // Found via real manual testing, 2026-09-14: this used to be a plain
+    // substring scan with no negation awareness at all, so "No chest pain,
+    // no dizziness" matched the same 'chest pain' keyword as an affirmed
+    // symptom and produced a false SATS-1 emergency read — reached both
+    // when both AI providers fail (conservativeFallback) and whenever the
+    // model's own answer looks too generic (enrichWithFallbackOpinion),
+    // which is the more common trigger of the two. Reuses the same
+    // negation-masking triageSafety.ts already applies before its own
+    // red-flag pattern matching.
+    const text = stripNegatedSpans(symptoms.toLowerCase());
 
     if (includesAnySymptom(text, ['chest pain', 'shortness of breath', 'can\'t breathe', 'difficulty breathing', 'one-sided weakness', 'slurred speech', 'seizure', 'unconscious'])) {
         return {

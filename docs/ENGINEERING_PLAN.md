@@ -1348,3 +1348,52 @@ coverage for the negation-conjunction fix) passes; `tsc`, `eslint`, and
 full build clean. Python: `py_compile` clean, and a real venv confirmed
 `main.py` still imports and builds its FastAPI app end-to-end after the
 persistence fix.
+
+## 17. Third bug found by the user's own manual testing, 2026-09-14
+
+The user manually tested one of the §16 scenarios (a panic-attack
+presentation explicitly denying chest pain and dizziness) against the real
+running app and got back a SATS-1 "cardiopulmonary emergency" — the fallback
+heuristic had run because both AI providers were unavailable in that
+environment, and asked what "AI providers failed" meant and whether the
+output was accurate.
+
+Traced precisely rather than guessed: `aiTriage.ts`'s `deriveFallbackOpinion`
+— used both when both AI providers fail entirely (`conservativeFallback`,
+the mechanism the user hit) *and* whenever the model's own answer looks too
+generic (`enrichWithFallbackOpinion`, a more common real-world trigger) —
+decides its category with a plain substring scan (`includesAnySymptom`)
+that has never had any negation awareness. The test text literally contained
+the substring `"chest pain"` inside `"No chest pain, no dizziness"`, and the
+heuristic doesn't distinguish a denial from an affirmation — same *class* of
+bug as §16's Bug 1, but a second, separate implementation of "read symptom
+text and infer something" that was never fixed because it was never known
+about, only surfaced through a real user test rather than an automated pass.
+
+Fixed by exporting `triageSafety.ts`'s existing `stripNegatedSpans` (already
+proven correct there) and applying it before `deriveFallbackOpinion`'s own
+keyword matching, rather than writing a second negation implementation.
+Verified against the exact real-world text from the user's test: the false
+"chest pain" match no longer fires, and the case correctly falls through to
+the generic, appropriately non-alarming default ("Acute undifferentiated
+illness", level 3) — matching the level this same scenario was predicted to
+land at in §16, before the AI-provider outage revealed this second bug.
+Also verified the fix doesn't blunt the real thing: a genuinely affirmed
+"crushing chest pain radiating to my left arm" still correctly reaches
+level 1.
+
+**On accuracy of the fallback mechanism itself**: confirmed as intentional,
+sourced, working-as-designed behavior — a total AI outage deliberately
+degrades to a conservative heuristic rather than blocking triage entirely,
+the same fail-safe already confirmed working in the original clinical
+scenario report (an unconscious trauma patient still reaching level 1 during
+a full provider outage). The bug was specifically in that heuristic's own
+un-negated keyword matching, not in the decision to have a fallback at all.
+
+**Verified:** new `aiTriage.test.ts` (the first test file for this service)
+pins both directions — the denied symptom no longer false-positives, and a
+genuinely affirmed one still correctly reaches level 1 — run for real
+against `analyzeSymptoms()` with no AI provider configured (this test
+environment's actual state, matching what the user's own test hit). Full
+backend suite (147 tests) passes; `tsc`, `eslint` (0 new errors), and full
+build clean.
