@@ -1397,3 +1397,42 @@ against `analyzeSymptoms()` with no AI provider configured (this test
 environment's actual state, matching what the user's own test hit). Full
 backend suite (147 tests) passes; `tsc`, `eslint` (0 new errors), and full
 build clean.
+
+## 18. "Model:" label was fabricated for every fallback case, 2026-09-14
+
+Following up on §17: the user pointed at the same test screenshot and noted
+it said "Model: claude-sonnet-4-20250514" — reasonably reading that as
+Claude having processed the case. It hadn't; the same card's own reasoning
+text said the conservative fallback ran because all providers failed.
+
+Traced to `aiTriageJob.ts`: `aiModel: process.env.ANTHROPIC_MODEL ||
+"claude-sonnet-4-20250514"` ran unconditionally on every completed case,
+regardless of whether Claude, Gemini, or neither actually produced the
+result — the doctor-facing label was never connected to what really
+happened. A second, smaller bug in the same area: the real Claude API call
+hardcoded its model as a literal (`"claude-sonnet-4-20250514"`), while the
+*displayed* label read a separate `ANTHROPIC_MODEL` env var — the two could
+silently disagree if that variable were ever set to something else.
+
+Fixed properly rather than patching the label in isolation:
+- `TriageResult` gained a `modelUsed: string` field, set at the actual
+  point a result is produced — `validateTriageResult` (used by both the
+  Claude and Gemini response parsers) now tags it with the exact model
+  string that was actually called, and `conservativeFallback` tags it with
+  an explicit, unambiguous non-model label.
+- `CLAUDE_MODEL`/`GEMINI_MODEL` constants replace the duplicated literals
+  in both the API call and the tag, so the label and the real call can no
+  longer drift apart.
+- Verified `modelUsed` survives both `enrichWithFallbackOpinion` and
+  `mergeGuardrails`'s object spreads (both already spread the candidate
+  first) — including the case where a *real* model's answer looks generic
+  and gets its content swapped for the fallback opinion (AH-49): `modelUsed`
+  correctly still says Claude/Gemini there, since a real model did run.
+- `aiTriageJob.ts` now persists `result.modelUsed` instead of the
+  unconditional stamp.
+
+**Verified:** new permanent test confirms `modelUsed` never mentions
+Claude or Gemini when the no-AI-provider fallback fires, and does contain
+"fallback" explicitly. Full backend suite (148 tests) passes; `tsc`,
+`eslint` (0 new errors — same 5 pre-existing warnings), and full build
+clean.

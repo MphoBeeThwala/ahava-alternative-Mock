@@ -13,6 +13,16 @@ const DEBUG = process.env.DEBUG === 'true';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
+// Single source of truth for both the API call and the doctor-facing
+// "Model:" label — previously the request body hardcoded this literal while
+// aiTriageJob.ts's displayed label read process.env.ANTHROPIC_MODEL
+// separately, so the two could silently disagree (and neither reflected
+// whether Gemini or the no-AI fallback actually produced the result — see
+// TriageResult.modelUsed).
+const CLAUDE_MODEL = "claude-sonnet-4-20250514";
+const GEMINI_MODEL = "gemini-2.0-flash";
+const FALLBACK_MODEL_LABEL = "fallback-heuristic (no AI model — see uncertaintyFlags)";
+
 // Key presence is logged at startup only — no patient data in logs
 if (DEBUG) console.log(`[aiTriage] providers configured: gemini=${!!GEMINI_API_KEY} claude=${!!ANTHROPIC_API_KEY}`);
 
@@ -45,6 +55,15 @@ reasoning: string;
     uncertaintyFlags: string[]; // machine-readable uncertainty reasons
     evidenceSources: string[]; // restricted to approved clinical sources
     requiresDoctorReview: boolean; // fail-safe for uncertain or high-risk outputs
+    // Found via a real user question, 2026-09-14: aiTriageJob.ts used to stamp
+    // every case with the CONFIGURED Anthropic model name unconditionally,
+    // even when Claude never ran — a case that used the no-AI-available
+    // fallback still displayed "Model: claude-sonnet-4-20250514" to the
+    // reviewing doctor, which is simply false. This field is set at the
+    // actual point a result is produced (validateTriageResult for a real
+    // model response, conservativeFallback for the heuristic), so the
+    // doctor-facing "Model:" label reflects what actually happened.
+    modelUsed: string;
 }
 
 const SA_EPIDEMIOLOGICAL_CONTEXT = `
@@ -300,6 +319,7 @@ function conservativeFallback(reason: string, symptoms: string): TriageResult {
         uncertaintyFlags: ['AI_PROVIDER_FAILURE', 'FALLBACK_USED'],
         evidenceSources: ['Local Clinical Rules'],
         requiresDoctorReview: true,
+        modelUsed: FALLBACK_MODEL_LABEL,
     };
 }
 
@@ -393,6 +413,7 @@ trim() === '') {
         uncertaintyFlags,
         evidenceSources,
         requiresDoctorReview,
+        modelUsed: source,
     };
 }
 
@@ -451,7 +472,7 @@ async function analyzeWithClaude(
     }
 
     const requestBody = JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: CLAUDE_MODEL,
         max_tokens: 1024,
         messages: [
             {
@@ -503,7 +524,7 @@ async function analyzeWithClaude(
     const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
     if (DEBUG) console.log("[aiTriage] Claude response received");
 
-    return validateTriageResult(JSON.parse(cleanJson), 'Claude');
+    return validateTriageResult(JSON.parse(cleanJson), CLAUDE_MODEL);
 }
 
 // Gemini
@@ -518,7 +539,7 @@ async function analyzeWithGemini(
 
     if (DEBUG) console.log("[aiTriage] Using Gemini...");
 
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
     const prompt = buildTriagePrompt(request, medicalContext, patientContext) + TRIAGE_PROMPT_END;
 
     const parts: any[] = [prompt];
@@ -552,7 +573,7 @@ async function analyzeWithGemini(
     const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
     if (DEBUG) console.log("[aiTriage] Gemini response received");
 
-    return validateTriageResult(JSON.parse(cleanJson), 'Gemini');
+    return validateTriageResult(JSON.parse(cleanJson), GEMINI_MODEL);
 }
 
 // Main function with fallback logic

@@ -44,3 +44,19 @@ describe("analyzeSymptoms — fallback heuristic negation handling", () => {
     expect(result.possibleConditions).toContain("Acute cardiopulmonary emergency");
   }, 20000);
 });
+
+// Found via a real user question, 2026-09-14: a case that used the no-AI-
+// available fallback still displayed "Model: claude-sonnet-4-20250514" to
+// the reviewing doctor — aiTriageJob.ts stamped every case with the
+// configured Anthropic model name unconditionally, regardless of whether
+// Claude, Gemini, or neither actually produced the result. Pinning that
+// modelUsed is set at the real point of origin, not assumed.
+describe("analyzeSymptoms — modelUsed reflects what actually produced the result", () => {
+  it("never claims a real model ran when the no-AI-provider fallback fired", async () => {
+    const result = await analyzeSymptoms({ symptoms: "mild headache for two days" });
+
+    expect(result.uncertaintyFlags).toContain("FALLBACK_USED");
+    expect(result.modelUsed).not.toMatch(/claude|gemini/i);
+    expect(result.modelUsed.toLowerCase()).toContain("fallback");
+  }, 20000);
+});

@@ -71,7 +71,14 @@ export async function processAiTriageJob(data: AiTriageJobData): Promise<void> {
       aiReasoning: result.reasoning,
       slaDeadline,
       doctorFeeCents: feeCents,
-      aiModel: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514",
+      // Found via a real user question, 2026-09-14: this used to stamp every
+      // case with the CONFIGURED Anthropic model name unconditionally, even
+      // when the no-AI-available fallback produced the result — a doctor
+      // reviewing a fallback case saw "Model: claude-sonnet-4-20250514" when
+      // no model had run at all. result.modelUsed is set at the actual point
+      // a result is produced (see aiTriage.ts), so this now reflects what
+      // really happened: Claude, Gemini, or the fallback heuristic.
+      aiModel: result.modelUsed,
       aiContextUsed: !!patientContext,
       statPearlsUsed: result.evidenceSources.includes("StatPearls/NCBI"),
     },
