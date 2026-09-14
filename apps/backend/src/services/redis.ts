@@ -1,11 +1,16 @@
 import Redis from 'ioredis';
 
 let redis: Redis | null = null;
-let redisInitFailed = false;
 
+// A failed attempt used to permanently lock this out for the process's
+// lifetime (redisInitFailed, now removed) — meaning a transient network
+// blip during startup degraded a replica until someone redeployed it. The
+// only caller (index.ts) now retries this on an interval after a failure,
+// so each call here genuinely attempts a fresh connection instead of
+// short-circuiting; that retry cadence is what keeps this from hammering a
+// genuinely-down Redis.
 export const initializeRedis = async (): Promise<Redis> => {
   if (redis) return redis;
-  if (redisInitFailed) throw new Error('Redis previously failed to connect');
 
   const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
   const client = new Redis(redisUrl, {
@@ -33,7 +38,6 @@ export const initializeRedis = async (): Promise<Redis> => {
     return redis;
   } catch (err) {
     client.disconnect();
-    redisInitFailed = true;
     throw err;
   }
 };

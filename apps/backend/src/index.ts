@@ -41,7 +41,7 @@ import { originGuard } from "./middleware/originGuard";
 
 // Import services
 import { getRedis, initializeRedis } from "./services/redis";
-import { initializeQueue } from "./services/queue";
+import { initializeQueue, closeQueues } from "./services/queue";
 import { getWebSocketRedisHealth, initializeWebSocket } from "./services/websocket";
 import prisma from "./lib/prisma";
 import { assertEncryptionKeyConfigured } from "./utils/encryption";
@@ -244,6 +244,45 @@ app.use("*", (req, res) => {
 
 const PORT = process.env.PORT || 4000;
 
+// A failed connection at startup used to degrade this replica for its
+// entire lifetime — nothing ever retried, so a transient network blip
+// required a redeploy to clear. This retries on an interval until it
+// succeeds (or the process shuts down), at which point AI triage, email,
+// PDF export and push notifications all come back without a restart.
+const REDIS_RECONNECT_INTERVAL_MS = Math.max(
+  5_000,
+  Number(process.env.REDIS_RECONNECT_INTERVAL_MS ?? 30_000),
+);
+let redisRetryTimer: NodeJS.Timeout | null = null;
+
+async function connectRedisAndQueues(): Promise<boolean> {
+  try {
+    const redis = await initializeRedis();
+    await initializeQueue(redis);
+    return true;
+  } catch (err) {
+    console.error(
+      `❌ Redis/Queue connection attempt failed — still running without background jobs (retrying every ${REDIS_RECONNECT_INTERVAL_MS / 1000}s):`,
+      (err as Error).message,
+    );
+    return false;
+  }
+}
+
+function scheduleRedisReconnect() {
+  if (redisRetryTimer) return;
+  redisRetryTimer = setInterval(async () => {
+    const ok = await connectRedisAndQueues();
+    if (ok) {
+      console.log("✅ Redis reconnected — AI triage, email, PDF export, and push notification jobs are live again");
+      if (redisRetryTimer) clearInterval(redisRetryTimer);
+      redisRetryTimer = null;
+    }
+  }, REDIS_RECONNECT_INTERVAL_MS);
+  // A pending retry must never be the reason this process won't exit.
+  redisRetryTimer.unref();
+}
+
 async function startServer() {
   if (DEBUG) console.log("🔄 Starting initialization...");
 
@@ -262,16 +301,12 @@ async function startServer() {
 
   // Initialize Redis + Queues (optional - app works without them for core API)
   if (process.env.REDIS_URL) {
-    try {
-      if (DEBUG) console.log("🔄 Connecting to Redis...");
-      const redis = await initializeRedis();
-      await initializeQueue(redis);
+    if (DEBUG) console.log("🔄 Connecting to Redis...");
+    const ok = await connectRedisAndQueues();
+    if (ok) {
       if (DEBUG) console.log("✅ Redis and queues initialized");
-    } catch (err) {
-      console.warn(
-        "⚠️ Redis/Queue unavailable, running without background jobs:",
-        (err as Error).message,
-      );
+    } else {
+      scheduleRedisReconnect();
     }
   } else {
     if (DEBUG) console.log(
@@ -320,11 +355,27 @@ async function shutdown(signal: string) {
   }, SHUTDOWN_TIMEOUT_MS);
   forceExit.unref();
 
+  // A pending Redis reconnect attempt must never fire mid-shutdown.
+  if (redisRetryTimer) {
+    clearInterval(redisRetryTimer);
+    redisRetryTimer = null;
+  }
+
   try {
     // Stop accepting new work first, so in-flight requests can finish.
     await new Promise<void>((resolve) => server.close(() => resolve()));
     wss.clients.forEach((client) => client.close(1001, "Server shutting down"));
     wss.close();
+
+    // BullMQ workers next, and given a real chance to finish an in-flight
+    // job (an AI triage analysis, an email send) — before quitting the
+    // shared Redis connection below, which the workers need to close
+    // cleanly. Previously not drained at all: a job running when SIGTERM
+    // arrived was just killed, with BullMQ's stall-detection as the only
+    // (unverified) recovery path.
+    await closeQueues(Math.max(3_000, SHUTDOWN_TIMEOUT_MS - 5_000)).catch((err) =>
+      console.warn("[shutdown] queue drain failed:", (err as Error).message),
+    );
 
     await prisma.$disconnect().catch((err) =>
       console.warn("[shutdown] prisma disconnect failed:", (err as Error).message),

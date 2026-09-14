@@ -18,6 +18,11 @@ let emailQueue: Queue | null = null;
 let emailWorker: Worker | null = null;
 let aiTriageQueue: Queue | null = null;
 let aiTriageWorker: Worker | null = null;
+let pdfEvents: QueueEvents | null = null;
+let pushEvents: QueueEvents | null = null;
+let emailEvents: QueueEvents | null = null;
+let aiTriageEvents: QueueEvents | null = null;
+let queuesInitialized = false;
 
 function getDefaultJobOptions() {
   return {
@@ -29,6 +34,12 @@ function getDefaultJobOptions() {
 }
 
 export const initializeQueue = async (connection: any) => {
+  // A background reconnect retry (index.ts) can call this again after a
+  // startup failure resolves — guard so it can't create duplicate
+  // Queue/Worker instances on the same queue names, which would process
+  // every job twice.
+  if (queuesInitialized) return;
+
   pdfExportQueue = new Queue(QUEUE_NAMES.PDF_EXPORT, {
     connection,
     defaultJobOptions: {
@@ -54,11 +65,11 @@ export const initializeQueue = async (connection: any) => {
     },
   });
 
-  const pdfEvents = new QueueEvents(QUEUE_NAMES.PDF_EXPORT, { connection });
-  const pushEvents = new QueueEvents(QUEUE_NAMES.PUSH_NOTIFICATION, {
+  pdfEvents = new QueueEvents(QUEUE_NAMES.PDF_EXPORT, { connection });
+  pushEvents = new QueueEvents(QUEUE_NAMES.PUSH_NOTIFICATION, {
     connection,
   });
-  const emailEvents = new QueueEvents(QUEUE_NAMES.EMAIL, { connection });
+  emailEvents = new QueueEvents(QUEUE_NAMES.EMAIL, { connection });
 
   pdfEvents.on("completed", ({ jobId }) => {
     console.log(`📄 PDF export job ${jobId} completed`);
@@ -121,7 +132,7 @@ export const initializeQueue = async (connection: any) => {
       backoff: { type: "exponential" as const, delay: 5000 },
     },
   });
-  const aiTriageEvents = new QueueEvents(QUEUE_NAMES.AI_TRIAGE, { connection });
+  aiTriageEvents = new QueueEvents(QUEUE_NAMES.AI_TRIAGE, { connection });
   aiTriageEvents.on("failed", ({ jobId, failedReason }) => {
     console.error(`❌ AI triage job ${jobId} failed:`, failedReason);
   });
@@ -143,6 +154,7 @@ export const initializeQueue = async (connection: any) => {
     });
   }
 
+  queuesInitialized = true;
   console.log("✅ BullMQ queues initialized");
 };
 
@@ -195,4 +207,50 @@ export const addAiTriageJob = async (data: AiTriageJobData): Promise<boolean> =>
   if (!aiTriageQueue) return false;
   await aiTriageQueue.add("analyze", data, { priority: 1 });
   return true;
+};
+
+async function closeWithTimeout(
+  closeable: { close: () => Promise<void> } | null,
+  label: string,
+  timeoutMs: number,
+): Promise<void> {
+  if (!closeable) return;
+  try {
+    await Promise.race([
+      closeable.close(),
+      new Promise<void>((_, reject) => setTimeout(() => reject(new Error("timed out")), timeoutMs)),
+    ]);
+  } catch (err) {
+    console.warn(`[queue] ${label} did not close cleanly:`, (err as Error).message);
+  }
+}
+
+/**
+ * Graceful shutdown drain for BullMQ. Previously nothing here — the process
+ * just exited on SIGTERM with these workers never told to stop, so a job
+ * being actively processed (an AI triage analysis, an email send) was
+ * abruptly killed rather than given a chance to finish; the only recovery
+ * was BullMQ's stall-detection eventually noticing and retrying it, an
+ * unverified safety net standing in for an actual drain. Workers close
+ * first — Worker.close() waits for the current job to finish, up to
+ * `workerTimeoutMs` — before the queues and their event listeners.
+ */
+export const closeQueues = async (workerTimeoutMs = 10_000): Promise<void> => {
+  if (!queuesInitialized) return;
+
+  await Promise.all([
+    closeWithTimeout(aiTriageWorker, "AI triage worker", workerTimeoutMs),
+    closeWithTimeout(emailWorker, "email worker", workerTimeoutMs),
+  ]);
+
+  await Promise.all([
+    closeWithTimeout(aiTriageQueue, "AI triage queue", 3000),
+    closeWithTimeout(emailQueue, "email queue", 3000),
+    closeWithTimeout(pdfExportQueue, "PDF export queue", 3000),
+    closeWithTimeout(pushNotificationQueue, "push notification queue", 3000),
+    closeWithTimeout(aiTriageEvents, "AI triage queue events", 3000),
+    closeWithTimeout(emailEvents, "email queue events", 3000),
+    closeWithTimeout(pdfEvents, "PDF queue events", 3000),
+    closeWithTimeout(pushEvents, "push queue events", 3000),
+  ]);
 };

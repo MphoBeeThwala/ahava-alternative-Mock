@@ -1184,3 +1184,75 @@ Redis, so `getRedis()` throws and every test here exercises the real
 fail-open path, not a mock standing in for a cache hit; that path is
 what's actually reachable without a live Redis to test against. Full
 backend suite (138 tests) passes.
+
+## 15. Redis outage incident follow-up, 2026-09-14
+
+A production incident report (`⚠️ Redis/Queue unavailable, running without
+background jobs`, observed during a deploy) raised four claims. Investigated
+each directly rather than taking the summary at face value:
+
+- **`/ready` doesn't consider Redis — confirmed exactly as reported.**
+  [`index.ts`](apps/backend/src/index.ts)'s readiness check pings Redis and
+  records `checks.redis`, but `const ready = checks.database === "ok"`
+  never factors it in. A replica with dead Redis returns 200 and stays in
+  rotation.
+- **"No AI decision support ever runs" — traced and it's more nuanced.**
+  `routes/triage.ts` already runs `processAiTriageJob` synchronously in
+  the request when `addAiTriageJob` reports the queue isn't available
+  (the AH-32 fallback, built for exactly this case) — AI analysis does
+  still run, just inline instead of backgrounded. What's actually lost is
+  PDF export, queued email, push notifications, and cross-replica
+  WebSocket delivery, none of which have an equivalent fallback.
+- **Unverified shutdown drain — confirmed.** `shutdown()` never called
+  `.close()` on `aiTriageWorker`/`emailWorker`; a job being processed when
+  SIGTERM arrived was simply killed via `process.exit()`, with BullMQ's
+  stall-detection as the only (untested) recovery path.
+- **Leaked credential — could not confirm.** Tested the specific
+  hypothesis (a malformed `REDIS_URL` missing the `redis://` scheme
+  causing ioredis to echo the raw string, credentials included, into an
+  error message) directly against the real ioredis client — it parses
+  `user:pass@host:port` correctly even without a scheme and strips
+  credentials from its connection-error messages. Checked every
+  `console.*` call near Redis/DB connection code for a raw connection
+  string; found none. Left open pending the actual log line.
+
+**Root cause identified for the readiness gap**: it isn't really a pass/
+fail-logic problem — failing `/ready` on Redis-down would pull every
+replica from rotation and block patient-facing triage submission
+entirely, which is *worse* than the current degraded-but-serving state
+given the AI-analysis fallback already exists. The actual bug is that
+`redis.ts`'s `initializeRedis()` set `redisInitFailed = true` on any
+failure and never attempted again — a 30-second network blip at startup
+degraded a replica **permanently, until redeployed**. Fixed at the root:
+
+- `redis.ts`: removed the permanent-failure lockout — each call now
+  genuinely attempts a fresh connection.
+- `index.ts`: on startup failure, `scheduleRedisReconnect()` retries on
+  an interval (`REDIS_RECONNECT_INTERVAL_MS`, default 30s, `.unref()`'d
+  so it can't block process exit) until it succeeds, then initializes
+  the queues — AI triage, email, PDF export, and push notifications all
+  come back without a restart. `/ready`'s existing live Redis ping
+  correctly reflects this automatically; no change needed there.
+- `queue.ts`: `initializeQueue()` is now idempotent (guards against the
+  retry loop creating duplicate Queue/Worker instances that would
+  double-process every job) via a `queuesInitialized` flag.
+- `queue.ts`: added `closeQueues()` — closes `aiTriageWorker`/
+  `emailWorker` first (each given up to `SHUTDOWN_TIMEOUT_MS - 5s` to
+  finish an in-flight job), then the queues and their event listeners.
+  Wired into `shutdown()` in `index.ts`, before the shared Redis client
+  is quit (workers need that connection alive to close cleanly), and the
+  pending reconnect timer is cancelled first so it can't fire mid-shutdown.
+
+Design call made without a further question, per standing delegation
+("as long as these are safe and improve functionality and optimize
+performance"): keep `/ready` returning 200 for a degraded-but-serving
+Redis state rather than failing it — the resilience the AH-32 fallback
+already provides is the point, and taking the whole app offline over a
+recoverable Redis blip would be a regression, not a fix.
+
+**Verified:** `tsc`, `eslint` (0 new errors — 2 pre-existing warnings
+untouched), and full build clean. New `queue.test.ts` (2 tests) pins that
+`closeQueues()` is a safe, non-hanging no-op when nothing was ever
+initialized — this test environment's actual default state, same
+no-live-Redis convention as `rateLimiter.test.ts` and
+`evidenceProvider/combiner.test.ts`. Full backend suite (140 tests) passes.
