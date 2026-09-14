@@ -28,6 +28,13 @@ export interface EvidenceProviderConfig {
   baseUrl?: string;
   timeoutMs?: number;
   weight?: number; // Ranking weight (0-1)
+  // Cache this provider's results in Redis, keyed by normalized symptom
+  // text, for this many seconds. Undefined/0 means never cache. Meant for
+  // slow, rate-limited external sources (PubMed/StatPearls both hit NCBI's
+  // shared 3-10 req/sec ceiling) — never set this for a provider whose
+  // result can legitimately change per-request for the same symptoms
+  // (e.g. one that reads vitals or patient-specific context).
+  cacheTtlSeconds?: number;
 }
 
 export interface ClinicalQuery {

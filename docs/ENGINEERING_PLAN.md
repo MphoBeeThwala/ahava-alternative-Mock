@@ -1141,3 +1141,46 @@ re-enabling paediatric scoring) passes; `tsc`, `eslint`, and full build
 clean. Python side: `py_compile` clean, and a real venv confirmed the
 updated `CvdRiskAssessment` Pydantic model accepts the new four-band
 values and correctly rejects the old five-band ones.
+
+## 14. NCBI cache and dead-code cleanup, 2026-09-14
+
+Follow-up from a question about the Railway `NCBI_API_KEY` variable
+(confirmed correctly named and wired to `evidenceProvider/providers/
+pubmed.ts` and `.../statPearls.ts`, both via `process.env.NCBI_API_KEY`).
+Surfaced two things while answering it:
+
+- **Deleted `apps/backend/src/services/statPearls.ts`** — a standalone,
+  never-imported duplicate of the same NCBI StatPearls lookup now
+  implemented in `evidenceProvider/providers/statPearls.ts`. Confirmed
+  via grep that nothing referenced it before removing.
+- **No caching in front of PubMed/StatPearls.** Both hit NCBI's shared
+  E-utilities infrastructure (3 req/sec without the key, 10/sec with
+  it), with no client-side throttling anywhere in the code — the first
+  external dependency likely to fail under real concurrent load. The
+  deleted dead file actually had a 24h Redis cache for this exact
+  lookup; the live implementation that superseded it did not.
+
+Added it back, generically, in `evidenceProvider/combiner.ts` rather
+than per-provider: a new `cacheTtlSeconds?: number` field on
+`EvidenceProviderConfig` (`types.ts`), set to `EVIDENCE_CACHE_TTL_SECONDS`
+(env-configurable, default 86400s/24h) for `pubmed` and `statpearls`
+only in `registry.ts`. `combiner.ts`'s `queryWithCache` wraps each
+provider's `query()` call: keyed by a SHA-256 of the normalized
+(trimmed, lower-cased) symptom text — the only field either provider
+actually reads from a `ClinicalQuery` — so semantically-identical
+repeat complaints hit the cache instead of NCBI. Fails open at every
+step (no Redis, a corrupt entry, a failed write) straight through to a
+live query, matching the exact pattern already proven in
+`idempotencyMiddleware`. A provider that throws
+(`EvidenceProviderNetworkError`, a real outage) is never cached — only
+a genuinely completed result, including a legitimate empty one.
+
+**Verified:** `tsc`, `eslint` (0 new errors — two pre-existing
+`no-explicit-any` warnings, unrelated to this change), and full build
+clean. New `combiner.test.ts` (4 tests) follows this codebase's own
+established convention for Redis-dependent code (see
+`rateLimiter.test.ts`'s comment) — this test environment has no live
+Redis, so `getRedis()` throws and every test here exercises the real
+fail-open path, not a mock standing in for a cache hit; that path is
+what's actually reachable without a live Redis to test against. Full
+backend suite (138 tests) passes.

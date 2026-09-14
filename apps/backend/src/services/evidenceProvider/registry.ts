@@ -6,6 +6,18 @@ import { statPearlsProvider } from './providers/statPearls';
 import { infermedicaProvider } from './providers/infermedica';
 import { visualDxProvider } from './providers/visualDx';
 
+// Both PubMed and StatPearls hit NCBI's shared E-utilities infrastructure,
+// which enforces a 3 req/sec ceiling (10/sec with NCBI_API_KEY set) across
+// every request this service sends it — with no client-side throttling,
+// that's the first external dependency to start failing under real traffic.
+// Cached (see combiner.ts's queryWithCache) by normalized symptom text for
+// this long; many patients describe very similar common complaints, so this
+// also cuts real NCBI traffic well below what raw request volume implies.
+const EVIDENCE_CACHE_TTL_SECONDS = Math.max(
+  60,
+  parseInt(process.env.EVIDENCE_CACHE_TTL_SECONDS ?? '86400', 10) || 86400
+);
+
 // Default configurations for all providers
 const DEFAULT_CONFIGS: Record<string, EvidenceProviderConfig> = {
   'who-icd11': {
@@ -23,6 +35,7 @@ const DEFAULT_CONFIGS: Record<string, EvidenceProviderConfig> = {
     baseUrl: 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils',
     timeoutMs: 10000,
     weight: 0.9, // High weight for peer-reviewed literature
+    cacheTtlSeconds: EVIDENCE_CACHE_TTL_SECONDS,
   },
   'statpearls': {
     id: 'statpearls',
@@ -31,6 +44,7 @@ const DEFAULT_CONFIGS: Record<string, EvidenceProviderConfig> = {
     baseUrl: 'https://www.ncbi.nlm.nih.gov',
     timeoutMs: 10000,
     weight: 0.8, // Slightly lower than PubMed due to HTML scraping fragility
+    cacheTtlSeconds: EVIDENCE_CACHE_TTL_SECONDS,
   },
   'africa-cdc': {
     id: 'africa-cdc',

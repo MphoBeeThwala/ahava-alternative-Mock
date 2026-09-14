@@ -4,14 +4,16 @@
  * Implements ranking/weighting logic for source quality
  */
 
-import { 
-  EvidenceProvider, 
-  ClinicalQuery, 
-  EvidenceResult, 
+import { createHash } from 'crypto';
+import {
+  EvidenceProvider,
+  ClinicalQuery,
+  EvidenceResult,
   CombinedEvidence,
   getEnabledProviders,
   isProviderEnabled
 } from './';
+import { getRedis } from '../redis';
 
 // Source ranking weights (0-1, higher = more trusted)
 const SOURCE_WEIGHTS: Record<string, number> = {
@@ -25,6 +27,55 @@ const SOURCE_WEIGHTS: Record<string, number> = {
 
 // Maximum total context characters
 const MAX_TOTAL_CONTEXT_CHARS = 12000;
+
+function cacheKeyFor(providerId: string, normalizedSymptoms: string): string {
+  const hash = createHash('sha256').update(normalizedSymptoms).digest('hex');
+  return `evidence:cache:${providerId}:${hash}`;
+}
+
+/**
+ * Wraps provider.query() with an optional Redis cache (provider.config.
+ * cacheTtlSeconds), keyed by normalized symptom text — the only field
+ * PubMed/StatPearls actually read from a ClinicalQuery. Fails open at every
+ * step: no Redis, a corrupt cache entry, or a failed cache write all fall
+ * straight through to a live query, since caching here is an optimization
+ * against NCBI's shared rate limit, never a correctness requirement. A
+ * provider that throws (a real network/HTTP failure — see
+ * EvidenceProviderNetworkError) is never cached, only a genuine completed
+ * result (including a legitimate empty one).
+ */
+export async function queryWithCache(provider: EvidenceProvider, query: ClinicalQuery): Promise<EvidenceResult[]> {
+  const ttlSeconds = provider.config.cacheTtlSeconds;
+  const normalizedSymptoms = (query.symptoms || '').trim().toLowerCase();
+  if (!ttlSeconds || !normalizedSymptoms) {
+    return provider.query(query);
+  }
+
+  let redis;
+  try {
+    redis = getRedis();
+  } catch {
+    return provider.query(query);
+  }
+
+  const cacheKey = cacheKeyFor(provider.id, normalizedSymptoms);
+  try {
+    const cached = await redis.get(cacheKey);
+    if (cached !== null) {
+      return JSON.parse(cached) as EvidenceResult[];
+    }
+  } catch {
+    // Corrupt/unreadable entry — fall through to a live query below.
+  }
+
+  const results = await provider.query(query);
+  try {
+    await redis.set(cacheKey, JSON.stringify(results), 'EX', ttlSeconds);
+  } catch {
+    // A failed cache write must never fail the evidence lookup itself.
+  }
+  return results;
+}
 
 /**
  * Combine evidence from all enabled providers
@@ -47,8 +98,8 @@ export async function combineEvidence(query: ClinicalQuery): Promise<CombinedEvi
     sourcesQueried.push(provider.id);
     
     try {
-      const providerResults = await provider.query(query);
-      
+      const providerResults = await queryWithCache(provider, query);
+
       if (providerResults.length > 0) {
         sourcesSucceeded.push(provider.id);
         
