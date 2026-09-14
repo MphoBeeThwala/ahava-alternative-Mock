@@ -70,6 +70,42 @@ describe("assessDeterministicRisk", () => {
     });
   });
 
+  // Red-team finding, 2026-09-14: the AH-48 negation mask ran to the next
+  // clause PUNCTUATION only. Real phrasing routinely joins a denial to a
+  // genuine, affirmed symptom with a bare conjunction and no comma —
+  // "denies numbness but has severe headache" — and the old pattern erased
+  // the real, affirmed "severe headache" right along with the denied
+  // "numbness", silently under-triaging a genuine red flag. Fixed by also
+  // stopping the mask at a set of contrast/coordination conjunctions.
+  describe("negation mask stops at a conjunction, not just punctuation", () => {
+    it.each([
+      ["but", "denies numbness but has severe headache"],
+      ["and", "denies fever and has crushing chest pain"],
+      ["however", "denies suicidal ideation however has severe abdominal pain"],
+    ])("preserves the real symptom after a denial joined by \"%s\" with no comma", (_label, narrative) => {
+      const result = assessDeterministicRisk(narrative);
+
+      expect(result.minTriageLevel).toBeLessThanOrEqual(2);
+    });
+
+    it("still fully masks a same-sentence double denial joined by \"and\"", () => {
+      // Each "no"/"denies" is matched independently by the negation regex's
+      // global flag, so stopping the first one's mask at "and" doesn't leave
+      // the second denied symptom exposed — it gets its own mask.
+      const result = assessDeterministicRisk("no fever and no chills");
+
+      expect(result.minTriageLevel).toBeGreaterThan(2);
+      expect(result.hardFlags).toHaveLength(0);
+      expect(result.cautionFlags).toHaveLength(0);
+    });
+
+    it("still preserves a comma-separated affirmed symptom (no regression)", () => {
+      const result = assessDeterministicRisk("no chest pain, but severe shortness of breath");
+
+      expect(result.minTriageLevel).toBeLessThanOrEqual(2);
+    });
+  });
+
   // AH-47/AH-44: vitals scoring is now the real SATS TEWS composite, not
   // independent adult-only thresholds — see triageThresholds/tews.ts. Every
   // vitals-scoring test below passes an adult age so it exercises the TEWS

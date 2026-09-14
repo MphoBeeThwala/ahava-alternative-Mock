@@ -60,7 +60,19 @@ function hasAnyPattern(input: string, patterns: RegExp[]): boolean {
 // "not breathing" and "no pulse" are themselves red-flag phrases below (the
 // negation word IS the symptom, not a denial of one) — excluded so this
 // doesn't mask the very phrase it's meant to protect.
-const NEGATION_TRIGGER = /\b(?:no(?!\s+pulse\b)|not(?!\s+breathing\b)|denies|denied|without|negative for|ruled out|absence of)\b[^,.;!?]*/gi;
+//
+// Red-team finding, 2026-09-14: the mask originally ran to the next clause
+// PUNCTUATION only. Real patient/clinician phrasing routinely joins a denial
+// to a genuine, affirmed symptom with a bare conjunction and no comma —
+// "denies numbness but has severe headache" — and the old pattern erased
+// "severe headache" along with the denied "numbness", silently under-triaging
+// a real red flag. The lookahead below also stops at a set of contrast/
+// coordination conjunctions (but/however/although/yet/except/and), not just
+// punctuation. Verified this doesn't reintroduce under-masking for a
+// same-sentence double denial ("no fever and no chills") — each "no" is
+// still matched independently by the global flag, so "chills" gets its own
+// mask from the second trigger.
+const NEGATION_TRIGGER = /\b(?:no(?!\s+pulse\b)|not(?!\s+breathing\b)|denies|denied|without|negative for|ruled out|absence of)\b(?:(?!\b(?:but|however|although|yet|except|and)\b)[^,.;!?])*/gi;
 
 function stripNegatedSpans(text: string): string {
     return text.replace(NEGATION_TRIGGER, (match) => ' '.repeat(match.length));

@@ -1256,3 +1256,95 @@ untouched), and full build clean. New `queue.test.ts` (2 tests) pins that
 initialized — this test environment's actual default state, same
 no-live-Redis convention as `rateLimiter.test.ts` and
 `evidenceProvider/combiner.test.ts`. Full backend suite (140 tests) passes.
+
+## 16. Adversarial clinical scenario pass, 2026-09-14
+
+A deliberate red-team pass against everything shipped in §11-§15 — boundary
+values at every threshold introduced today, interaction effects between the
+new systems, and adversarial/messy real-world phrasing — run against the
+real code (Jest for `assessDeterministicRisk`, a real Python venv for
+`engine.py`), not reviewed by inspection. Found and fixed two genuine bugs;
+confirmed roughly a dozen other scenarios behave correctly, including two
+that looked wrong on first read and turned out to be test-construction
+mistakes on investigation, not engine bugs.
+
+**Bug 1 — negation mask erased a real, affirmed symptom (triageSafety.ts).**
+Today's own AH-48 fix (§11) masked a denial only up to the next clause
+*punctuation*. Real phrasing routinely joins a denial to a genuine symptom
+with a bare conjunction and no comma: `"denies numbness but has severe
+headache"` returned level 5 with zero flags — the mask consumed "but has
+severe headache" right along with the denied "numbness", since nothing
+stopped it before end-of-string. Same failure for `"denies fever and has
+crushing chest pain"`. Fixed by also stopping the mask at a set of
+contrast/coordination conjunctions (but/however/although/yet/except/and).
+Verified this doesn't reintroduce under-masking for a same-sentence double
+denial (`"no fever and no chills"` — each `"no"` is still matched
+independently by the global regex, so the second denial gets its own mask)
+and doesn't regress the comma-separated case. Pinned permanently in
+`triageSafety.test.ts`.
+
+**Bug 2 — persistence counted an abnormality "recently", not "right now"
+(engine.py).** §50.3's `_persistent_anomaly` counted a breach anywhere in
+the 3-reading window, so two readings-ago being abnormal plus one
+more-readings-ago being abnormal could flag even when the *current* reading
+had returned exactly to baseline (z=0.0) — the code was answering "did this
+happen recently" when the clinical claim being made ("persistent") is "is
+this still happening." Fixed by requiring the current reading to itself
+breach threshold before counting toward the persistence total at all.
+
+**Two false alarms, resolved by finding the actual cause rather than
+either dismissing or over-fixing:**
+- A same-magnitude HR move (76 vs a ~71 baseline) appeared to never flag
+  regardless of how much history existed, seemingly breaking §50.5's
+  immature-baseline widening entirely. Traced to two stacked test-script
+  mistakes: history built in descending order while the engine (correctly)
+  assumes ascending, per `db.py`'s real `ORDER BY time ASC`; and once fixed,
+  the chosen test value landed the z-score at *exactly* 1.5 — the same as
+  `SIGMA_YELLOW`, failing the strict `>` comparison by construction, not by
+  bug. Re-run with a value that clears the boundary comfortably: immature
+  baselines (6/7/13/14 days) correctly suppress the flag, mature ones
+  (15/20 days) correctly raise it — the day-14/15 transition lands exactly
+  on `MIN_BASELINE_DAYS` as designed.
+- A patient whose HRV recovered to baseline still showed a flagged 7-day
+  rolling mean for several days afterward. Not a bug: a rolling mean is
+  supposed to lag a single night's recovery — that's the deliberate
+  smoothing §50.2 asked for specifically to avoid one-night noise, matching
+  how recovery-tracking wearables (Whoop/Oura-style) work. Distinct in kind
+  from Bug 2 above, which made a discrete, real-time claim ("still
+  happening") that a stale reading can't honestly support.
+
+**Other scenarios run and confirmed correct, no changes needed:** exact
+TEWS band boundaries (age 3/12, height 95/150cm — both land in the older-
+child band as specified); an adult with every TEWS parameter simultaneously
+at its worst value (correctly reaches RED/level 1 through legitimate
+additive scoring, not an override); every NEWS2 SpO2 boundary (90/91→
+critical, 92/93→low, 94/96→indeterminate, 97→clear); WHO 2019 CVD age-gate
+boundaries (39/75→out of range, 40/74→valid, correctly reaching the
+"chart not digitized" stub rather than a false validation rejection); a
+negative age (-5) resolving to a nonsensical band but landing safely
+behind the paediatric sign-off gate regardless (a real input-validation
+gap worth hardening later, but not currently reachable with unsafe
+consequences); a literal zero heart rate scoring only YELLOW through TEWS
+rather than an emergency override — confirmed **not reachable in
+production**, since `submitBiometricsSchema` already rejects it via
+`Joi.number().min(30)` before it can reach triage scoring, and the
+matching Pydantic bound (`ge=30`) does the same on the wearable-engine
+side (confirmed by exception when tested directly).
+
+**Recommendation, not actioned**: this ml-service has zero test
+infrastructure (`requirements.txt` has no `pytest`) despite now carrying
+several hundred lines of clinical scoring logic across three distinct
+mechanisms (absolute floor, TEWS-equivalent persistence, log-transformed
+HRV). Both real bugs above were found by hand-built disposable scripts,
+deleted after use per this session's established practice — a permanent
+pytest suite would have caught bug 2 automatically on the next change
+instead of requiring another manual red-team pass. Flagged for the user
+rather than added unprompted, since introducing a new test framework as a
+side effect of a bug hunt is a bigger decision than the bug fixes
+themselves.
+
+**Verified:** full backend Jest suite (146 tests, including new permanent
+coverage for the negation-conjunction fix) passes; `tsc`, `eslint`, and
+full build clean. Python: `py_compile` clean, and a real venv confirmed
+`main.py` still imports and builds its FastAPI app end-to-end after the
+persistence fix.

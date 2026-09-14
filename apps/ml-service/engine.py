@@ -384,11 +384,27 @@ class EarlyWarningEngine:
     def _persistent_anomaly(
         self, recent_values: List[float], mean: float, std: float, bad_direction: str
     ) -> Tuple[bool, float]:
-        """\u00a750.3: True only if the deviation recurs on >=PERSISTENCE_REQUIRED
-        of the supplied readings. Returns (persisted, current_z) \u2014 current_z
-        is always the *current* (first) reading's z-score, used for display
-        and severity weighting regardless of which readings persisted."""
+        """\u00a750.3: True only if the CURRENT reading is itself abnormal AND the
+        deviation recurs on >=PERSISTENCE_REQUIRED of the supplied readings.
+
+        Red-team finding, 2026-09-14: the first version counted a breach
+        anywhere in the 3-reading window, so two READINGS AGO being abnormal
+        plus one MORE reading ago being abnormal could flag even when the
+        patient's current reading was back at their exact baseline (z=0) \u2014
+        "persistent" was being read as "occurred recently", not "ongoing
+        right now", which is a materially different (and wrong) clinical
+        claim. Requiring the current reading to breach first, before even
+        counting toward the persistence total, is what actually implements
+        "the deviation is still present and has been sustained."
+        """
         current_z = (recent_values[0] - mean) / std
+        current_breached = (
+            (bad_direction == "high" and current_z > self.SIGMA_YELLOW) or
+            (bad_direction == "low" and current_z < -self.SIGMA_YELLOW)
+        )
+        if not current_breached:
+            return False, current_z
+
         count = 0
         for v in recent_values:
             z = (v - mean) / std
