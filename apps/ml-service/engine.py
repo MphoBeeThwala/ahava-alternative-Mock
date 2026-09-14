@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 import hashlib
 from models import (
     BiometricData, AlertLevel, ContextualProfile,
-    RiskScores, FusionOutput, EarlyWarningSummary,
+    CvdRiskAssessment, FusionOutput, EarlyWarningSummary,
     UncertaintyProfile, ClinicalProvenance,
 )
 import db
@@ -124,8 +124,19 @@ class EarlyWarningEngine:
         # input, so it inherits the same paediatric gap as AH-47 in the TS
         # engine until that's fixed with real clinician-defined paediatric
         # ranges — do not treat these numbers as safe for children.
-        self.SPO2_RED = 90
-        self.SPO2_YELLOW = 94
+        #
+        # AH-50 §50.4: SpO2 boundaries updated to NEWS2 Scale 1 exactly
+        # (>=96 normal, 94-95 caution, 92-93 low, <=91 critical) — never
+        # z-scored against a personal baseline (see _evaluate: spo2 is
+        # excluded from the baseline-relative metrics loop entirely), and
+        # never corrected by race: a systematic review found pulse
+        # oximeters consistently overestimate saturation in darker skin
+        # tones, worst at low readings, but self-reported race is not a
+        # valid proxy for skin colour — this builds in margin (the
+        # indeterminate band below) instead of a race-based correction.
+        self.SPO2_RED = 91          # <= this is critical (NEWS2 score 3)
+        self.SPO2_LOW = 93          # <= this (and > SPO2_RED) is low (NEWS2 score 2)
+        self.SPO2_INDETERMINATE = 96  # <= this (and > SPO2_LOW) is indeterminate, not reassuring (NEWS2 score 0-1)
         self.RR_RED_HIGH = 30
         self.RR_RED_LOW = 8
         self.RR_YELLOW_HIGH = 24
@@ -136,21 +147,69 @@ class EarlyWarningEngine:
         self.HR_YELLOW_LOW = 45
         self._LEVEL_RANK = {AlertLevel.GREEN: 0, AlertLevel.YELLOW: 1, AlertLevel.RED: 2}
 
+        # AH-50 gap report: a shared 0.1-unit floor on every metric's
+        # baseline SD (e.g. a tenth of a beat for heart rate) let ordinary
+        # day-to-day variation in a very consistent wearer read as
+        # multi-sigma noise — M09 flagged a 4 bpm HR move as 1.6σ. Per-metric
+        # floors below are sourced (see docs/ENGINEERING_PLAN.md §11
+        # follow-up); HRV is handled separately in
+        # _hrv_deviation_from_baseline (log-transformed, not a flat floor).
+        self.HR_SIGMA_FLOOR = 3.0          # bpm — within-person day-to-day SD, Quer et al. 2020
+        self.RR_SIGMA_FLOOR = 1.0          # br/min — Natarajan et al. 2021
+        self.RR_SIGMA_FLOOR_OVER_60 = 1.5  # br/min — wider in older adults, same source
+
+        # §50.2: HRV's smallest-worthwhile-change is 0.5x the patient's own
+        # coefficient of variation on the log scale, not a sigma multiple.
+        self.HRV_SWC_MULTIPLIER = 0.5
+        # A real day-to-day CV floor, not just a floating-point-noise guard:
+        # the spec's own cited literature gives ~2.7-3.1% as the lower bound
+        # even for a genuinely stable individual. Without this, a patient
+        # whose recorded history happens to be near-constant (device
+        # rounding, a short window) gets a CV of ~0 and therefore a
+        # smallest-worthwhile-change of ~0 — making HRV monitoring maximally
+        # *insensitive* for exactly the most consistent wearers, the
+        # opposite of AH-50's purpose.
+        self.HRV_MIN_CV = 0.027
+
+        # §50.3: a single anomalous reading on a non-emergency metric isn't
+        # enough — require the deviation on >=2 of the last 3 readings
+        # (current included) before it counts toward alert level. The
+        # absolute floor (_absolute_floor, AH-43/44) is exempt by design:
+        # those fire on the first reading, every time.
+        self.PERSISTENCE_REQUIRED = 2
+        self.PERSISTENCE_WINDOW = 3
+
+        # §50.5: the personal SD is unreliable from very few points —
+        # widen the effective floor while the baseline is still immature.
+        self.IMMATURE_BASELINE_MULT_UNDER_7D = 1.5
+        self.IMMATURE_BASELINE_MULT_7_TO_14D = 1.25
+
     def _absolute_floor(self, data: BiometricData) -> Tuple[AlertLevel, List[str]]:
         """Baseline-independent SATS-aligned floor — see __init__ comment."""
         anomalies: List[str] = []
         level = AlertLevel.GREEN
 
+        rr = data.respiratory_rate
+        rr_deviated = rr >= self.RR_YELLOW_HIGH or rr <= self.RR_YELLOW_LOW
+
+        # §50.4: SpO2 is absolute-only (never compared to a personal
+        # baseline) and a 92-96% reading from a consumer device is treated
+        # as indeterminate, not reassuring — it escalates only alongside a
+        # respiratory-rate deviation already present, rather than clearing
+        # a patient with breathing symptoms on the strength of SpO2 alone.
         spo2 = data.spo2
-        if spo2 < self.SPO2_RED:
-            anomalies.append(f"spo2 ({spo2:.1f}) below critical floor (<{self.SPO2_RED}) — SEVERE_HYPOXEMIA")
+        if spo2 <= self.SPO2_RED:
+            anomalies.append(f"spo2 ({spo2:.1f}) at or below critical floor (<={self.SPO2_RED}) — NEWS2 SpO2 critical")
             level = AlertLevel.RED
-        elif spo2 < self.SPO2_YELLOW:
-            anomalies.append(f"spo2 ({spo2:.1f}) below floor (<{self.SPO2_YELLOW}) — LOW_SPO2")
+        elif spo2 <= self.SPO2_LOW:
+            anomalies.append(f"spo2 ({spo2:.1f}) at or below floor (<={self.SPO2_LOW}) — NEWS2 SpO2 low")
             if self._LEVEL_RANK[level] < self._LEVEL_RANK[AlertLevel.YELLOW]:
                 level = AlertLevel.YELLOW
+        elif spo2 <= self.SPO2_INDETERMINATE:
+            anomalies.append(f"spo2 ({spo2:.1f}) is indeterminate (<={self.SPO2_INDETERMINATE}) from a consumer device — not reassuring")
+            if rr_deviated and self._LEVEL_RANK[level] < self._LEVEL_RANK[AlertLevel.YELLOW]:
+                level = AlertLevel.YELLOW
 
-        rr = data.respiratory_rate
         if rr >= self.RR_RED_HIGH or rr <= self.RR_RED_LOW:
             anomalies.append(f"respiratory_rate ({rr:.1f}) at critical floor — CRITICAL_RESPIRATORY_RATE")
             level = AlertLevel.RED
@@ -273,10 +332,16 @@ class EarlyWarningEngine:
         anomalies: List[str] = []
         significant_deviations = 0
 
+        # AH-50 \u00a750.3: heart rate and respiratory rate now require the
+        # deviation on >=2 of the last 3 readings (current included) before
+        # counting \u2014 a single bad night's reading no longer moves the alert
+        # level on its own. SpO2 is excluded here entirely per \u00a750.4 (never
+        # baseline-relative; handled only in _absolute_floor above). HRV is
+        # excluded here too \u2014 it gets its own log-transform + rolling-mean
+        # treatment in _hrv_deviation, not a persistence-gated single-value
+        # z-score, since a rolling mean already can't swing on one bad night.
         metrics = {
             "heart_rate_resting": (data.heart_rate_resting, "high"),
-            "hrv_rmssd":          (data.hrv_rmssd,          "low"),
-            "spo2":               (data.spo2,               "low"),
             "respiratory_rate":   (data.respiratory_rate,   "high"),
         }
 
@@ -284,16 +349,19 @@ class EarlyWarningEngine:
             mean, std = self._calculate_blended_baseline(history, metric_name, age)
             if std == 0:
                 continue
-            z_score = (value - mean) / std
-            is_anomaly = (
-                (bad_direction == "high" and z_score > self.SIGMA_YELLOW) or
-                (bad_direction == "low"  and z_score < -self.SIGMA_YELLOW)
-            )
-            if is_anomaly:
+            recent_values = self._recent_metric_values(history, value, metric_name)
+            persisted, z_score = self._persistent_anomaly(recent_values, mean, std, bad_direction)
+            if persisted:
                 anomalies.append(
-                    f"{metric_name} ({value:.1f}) is {z_score:.1f}\u03c3 from baseline ({mean:.1f})"
+                    f"{metric_name} ({value:.1f}) is {z_score:.1f}\u03c3 from baseline ({mean:.1f}), "
+                    f"persistent across {self.PERSISTENCE_REQUIRED}+ of last {min(len(recent_values), self.PERSISTENCE_WINDOW)} readings"
                 )
                 significant_deviations += 2 if abs(z_score) > self.SIGMA_RED else 1
+
+        hrv_anomaly, hrv_description = self._hrv_deviation(history, data)
+        if hrv_anomaly:
+            anomalies.append(hrv_description)
+            significant_deviations += 1
 
         if significant_deviations >= 3:
             relative_level = AlertLevel.RED
@@ -305,6 +373,103 @@ class EarlyWarningEngine:
         if self._LEVEL_RANK[floor_level] > self._LEVEL_RANK[relative_level]:
             return floor_level, floor_anomalies + anomalies
         return relative_level, anomalies
+
+    def _recent_metric_values(self, history: List[dict], current_value: float, metric: str) -> List[float]:
+        """Current reading plus up to PERSISTENCE_WINDOW-1 most recent prior
+        values for `metric` from history (ascending by time \u2014 see db.py's
+        ORDER BY time ASC)."""
+        prior = [r.get(metric) for r in history[-(self.PERSISTENCE_WINDOW - 1):] if r.get(metric) is not None]
+        return [current_value] + prior
+
+    def _persistent_anomaly(
+        self, recent_values: List[float], mean: float, std: float, bad_direction: str
+    ) -> Tuple[bool, float]:
+        """\u00a750.3: True only if the deviation recurs on >=PERSISTENCE_REQUIRED
+        of the supplied readings. Returns (persisted, current_z) \u2014 current_z
+        is always the *current* (first) reading's z-score, used for display
+        and severity weighting regardless of which readings persisted."""
+        current_z = (recent_values[0] - mean) / std
+        count = 0
+        for v in recent_values:
+            z = (v - mean) / std
+            breached = (
+                (bad_direction == "high" and z > self.SIGMA_YELLOW) or
+                (bad_direction == "low" and z < -self.SIGMA_YELLOW)
+            )
+            if breached:
+                count += 1
+        return count >= self.PERSISTENCE_REQUIRED, current_z
+
+    def _hrv_deviation(self, history: List[dict], data: BiometricData) -> Tuple[bool, Optional[str]]:
+        """\u00a750.2: RMSSD is right-skewed, so a raw z-score isn't a valid
+        statistic. Compares a 7-day rolling mean of ln(RMSSD) against the
+        baseline established during the patient's first stable week (also
+        on the log scale), flagging only when the shift exceeds
+        HRV_SWC_MULTIPLIER x the patient's own coefficient of variation \u2014
+        the smallest-worthwhile-change convention, not a sigma multiple.
+        A single night's reading can't move a 7-day mean on its own, so
+        this needs no separate persistence gate."""
+        if data.hrv_rmssd is None or data.hrv_rmssd <= 0:
+            return False, None
+
+        df = pd.DataFrame(history)
+        if "hrv_rmssd" not in df.columns or "timestamp" not in df.columns:
+            return False, None
+        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+        df = df.set_index("timestamp").sort_index()
+        hrv = df["hrv_rmssd"].dropna()
+        hrv = hrv[hrv > 0]
+        if len(hrv) < 3:
+            return False, None
+
+        ln_hrv = np.log(hrv)
+
+        first_week_cutoff = ln_hrv.index.min() + timedelta(days=7)
+        baseline_window = ln_hrv[ln_hrv.index < first_week_cutoff]
+        if len(baseline_window) < 3:
+            baseline_window = ln_hrv  # not enough history for a dedicated first week yet
+        epsilon = 1e-9
+        baseline_mean = float(baseline_window.mean())
+        if abs(baseline_mean) < epsilon:
+            return False, None
+        baseline_std = float(baseline_window.std()) if len(baseline_window) > 1 else 0.0
+        # Floored at HRV_MIN_CV, not just an epsilon-for-floating-point-noise
+        # guard: constant/near-constant historical data (device rounding, a
+        # short window, or literally identical readings) produces a std()
+        # nowhere near zero's real-world meaning — treating that as "no
+        # variability, never flag" would make HRV monitoring least sensitive
+        # for exactly the most consistent wearers. See HRV_MIN_CV's comment.
+        baseline_cv = max(baseline_std / abs(baseline_mean), self.HRV_MIN_CV)
+        swc = self.HRV_SWC_MULTIPLIER * baseline_cv
+
+        current_ln = float(np.log(data.hrv_rmssd))
+        window_start = ln_hrv.index.max() - timedelta(days=self.ROLLING_WINDOW_DAYS)
+        recent = ln_hrv[ln_hrv.index >= window_start]
+        rolling_mean = float(pd.concat([recent, pd.Series([current_ln])]).mean())
+
+        deviation = abs(rolling_mean - baseline_mean)
+        if deviation <= swc:
+            return False, None
+
+        direction = "below" if rolling_mean < baseline_mean else "above"
+        approx_ms = float(np.exp(rolling_mean) - np.exp(baseline_mean))
+        return True, (
+            f"hrv_rmssd 7-day rolling mean is {direction} baseline by {deviation:.3f} "
+            f"(ln-scale), exceeding the smallest-worthwhile-change of {swc:.3f} "
+            f"(~{approx_ms:+.1f} ms)"
+        )
+
+    # AH-50 §50.1: per-metric σ floor, replacing the old flat 0.1 (a tenth
+    # of a beat for heart rate). HRV keeps the old flat floor here — its
+    # anomaly detection is handled separately on the log scale in
+    # _hrv_deviation (§50.2); this function's HRV output is display-only
+    # (e.g. "your baseline HRV"), not used for flagging.
+    def _sigma_floor_for(self, metric: str, age: Optional[int]) -> float:
+        if metric == "heart_rate_resting":
+            return self.HR_SIGMA_FLOOR
+        if metric == "respiratory_rate":
+            return self.RR_SIGMA_FLOOR_OVER_60 if (age is not None and age >= 60) else self.RR_SIGMA_FLOOR
+        return 0.1
 
     # ------------------------------------------------------------------
     # Progressive blended baseline
@@ -319,19 +484,20 @@ class EarlyWarningEngine:
         demo = _get_demographic_seed(age, gender)
         demo_mean = demo[metric]["mean"] if metric in demo else 70.0
         demo_std  = demo[metric]["std"]  if metric in demo else 5.0
+        floor = self._sigma_floor_for(metric, age)
 
         if not history:
-            return demo_mean, demo_std
+            return demo_mean, max(demo_std, floor)
 
         df = pd.DataFrame(history)
         if metric not in df.columns:
-            return demo_mean, demo_std
+            return demo_mean, max(demo_std, floor)
 
         df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
         df = df.set_index("timestamp").sort_index()
         series = df[metric].dropna()
         if series.empty:
-            return demo_mean, demo_std
+            return demo_mean, max(demo_std, floor)
 
         last_date    = df.index.max()
         window_start = last_date - timedelta(days=self.ROLLING_WINDOW_DAYS)
@@ -350,7 +516,17 @@ class EarlyWarningEngine:
         blended_mean, blended_std = _blend_seed(
             {"mean": p_mean, "std": p_std}, demo_mean, demo_std, personal_weight
         )
-        return blended_mean, max(blended_std, 0.1)
+
+        # §50.5: the personal SD above is estimated from very few points
+        # early on and is unreliable in both directions — widen the floor
+        # while the baseline is still immature, on top of whatever the
+        # personal/demographic blend produced.
+        if date_span_days < 7:
+            floor *= self.IMMATURE_BASELINE_MULT_UNDER_7D
+        elif date_span_days < self.MIN_BASELINE_DAYS:
+            floor *= self.IMMATURE_BASELINE_MULT_7_TO_14D
+
+        return blended_mean, max(blended_std, floor)
 
     def _calculate_baseline(self, user_id: str, metric: str) -> Tuple[float, float]:
         """Convenience wrapper: load history from DB then delegate to blended baseline."""
@@ -476,56 +652,97 @@ class EarlyWarningEngine:
         return hr_trend_2w, hrv_vs_baseline, sleep_pattern
 
     # ------------------------------------------------------------------
-    # CVD risk algorithms
+    # CVD risk — WHO 2019 non-laboratory chart (Southern sub-Saharan Africa)
     # ------------------------------------------------------------------
-    def _framingham_adapted(self, profile: ContextualProfile, heart_rate_resting: float) -> float:
-        age_pts   = min(4, max(0, (profile.age - 30) // 10)) if profile.age >= 30 else 0
-        hr_pts    = 2 if heart_rate_resting >= 90 else (1 if heart_rate_resting >= 80 else 0)
-        ht_pts    = 2 if profile.hypertension else 0
-        smoke_pts = 1 if profile.smoker else 0
-        return min(100.0, round(5.0 + (age_pts + hr_pts + ht_pts + smoke_pts) * 2.2, 1))
+    # AH-45 gap report: _framingham_adapted took age/resting-HR/hypertension/
+    # smoker — resting HR is not a Framingham variable, and real Framingham
+    # needs cholesterol, HDL, and BP-treatment status this never collected.
+    # _qrisk3_adapted called _framingham_adapted and added a fixed increment,
+    # so the two scores could never actually disagree — there was no second
+    # opinion to weigh. Both are replaced by a single categorical result
+    # from the WHO 2019 non-lab chart, the instrument the spec identifies as
+    # regionally validated (vs. global tools shown mutually uncorrelated in
+    # African cohorts). §45.4: refuses to score outside the chart's
+    # validated 40-74 age range, and refuses on any missing required input
+    # rather than imputing a default.
+    WHO_2019_MIN_AGE = 40
+    WHO_2019_MAX_AGE = 74
 
-    def _qrisk3_adapted(
-        self, profile: ContextualProfile,
-        heart_rate_resting: float, hrv_rmssd: float,
-        sleep_hours: float, step_count: int,
-    ) -> float:
-        fram   = self._framingham_adapted(profile, heart_rate_resting)
-        uplift = 0.0
-        if 0 < hrv_rmssd < 25:    uplift += 2.0
-        if 0 < sleep_hours < 6:   uplift += 1.5
-        if 0 < step_count < 5000: uplift += 1.5
-        return min(100.0, round(fram + uplift, 1))
+    def _who2019_non_lab_risk_category(
+        self, profile: ContextualProfile, systolic_bp: Optional[float]
+    ) -> CvdRiskAssessment:
+        reasons: List[str] = []
+        if profile.age < self.WHO_2019_MIN_AGE or profile.age > self.WHO_2019_MAX_AGE:
+            reasons.append("OUT_OF_VALIDATED_AGE_RANGE")
+        if profile.sex is None:
+            reasons.append("MISSING_SEX")
+        if profile.smoker is None:
+            reasons.append("MISSING_SMOKING_STATUS")
+        if systolic_bp is None:
+            reasons.append("MISSING_SYSTOLIC_BP")
+        if profile.bmi is None:
+            reasons.append("MISSING_BMI")
 
-    def _custom_ml_risk(
-        self, heart_rate_resting: float, hrv_rmssd: float,
-        sleep_hours: float, ecg_rhythm: str, step_count: int,
-    ) -> Tuple[float, float]:
-        risk = 12.0
-        if heart_rate_resting >= 80:  risk += (heart_rate_resting - 80) * 0.15
-        if 0 < hrv_rmssd < 30:        risk += (30 - hrv_rmssd) * 0.2
-        if 0 < sleep_hours < 6:       risk += 3.0
-        if ecg_rhythm == "irregular": risk += 6.0
-        if 0 < step_count < 4000:     risk += 2.0
-        risk = min(100.0, round(risk, 1))
-        conf = min(1.0, round(0.75 + (heart_rate_resting + hrv_rmssd) / 1000.0, 2))
-        return risk, conf
+        if reasons:
+            return CvdRiskAssessment(computable=False, reasons_not_computable=reasons)
 
-    def _fusion_trajectory(
-        self, risk_scores: RiskScores,
-        hr_trend: Optional[str], hrv_vs_baseline: Optional[str], ecg_rhythm: str,
-    ) -> FusionOutput:
-        current = risk_scores.ml_cvd_risk_pct
-        trajectory_2y = current
-        if hr_trend == "rising" and (hrv_vs_baseline == "below" or ecg_rhythm == "irregular"):
-            trajectory_2y = min(100.0, round(current + 6.0, 1))
-        alert_triggered = current >= 20 or (trajectory_2y >= 28 and current >= 18)
-        message = "High cardiovascular risk detected. Recommend clinical follow-up." if alert_triggered else None
-        return FusionOutput(
-            trajectory_risk_2y_pct=trajectory_2y,
-            alert_triggered=alert_triggered,
-            alert_message=message,
-        )
+        # The WHO 2019 non-laboratory CVD risk chart for Southern
+        # sub-Saharan Africa (WHO CVD Risk Chart Working Group, Lancet Glob
+        # Health 2019) is a published table of age x SBP x BMI x sex x
+        # smoking-status cells, each mapping to one of five risk categories.
+        # The exact cell values were not supplied with the specification
+        # this fix was built from, and are not reproduced here from memory —
+        # doing so would be exactly the kind of unsourced clinical number
+        # this whole engagement exists to remove. Every input this function
+        # validates above is real and wired end-to-end; only the final
+        # table lookup is a stub until someone transcribes the actual chart
+        # from the primary WHO/Lancet publication (with the same clinician
+        # sign-off as the SATS tables in triageThresholds/).
+        reasons.append("WHO_2019_CHART_NOT_YET_DIGITIZED")
+        return CvdRiskAssessment(computable=False, reasons_not_computable=reasons)
+
+    def _physiological_trend_flags(
+        self, hr_trend: Optional[str], hrv_vs_baseline: Optional[str], sleep_pattern: Optional[str]
+    ) -> List[str]:
+        # AH-45 §45.5: resting HR trend, HRV-vs-baseline and sleep pattern
+        # are risk *markers* in cohort studies, not inputs to any validated
+        # CVD risk equation — previously folded straight into a risk
+        # percentage by _custom_ml_risk/_qrisk3_adapted, which silently
+        # invalidated both instruments. Surfaced here instead, explicitly
+        # separate from risk_category, and never used to compute it.
+        flags: List[str] = []
+        if hr_trend == "rising":
+            flags.append("RESTING_HR_RISING_OVER_ROLLING_WINDOW")
+        if hrv_vs_baseline == "below":
+            flags.append("HRV_BELOW_PERSONAL_BASELINE")
+        if sleep_pattern == "disrupted":
+            flags.append("SLEEP_DISRUPTED")
+        return flags
+
+    def _epidemiological_flags(self, profile: ContextualProfile) -> List[str]:
+        # AH-45 §45.6: no major CVD calculator (including WHO 2019) accounts
+        # for HIV or active TB, both common in this population — surfaced
+        # as an explicit flag next to the risk category, never as a hidden
+        # multiplier invented for this codebase.
+        flags: List[str] = []
+        if profile.hiv_positive:
+            flags.append("HIV_POSITIVE_INSTRUMENT_LIKELY_UNDERESTIMATES_RISK")
+        if profile.active_tb:
+            flags.append("ACTIVE_TB_INSTRUMENT_LIKELY_UNDERESTIMATES_RISK")
+        return flags
+
+    def _fusion_from_cvd_risk(self, cvd_risk: CvdRiskAssessment) -> FusionOutput:
+        # AH-45 §45.1: no more arithmetic trajectory projection — alert is
+        # driven only by the categorical result (or a future discordance
+        # flag), never a blended/averaged number.
+        high_risk = cvd_risk.computable and cvd_risk.risk_category in ("20-<30%", ">=30%")
+        alert_triggered = high_risk or cvd_risk.discordance_flag
+        message = None
+        if high_risk:
+            message = f"WHO 2019 non-lab CVD risk category: {cvd_risk.risk_category}. Recommend clinical follow-up."
+        elif cvd_risk.discordance_flag:
+            message = "CVD risk instruments disagree — recommend clinician review."
+        return FusionOutput(alert_triggered=alert_triggered, alert_message=message)
 
     # ------------------------------------------------------------------
     # Full analysis
@@ -538,7 +755,11 @@ class EarlyWarningEngine:
         profile = context or db.load_context(user_id)
         profile_was_missing = profile is None
         if profile is None:
-            profile = ContextualProfile(age=50, smoker=False, hypertension=False)
+            # AH-45 §45.4: no imputed default — smoker/sex/systolic_bp/bmi
+            # stay None (unknown), not assumed. age=50 is only ever used as
+            # a demographic-seed lookup for the baseline blend below, never
+            # fed into the WHO 2019 chart itself without a real profile.
+            profile = ContextualProfile(age=50)
         if context:
             db.save_context(user_id, context)
 
@@ -552,25 +773,12 @@ class EarlyWarningEngine:
         hrv_baseline, _ = self._calculate_blended_baseline(history, "hrv_rmssd",          age)
         hr_trend, hrv_vs_baseline, sleep_pattern = self._extract_features(history, data, user_id)
 
-        fram  = self._framingham_adapted(profile, data.heart_rate_resting)
-        qrisk = self._qrisk3_adapted(
-            profile, data.heart_rate_resting, data.hrv_rmssd,
-            data.sleep_duration_hours or 0, data.step_count or 0,
+        cvd_risk = self._who2019_non_lab_risk_category(profile, profile.systolic_bp)
+        cvd_risk.physiological_trend_flags = self._physiological_trend_flags(
+            hr_trend, hrv_vs_baseline, sleep_pattern
         )
-        ml_risk, ml_conf = self._custom_ml_risk(
-            data.heart_rate_resting, data.hrv_rmssd,
-            data.sleep_duration_hours or 0,
-            getattr(data, "ecg_rhythm", "unknown") or "unknown",
-            data.step_count or 0,
-        )
-        risk_scores = RiskScores(
-            framingham_10y_pct=fram, qrisk3_10y_pct=qrisk,
-            ml_cvd_risk_pct=ml_risk, ml_confidence=ml_conf,
-        )
-        fusion = self._fusion_trajectory(
-            risk_scores, hr_trend, hrv_vs_baseline,
-            getattr(data, "ecg_rhythm", "unknown") or "unknown",
-        )
+        cvd_risk.epidemiological_flags = self._epidemiological_flags(profile)
+        fusion = self._fusion_from_cvd_risk(cvd_risk)
 
         clinical_flags: List[str] = []
         if getattr(data, "ecg_rhythm", None) == "irregular":
@@ -618,7 +826,7 @@ class EarlyWarningEngine:
             hr_trend_2w=hr_trend,
             hrv_vs_baseline=hrv_vs_baseline,
             sleep_pattern=sleep_pattern,
-            risk_scores=risk_scores,
+            cvd_risk=cvd_risk,
             fusion=fusion,
             clinical_flags=clinical_flags,
             alert_level=alert_level,

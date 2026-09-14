@@ -959,3 +959,117 @@ has no test/syntax gate before it builds and deploys the container —
 verified instead by careful manual re-reading of the full diff across
 several passes. Run the ml-service test suite (or re-run the scenario
 harness) against this change before merging to close that gap.
+
+## 12. AH-45 / AH-50 — CVD risk and wearable noise floor, 2026-09-14
+
+Follow-up to §11: a clinician threshold specification (evidence-assembled,
+explicitly **awaiting named clinician sign-off** — HPCSA number, date,
+table version — before any of it is clinically authorized) gave sourced
+numbers for AH-45 and AH-50, and cited literature/structural fixes for
+AH-44's Python side. User directed: build and land on main now; sign-off
+is a parallel track, not a merge gate.
+
+Also closed the gap flagged in §11: installed a real Python 3.12
+interpreter (`winget install Python.Python.3.12`) plus the ml-service's
+actual dependencies, so every change below was executed against the real
+engine, not just read. That execution caught two real bugs before they
+shipped (below).
+
+**AH-45 — CVD risk (`apps/ml-service/engine.py`, `models.py`):**
+`_framingham_adapted` took age/resting-HR/hypertension/smoker — resting
+HR is not a Framingham variable, and real Framingham needs cholesterol,
+HDL, and BP-treatment status this never collected. `_qrisk3_adapted`
+*called* `_framingham_adapted` and added a fixed increment, so the two
+"independent validated scores" were one function and a constant — they
+could never actually disagree. Displaying them as "Framingham 10-year"
+and "QRISK3 10-year" was a labelling problem before an accuracy one.
+
+- Deleted both, plus `_custom_ml_risk` and `_fusion_trajectory`'s
+  arithmetic trajectory projection (`current + 6.0` if "rising" — an
+  unsourced number). Replaced with `_who2019_non_lab_risk_category`: the
+  WHO 2019 non-laboratory CVD risk chart for Southern sub-Saharan Africa
+  (age, sex, smoking, SBP, BMI → one of five categories), the instrument
+  the specification identifies as regionally validated versus global
+  tools shown mutually uncorrelated in African cohorts.
+- **Honest, disclosed gap**: the actual WHO 2019 chart cell values (a
+  published table of age × SBP × BMI × sex × smoking-status combinations)
+  were not supplied with the specification and are not reproduced here
+  from memory — doing so would be exactly the kind of unsourced clinical
+  number this whole engagement exists to remove. Every validation gate
+  around the lookup is real and wired end-to-end (age range 40–74,
+  required inputs, no imputed defaults); the function currently always
+  returns `computable: false, reasons_not_computable: ["WHO_2019_CHART_NOT_YET_DIGITIZED"]`
+  once inputs pass validation. Digitizing the real chart (with the same
+  clinician sign-off as the SATS tables in `triageThresholds/`) is the
+  one piece of remaining work this fix could not complete honestly.
+- `ContextualProfile` gained `sex`, `systolic_bp`, `bmi`, `diabetes`,
+  `hiv_positive`, `active_tb` — all `Optional` with no default, per the
+  spec's "no imputed default, no assumed non-smoker."
+- Wearable signals (resting-HR trend, HRV-vs-baseline, sleep pattern) —
+  previously folded straight into the fake risk percentage — moved to
+  `physiological_trend_flags`, explicitly separate from `risk_category`
+  and never used to compute it. Fake confidence
+  (`0.75 + (HR+HRV)/1000`, a function of inputs, not certainty) deleted
+  outright. HIV/TB surfaced as `epidemiological_flags`, not a hidden
+  multiplier. `RiskScores` renamed `CvdRiskAssessment`
+  (`EarlyWarningSummary.risk_scores` → `.cvd_risk`) — checked first that
+  nothing in the frontend renders these fields (only referenced in an
+  unused optional TS type), so this is a safe internal contract change.
+
+**AH-50 — wearable noise floor (`engine.py`):**
+- §50.1: the shared `max(blended_std, 0.1)` floor (a tenth of a beat for
+  heart rate) replaced with per-metric floors — HR 3.0 bpm, RR 1.0 br/min
+  (1.5 if age ≥60) — in `_sigma_floor_for`.
+- §50.2: HRV moved off the generic z-score loop entirely into
+  `_hrv_deviation` — RMSSD is right-skewed, so a raw z-score isn't a valid
+  statistic (this is how M09 produced "−6.1σ" in the original report).
+  Compares a 7-day rolling mean of `ln(RMSSD)` against the baseline from
+  the patient's first stable week, flagging only when the shift exceeds
+  0.5× the patient's own coefficient of variation (smallest-worthwhile-
+  change), not a sigma multiple.
+- §50.3: heart rate and respiratory rate now require the deviation on
+  ≥2 of the last 3 readings (current included) before counting —
+  `_persistent_anomaly`. The AH-43/44 absolute floor is exempt by design;
+  those still fire on the first reading.
+- §50.4: SpO2 boundaries updated to NEWS2 Scale 1 exactly (≤91 critical,
+  92–93 low, 94–96 indeterimate) and removed entirely from the
+  baseline-relative z-score loop — never compared to a personal baseline.
+  A 94–96% reading is indeterminate, not reassuring: it only escalates
+  alongside a respiratory-rate deviation also present, matching the
+  TS-side triage implementation of the same rule (§11).
+- §50.5: the effective floor widens ×1.5 below 7 days of history and
+  ×1.25 between 7–14 days, since the personal SD is unreliable from very
+  few points in either direction.
+
+**Two real bugs caught by actually executing this, not just reading it:**
+1. HRV's coefficient-of-variation calculation returned ~0 for
+  near-constant historical data (`std()` on identical values is ~1e-16,
+  not exactly 0, so a bare `<= 0` guard didn't catch it) — this made HRV
+  monitoring *least* sensitive for the most consistent wearers, the
+  opposite of AH-50's purpose. Fixed with a real CV floor (2.7%, the
+  spec's own cited minimum for a stable individual), not just a
+  floating-point epsilon guard.
+2. The first test of a genuine, large single-vital deviation
+  (`_verify_ah43_44.py`, deleted before commit) surfaced this — without
+  running it, both would have shipped silently.
+
+**Verified:** `python -m py_compile` clean on every touched file. A real
+Python 3.12 venv with the service's actual dependencies (pydantic, numpy,
+pandas, psycopg2-binary) confirmed `main.py` — the actual Railway
+entrypoint — imports and builds its FastAPI app cleanly end-to-end. A
+disposable verification script (deleted before commit) exercised: AH-43/44
+regression (no-history catastrophic → RED, isolated critical vital → RED,
+exercise suppression still works and still doesn't suppress a RED-level
+floor breach), AH-50's persistence rule (single spike doesn't escalate,
+2-of-3 does), immature-baseline widening (same 4 bpm move flags with a
+mature baseline, doesn't with a 5-day one), a genuine HRV crash correctly
+flagging after the CV-floor fix, the SpO2 indeterminate+RR-deviation
+escalation combo, and every AH-45 CVD scenario (missing inputs, out-of-
+range age, HIV flag, wearable trend flag) resolving correctly.
+
+**Not fixed — still needs the actual WHO 2019 chart data**, and clinician
+sign-off on all six items the specification calls out (three TEWS charts,
+the emergency-signs override, the age/height band rule, the WHO 2019
+instrument choice, the SpO2 indeterminate band, and the σ floors +
+persistence rule) before any of this reaches a patient in the sense the
+specification means "reaches."
