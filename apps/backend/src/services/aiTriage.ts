@@ -19,8 +19,15 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 // separately, so the two could silently disagree (and neither reflected
 // whether Gemini or the no-AI fallback actually produced the result — see
 // TriageResult.modelUsed).
-const CLAUDE_MODEL = "claude-sonnet-4-20250514";
-const GEMINI_MODEL = "gemini-2.0-flash";
+// 2026-09-15: both of these were retired by their providers — Anthropic
+// returned 404 not_found_error for claude-sonnet-4-20250514, and Google's
+// 404 for gemini-2.0-flash pointed directly at its replacement. Every real
+// AI call was failing silently into conservativeFallback (see
+// analyzeSymptoms below), so every triage case looked AI-analyzed in the UI
+// but was actually the non-AI keyword fallback. Check both provider's
+// current model list before bumping either of these again.
+const CLAUDE_MODEL = "claude-sonnet-5";
+const GEMINI_MODEL = "gemini-3.6-flash";
 const FALLBACK_MODEL_LABEL = "fallback-heuristic (no AI model — see uncertaintyFlags)";
 
 // Key presence is logged at startup only — no patient data in logs

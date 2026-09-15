@@ -1486,3 +1486,66 @@ stale `.next/types` reference to a deleted dev-only page was cleared —
 neither caused by this change). `eslint` on every changed file: 0 errors,
 only pre-existing warnings. Full backend Jest suite and both production
 builds run clean.
+
+## 20. Every real AI triage call had been silently failing for some time — retired model IDs, 2026-09-15
+
+The user asked a design question: if the symptom checker sources evidence
+from PubMed/NCBI/StatPearls, why doesn't it read as a real diagnostic
+assistant even on straightforward cases? Pulled ~15 minutes of Railway
+logs to check, rather than answering from the architecture alone.
+
+The evidence pipeline was fine. The AI reasoning step that's supposed to
+read that evidence was not running at all:
+
+```
+[aiTriage] Anthropic API Error: 404 {"type":"error","error":{"type":"not_found_error","message":"model: claude-sonnet-4-20250514"}}
+[aiTriage] Claude failed: ...
+[aiTriage] Gemini also failed: [GoogleGenerativeAI Error]: ... [404 Not Found] This model models/gemini-2.0-flash is no longer available. Please update your code to use models/gemini-3.6-flash...
+```
+
+Both hardcoded model constants in `aiTriage.ts` (`CLAUDE_MODEL`,
+`GEMINI_MODEL` — unified into single constants by §18's fix) had been
+retired by their providers. Every request hit both 404s and fell through
+to `conservativeFallback`, the non-AI keyword safety net — which is why
+cases displayed generic, non-evidence-grounded reasoning ("Cough with fever
+... TB remains part of the differential ... Conservative safety fallback
+was used") regardless of how good the fetched PubMed/StatPearls context
+was: that context is only ever handed to Claude/Gemini, never to the
+fallback. This wasn't specific to the one case the user pointed at —
+matches multiple other queued cases in the same screenshot, all showing
+the same fallback signature.
+
+Fixed by updating the constants to each provider's current model
+(`claude-sonnet-5`, `gemini-3.6-flash` — the latter taken directly from
+Gemini's own 404 message). Also removed the stale `ANTHROPIC_MODEL=` line
+from `env.example`, which no longer does anything since §18 unified the
+display label and the real API call onto the same hardcoded constant —
+leaving it in the example file invited someone to "fix" this exact problem
+by setting an env var that the code doesn't read.
+
+Second, unrelated bug in the same log window: Redis has been unreachable
+in production —
+```
+❌ Redis connection error: connect ENOENT //default:<pw>@redis.railway.internal:6379
+```
+— `REDIS_URL` is missing its `redis://` scheme, so ioredis can't parse it.
+This is the same config bug flagged in §15's Redis incident review; it was
+apparently never corrected on Railway's side, or regressed since. Rather
+than wait on that dashboard fix again, added `normalizeRedisUrl()` in
+`services/redis.ts` so a scheme-less value is corrected in code and the
+existing retry loop (from §15) does the rest. This does not affect AI
+triage correctness directly (the synchronous fallback path runs with or
+without Redis) but explains why background jobs, the NCBI/PubMed evidence
+cache (§14), and auth lockout checks (`[auth] Redis unavailable ... failing
+open`) have been degraded the whole time. The underlying Railway variable
+should still be corrected directly — the code fix is a safety net, not a
+substitute for fixing the actual value.
+
+**Verified:** new `redis.test.ts` (4 cases) pins `normalizeRedisUrl`
+against well-formed `redis://`/`rediss://` URLs (unchanged) and two
+malformed shapes seen in the wild. `tsc --noEmit` and `eslint` clean (0
+errors) on both changed files. Full backend Jest suite passes (one test —
+a live network call to evidence providers with no test-env API keys —
+timed out under concurrent load in this run and passed cleanly in
+isolation; pre-existing flakiness unrelated to this change, not a
+regression).

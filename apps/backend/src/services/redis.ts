@@ -9,10 +9,21 @@ let redis: Redis | null = null;
 // so each call here genuinely attempts a fresh connection instead of
 // short-circuiting; that retry cadence is what keeps this from hammering a
 // genuinely-down Redis.
+// Seen in production, 2026-09-15: REDIS_URL was set on Railway without its
+// scheme (`//default:<pw>@redis.railway.internal:6379` instead of
+// `redis://...`), which ioredis can't parse — it connects to a literal host
+// named "" and fails with ENOENT forever. Normalizing here means a
+// misconfigured value degrades gracefully via the existing retry loop
+// instead of silently disabling caching/background jobs/auth-lockout
+// checks until someone notices and fixes the Railway variable by hand.
+export function normalizeRedisUrl(url: string): string {
+  return /^rediss?:\/\//.test(url) ? url : `redis://${url.replace(/^\/+/, '')}`;
+}
+
 export const initializeRedis = async (): Promise<Redis> => {
   if (redis) return redis;
 
-  const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+  const redisUrl = normalizeRedisUrl(process.env.REDIS_URL || 'redis://localhost:6379');
   const client = new Redis(redisUrl, {
     enableReadyCheck: true,
     maxRetriesPerRequest: null, // Required by BullMQ Workers (allows retries on disconnect)
