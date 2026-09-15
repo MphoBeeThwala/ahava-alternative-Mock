@@ -113,6 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
+  const isAuthenticated = !!user && !!token;
 
   const updateCurrentUser = useCallback((patch: Partial<User>) => {
     setUser((currentUser) => {
@@ -183,6 +184,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     void initializeAuth();
   }, []);
+
+  // Found via a real report, 2026-09-15: a doctor's session expired mid-way
+  // through writing a clinical review and they were forced to log back in,
+  // losing everything typed (see the review-draft fix in the doctor
+  // dashboard for the other half of this). The access token is short-lived
+  // (15m default) and, before this, only ever refreshed reactively — on a
+  // 401 from an actual API call (lib/api/client.ts's interceptor). Filling
+  // in a long form makes zero API calls until the final submit, so a
+  // 15+ minute review could hit that 401 for the first time on save, and if
+  // the refresh token had also lapsed by then, the doctor was logged out on
+  // the very request meant to save their work. Proactively refreshing well
+  // inside the access-token window means normal clinical work no longer
+  // depends on finishing within 15 minutes; a genuine logout becomes a rare
+  // edge case (multi-day inactivity, revoked session) instead of routine.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const REFRESH_INTERVAL_MS = 10 * 60 * 1000; // inside the 15m access-token TTL
+    const interval = setInterval(() => {
+      authApi.refreshToken().catch(() => {
+        // A real 401 here means the session is genuinely gone (refresh token
+        // expired/revoked) — let the next actual request's reactive handling
+        // in client.ts decide that and redirect, rather than racing it here.
+      });
+    }, REFRESH_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [isAuthenticated]);
 
   const finalizeSession = async (user: User) => {
     if (typeof window !== 'undefined') {
@@ -311,7 +338,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         logout,
         refreshUser,
         updateCurrentUser,
-        isAuthenticated: !!user && !!token,
+        isAuthenticated,
       }}
     >
       {children}

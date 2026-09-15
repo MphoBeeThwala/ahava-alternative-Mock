@@ -1549,3 +1549,53 @@ a live network call to evidence providers with no test-env API keys —
 timed out under concurrent load in this run and passed cleanly in
 isolation; pre-existing flakiness unrelated to this change, not a
 regression).
+
+## 21. Doctor lost in-progress clinical notes on session expiry, 2026-09-15
+
+Reported while a doctor was actually using the fixed triage flow from §20:
+a session token expiring mid-review forced a re-login, and everything typed
+into the review form (clinical notes, diagnosis, recommendations) was gone
+— nothing in it was persisted anywhere until the final submit. Two separate
+problems compound this, so both got fixed rather than papering over one.
+
+**Root cause — sessions only ever renewed reactively.** Access tokens are
+short-lived (15m default, `JWT_EXPIRES_IN`) and were only ever refreshed by
+`lib/api/client.ts`'s response interceptor, which fires on an actual 401
+from an actual API call. Filling in a review form makes zero API calls
+until the doctor hits Save — so a review that takes longer than 15 minutes
+could hit that 401 for the first time on submit, and if the 7-day refresh
+token had also lapsed (inactivity, revocation, a dropped cookie), the
+interceptor's failure path does a hard `window.location.href =
+'/auth/login'`, which wipes all in-memory React state unconditionally.
+Fixed by adding a proactive refresh heartbeat in `AuthContext.tsx` — every
+10 minutes (inside the 15-minute access-token window) while authenticated,
+silently call `/auth/refresh` in the background. This keeps a doctor's
+session alive through normal long-form clinical work without them ever
+needing to notice; a genuine logout becomes the rare case (real multi-day
+inactivity or an actually-revoked session) instead of a routine mid-task
+interruption. A failed heartbeat call is swallowed deliberately — it lets
+the next real request's existing reactive handling in `client.ts` decide
+whether the session is actually gone, rather than racing it.
+
+**Safety net — the underlying data-loss shouldn't depend on the cause.**
+Even with the above, a doctor can still lose typed notes to a browser
+crash, an accidental tab close, or a real multi-day-inactivity logout — the
+fix above reduces how often sessions expire mid-task, it doesn't make form
+state durable. Added local draft persistence for the review modal
+(`_lib.ts`'s `loadReviewDraft`/`saveReviewDraft`/`clearReviewDraft`,
+`localStorage`-backed and keyed by case id): the form autosaves on every
+change, `onOpenReview` restores a matching draft if one exists (with a
+toast so the doctor knows it happened, rather than being confused by a
+pre-filled form), and the draft is only cleared after a successful save.
+Scoped to the review modal specifically, since that's the reported case and
+the highest-value target (it's the point where a doctor first writes
+free-text clinical reasoning); the same pattern extends cleanly to the
+prescription/referral/follow-up modals if the same loss is reported there.
+
+**Verified:** `tsc --noEmit` and `eslint` clean (0 errors) on all three
+changed files. No frontend test runner exists in `workspace` to add a
+regression test to (`npm test` is a no-op placeholder) — verified by
+reading the actual save/restore/clear call sites against the reported
+failure mode; not exercised in a live browser session (no local backend/DB
+in this environment, per earlier sections). Production build compiles
+clean.

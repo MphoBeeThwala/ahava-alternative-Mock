@@ -42,6 +42,48 @@ export type ReviewModalState = {
   overrideReason: string;
 };
 
+// Found via a real report, 2026-09-15: a doctor's session expired while they
+// were mid-way through writing a clinical review (nothing in this form was
+// persisted anywhere until the final submit), and the forced re-login wiped
+// everything they'd typed. This isn't only a token-expiry problem — the same
+// loss happens on an accidental tab close or a browser crash — so the fix is
+// a general draft safety net, not something tied to auth specifically.
+// localStorage access is wrapped because it can throw (private browsing,
+// storage disabled) and a failed draft save/restore should never break the
+// review flow itself.
+const REVIEW_DRAFT_PREFIX = 'ahava:doctor:review-draft:';
+
+export function reviewDraftKey(caseId: string): string {
+  return `${REVIEW_DRAFT_PREFIX}${caseId}`;
+}
+
+export function loadReviewDraft(caseId: string): ReviewModalState | null {
+  try {
+    const raw = localStorage.getItem(reviewDraftKey(caseId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && parsed.caseId === caseId ? (parsed as ReviewModalState) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveReviewDraft(state: ReviewModalState): void {
+  try {
+    localStorage.setItem(reviewDraftKey(state.caseId), JSON.stringify(state));
+  } catch {
+    // Best effort only.
+  }
+}
+
+export function clearReviewDraft(caseId: string): void {
+  try {
+    localStorage.removeItem(reviewDraftKey(caseId));
+  } catch {
+    // Best effort only.
+  }
+}
+
 export type MedRow = { name: string; dosage: string; frequency: string; duration: string; instructions: string };
 
 export const blankMed = (): MedRow => ({ name: '', dosage: '', frequency: '', duration: '', instructions: '' });

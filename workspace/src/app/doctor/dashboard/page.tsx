@@ -18,6 +18,9 @@ import { FollowUpRequestModal } from './_components/FollowUpRequestModal';
 import { NurseVisitCard } from './_components/NurseVisitCard';
 import {
   blankMed,
+  loadReviewDraft,
+  saveReviewDraft,
+  clearReviewDraft,
   type ReviewModalState,
   type PrescriptionModalState,
   type ReferralModalState,
@@ -91,6 +94,13 @@ export default function DoctorDashboard() {
         loadHcpsaStatus();
     }, [user, loadPendingVisits, loadTriageCases, loadHcpsaStatus]);
 
+    // Autosave the in-progress review as a local draft (see _lib.ts) so a
+    // session expiry, accidental tab close, or crash mid-write doesn't lose
+    // clinical notes the doctor already typed. Cleared on successful save.
+    useEffect(() => {
+        if (reviewModal) saveReviewDraft(reviewModal);
+    }, [reviewModal]);
+
     const handleApprove = async (visitId: string) => {
         try {
             await doctorApi.approveVisit(visitId);
@@ -142,6 +152,7 @@ export default function DoctorDashboard() {
                 overrideReason: reviewModal.finalTriageLevel !== reviewModal.aiTriageLevel ? reviewModal.overrideReason : undefined,
             });
             toast.success('Review saved. You can now release the result to the patient.');
+            clearReviewDraft(reviewModal.caseId);
             setReviewModal(null);
             loadTriageCases();
         } catch (error: unknown) {
@@ -318,7 +329,11 @@ export default function DoctorDashboard() {
                             triageCase={selectedCase}
                             releasing={releasing}
                             onClaim={handleClaim}
-                            onOpenReview={(c) => setReviewModal({ caseId: c.id, aiTriageLevel: c.aiTriageLevel, doctorNotes: '', doctorDiagnosis: '', doctorRecommendations: '', finalTriageLevel: c.aiTriageLevel, overrideReason: '' })}
+                            onOpenReview={(c) => {
+                                const draft = loadReviewDraft(c.id);
+                                if (draft) toast.info('Restored your unsaved draft for this case.');
+                                setReviewModal(draft ?? { caseId: c.id, aiTriageLevel: c.aiTriageLevel, doctorNotes: '', doctorDiagnosis: '', doctorRecommendations: '', finalTriageLevel: c.aiTriageLevel, overrideReason: '' });
+                            }}
                             onOpenFollowUp={(c) => setFollowUpModal({
                                 caseId: c.id,
                                 requestType: 'MORE_INFO',
