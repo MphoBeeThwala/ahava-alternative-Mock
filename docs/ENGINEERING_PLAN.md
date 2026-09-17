@@ -1599,3 +1599,73 @@ reading the actual save/restore/clear call sites against the reported
 failure mode; not exercised in a live browser session (no local backend/DB
 in this environment, per earlier sections). Production build compiles
 clean.
+
+## 22. Admin console — four broken/missing pieces found while scoping SOP documentation, 2026-09-17
+
+Came up while asked what a system admin actually sees after a doctor issues
+an emergency referral, ahead of writing operational SOPs for the app.
+Traced every button on the admin dashboard against the actual backend and
+found the whole admin panel had far less working behind it than the UI
+implies — `routes/admin.ts` had exactly three endpoints (list users,
+aggregate stats, suspend) while the frontend's `adminApi` called five more
+paths that didn't exist. Fixed all of it rather than documenting a
+partially-fake admin workflow:
+
+- **"+ Add User" 404'd** — `POST /admin/users` didn't exist. Added it:
+  validates with the same `emailSchema`/`passwordComplexitySchema` used by
+  self-registration (now exported from `routes/auth.ts` instead of
+  duplicated), hashes with the same `BCRYPT_ROUNDS` convention, and sets
+  `isActive`/`isVerified` true immediately — an admin-created account skips
+  the email-verification loop because the admin is already vouching for the
+  identity.
+- **Suspend/Activate was two bugs deep** — the frontend called `PATCH
+  /admin/users/:id`, the only real route was `PATCH /admin/users/:id/suspend`
+  (wrong path, so it 404'd), and that route unconditionally set `isActive:
+  false` regardless of intent — so even a correct path could never express
+  "Activate." Replaced with one generic `PATCH /admin/users/:id` accepting
+  `{ isActive }`, which the frontend already expected. Added a guard against
+  an admin suspending their own account, which the old route had no
+  protection against either.
+- **HPCSA verification never existed anywhere.** The doctor dashboard tells
+  a doctor "an administrator will verify it shortly" after they submit a
+  practice number (see the "Verify HPCSA" nag on that dashboard), but no
+  endpoint — not even a stub — let an admin do that. Every doctor was
+  permanently stuck unverified, including the one who issued today's
+  emergency referral. Added `GET`/`PATCH /admin/users/:id/hpcsa` and a
+  column + "Verify" action on the admin users table.
+- **"⚠️ Reset Platform Data" 404'd** — `POST /admin/reset-trial-data` didn't
+  exist. Added it matching the UI's own stated scope ("delete ALL bookings,
+  readings, visits, and users except you"): wipes bookings, visits,
+  messages, payments, biometric readings, user baselines, health alerts,
+  triage cases (+ cascaded prescriptions/referrals), and patient consents
+  unconditionally; additionally deletes every user except the calling admin
+  when `keepUsers` is false. The frontend's `confirm()`/`prompt("RESET")`
+  dialogs are client-side only and don't stop a direct API call, so the
+  endpoint requires `confirm: "RESET"` in the body too — the same pattern as
+  `--confirm` on `scripts/reset-triage-cases.ts` (§19). `AuditLog` and
+  `SancRegister` are deliberately untouched — the UI's own description never
+  claimed to touch them, and an audit trail that erases itself on reset
+  defeats its own purpose.
+
+Deletion order in the reset handler matters for FK constraints and was
+checked against `schema.prisma` deliberately, not by trial and error:
+`Prescription`/`Referral`/`Booking`/`Visit` reference `User` with no
+cascade, so they're deleted before any `User` row is; `Payment` references
+`Visit` with no cascade, so it's deleted first; everything that *does*
+cascade from `User` (`BiometricReading`, `UserBaseline`, `HealthAlert`,
+`RefreshToken`, `TriageCase`'s patient side) is deleted explicitly anyway
+for clarity rather than relying on the cascade firing only when
+`keepUsers` is false.
+
+**Verified:** `tsc --noEmit` and `eslint` clean (0 errors; one pre-existing
+unused-import warning on `authMiddleware` fixed as a drive-by since the
+file was already being rewritten) on all four changed files. Full backend
+Jest suite (152/152) and both production builds compile clean. No
+route-level test convention exists for this codebase to extend with
+confidence outside a live database — the one integration-test file that
+does exist (`triage.integration.test.ts`) requires a real Postgres
+connection this environment doesn't have, so these endpoints are verified
+by type-checking, lint, and a deliberate line-by-line check of the Joi
+schemas and Prisma calls against `schema.prisma`'s actual constraints, not
+by an executed test. Worth a real click-through in the deployed app before
+relying on it for real HPCSA verification or a real trial-data reset.

@@ -109,6 +109,22 @@ export default function AdminDashboard() {
         }
     };
 
+    const [verifyingHcpsa, setVerifyingHcpsa] = useState<string | null>(null);
+
+    const handleVerifyHcpsa = async (userId: string) => {
+        setVerifyingHcpsa(userId);
+        try {
+            await adminApi.setDoctorHpcsa(userId, true);
+            toast.success('HPCSA practice number verified.');
+            loadUsers();
+        } catch (error: unknown) {
+            const err = error as { response?: { data?: { error?: string } } };
+            toast.error(err.response?.data?.error || 'Failed to verify HPCSA number.');
+        } finally {
+            setVerifyingHcpsa(null);
+        }
+    };
+
     const filteredUsers = useMemo(() => {
         return users.filter((u) => {
             if (roleFilter !== 'ALL' && u.role !== roleFilter) return false;
@@ -218,6 +234,7 @@ export default function AdminDashboard() {
                                         <th className="p-4">Email</th>
                                         <th className="p-4">Status</th>
                                         <th className="p-4">Verified</th>
+                                        <th className="p-4">HPCSA</th>
                                         <th className="p-4">Actions</th>
                                     </tr>
                                 </thead>
@@ -242,6 +259,29 @@ export default function AdminDashboard() {
                                                 <StatusBadge variant={u.isVerified ? 'success' : 'warning'} className="text-xs">
                                                     {u.isVerified ? 'Verified' : 'Pending'}
                                                 </StatusBadge>
+                                            </td>
+                                            <td className="p-4">
+                                                {u.role !== 'DOCTOR' ? (
+                                                    <span className="text-xs text-[var(--muted)]">—</span>
+                                                ) : !u.hcpsaNumber ? (
+                                                    <span className="text-xs text-[var(--muted)]">Not submitted</span>
+                                                ) : (
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-xs font-mono text-[var(--foreground)]">{u.hcpsaNumber}</span>
+                                                        <StatusBadge variant={u.hcpsaVerified ? 'success' : 'warning'} className="text-xs">
+                                                            {u.hcpsaVerified ? 'Verified' : 'Pending'}
+                                                        </StatusBadge>
+                                                        {!u.hcpsaVerified && (
+                                                            <button
+                                                                onClick={() => handleVerifyHcpsa(u.id)}
+                                                                disabled={verifyingHcpsa === u.id}
+                                                                className="text-xs font-medium text-[var(--primary)] hover:underline disabled:opacity-50"
+                                                            >
+                                                                {verifyingHcpsa === u.id ? 'Verifying…' : 'Verify'}
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </td>
                                             <td className="p-4">
                                                 <button

@@ -9,6 +9,8 @@ export interface User {
   isActive: boolean;
   isVerified: boolean;
   createdAt: string;
+  hcpsaNumber?: string | null;
+  hcpsaVerified?: boolean;
 }
 
 export const adminApi = {
@@ -24,8 +26,10 @@ export const adminApi = {
     const res = await apiClient.get('/admin/stats');
     return res.data;
   },
+  // `confirm: 'RESET'` is required server-side too — the UI's own confirm()/
+  // prompt() dialogs are client-side only and don't stop a direct API call.
   resetTrialData: async (keepUsers: boolean = true) => {
-    const res = await apiClient.post('/admin/reset-trial-data', { keepUsers });
+    const res = await apiClient.post('/admin/reset-trial-data', { keepUsers, confirm: 'RESET' });
     return res.data;
   },
   createUser: async (data: {
@@ -38,8 +42,14 @@ export const adminApi = {
     const res = await apiClient.post('/admin/users', data);
     return res.data;
   },
-  setDoctorHpcsa: async (userId: string, hcpsaNumber: string, verify = false) => {
-    const res = await apiClient.patch(`/admin/users/${userId}/hpcsa`, { hcpsaNumber, verify });
+  // hcpsaNumber is omitted (not sent as '') when only the verified flag is
+  // changing — the backend requires a non-empty string when this field is
+  // present at all.
+  setDoctorHpcsa: async (userId: string, verify: boolean, hcpsaNumber?: string) => {
+    const res = await apiClient.patch(`/admin/users/${userId}/hpcsa`, {
+      verify,
+      ...(hcpsaNumber ? { hcpsaNumber } : {}),
+    });
     return res.data;
   },
   getDoctorHpcsa: async (userId: string) => {

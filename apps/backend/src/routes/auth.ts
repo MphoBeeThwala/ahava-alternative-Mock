@@ -25,12 +25,12 @@ import { signToken, verifyToken, TWOFA_PENDING_TTL_SECONDS } from "../services/t
 const router: Router = Router();
 
 // Allow any TLD including .test for mock/load-test users (IANA list excludes .test)
-const emailSchema = Joi.string()
+export const emailSchema = Joi.string()
   .email({ tlds: { allow: false } })
   .required();
 
 // Password must be 8+ chars with at least one uppercase, one digit, one special character
-const passwordComplexitySchema = Joi.string()
+export const passwordComplexitySchema = Joi.string()
   .min(8)
   .pattern(/[A-Z]/, "uppercase letter")
   .pattern(/[0-9]/, "number")
