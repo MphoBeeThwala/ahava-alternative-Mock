@@ -1669,3 +1669,54 @@ by type-checking, lint, and a deliberate line-by-line check of the Joi
 schemas and Prisma calls against `schema.prisma`'s actual constraints, not
 by an executed test. Worth a real click-through in the deployed app before
 relying on it for real HPCSA verification or a real trial-data reset.
+
+## 23. SANC verification override had the same dead-end as HPCSA — nurses stuck flagged forever, 2026-09-17
+
+Same class of bug as §22's HPCSA fix, found by checking whether the nurse
+side of manual-review verification had the same gap the doctor side did.
+`services/sancVerification.ts` already does everything up to the point of
+letting an admin act: `verifySancRegistration` flags a nurse `NAME_MISMATCH`,
+`EXPIRED`, `SUSPENDED`, or `NOT_FOUND` during sign-up, and
+`adminOverrideVerification` already existed to clear that flag after an
+out-of-band check, recording who approved it and why. But nothing ever
+called it — no route, no admin UI — so a flagged nurse had no way back to
+verified, same as every doctor before §22.
+
+- **Added `GET`/`PATCH /admin/users/:id/sanc`** (`routes/admin.ts`), mirroring
+  the HPCSA routes exactly: `requireAdmin`, `invalidateCachedUser` after the
+  write, and a `createAuditLog` call on top of the audit entry
+  `adminOverrideVerification` already writes internally (`SANC_MANUAL_OVERRIDE`
+  on the `users` resource) — so the change shows up both in the nurse's own
+  verification history and in the admin-action log, same as every other
+  route in this file. `PATCH` requires a `reason` (min 3 chars, matching the
+  service function's signature) and 400s if the nurse isn't currently in one
+  of the four flagged statuses — a nurse who's already `Active`, or whose
+  registration is `CANCELLED` (deliberately left off the overridable list;
+  a cancellation is a harder stop than the other four and wasn't part of
+  what the task asked this override to clear), can't be pushed through this
+  endpoint.
+- **Admin dashboard** — added a `SANC` column next to `HPCSA` on the user
+  table (`admin/dashboard/page.tsx`), showing the nurse's
+  `sancVerificationStatus` and, for the four flagged statuses, an "Override"
+  action that prompts for a reason (mirroring the reset-data flow's use of
+  `prompt()` for input the double-confirm pattern doesn't need here) before
+  calling the new endpoint. `GET /admin/users` now also selects `sancId` /
+  `sancVerificationStatus` / `sancCategory` so the table has the data to
+  render without a per-row fetch, matching how `hcpsaNumber` / `hcpsaVerified`
+  were already selected there.
+
+**Verified:** dependencies weren't installed in this worktree at all
+(`node_modules` missing everywhere); ran `pnpm install` and
+`prisma generate` first. `tsc --noEmit` and `eslint` clean (0 errors, 0
+warnings) on all four changed files
+(`apps/backend/src/routes/admin.ts`, `workspace/src/app/admin/dashboard/page.tsx`,
+`workspace/src/lib/api/admin.ts`, plus the read-only reference check against
+`services/sancVerification.ts`). Full backend Jest suite: 152/152 passed.
+Both production builds compile clean (`apps/backend`'s `tsc`+`tsc-alias`,
+and `workspace`'s Next.js build). Same caveat as §22: no route-level test
+convention exists for this codebase outside a live-Postgres integration
+test, so the new routes are verified by type-checking, lint, a full test
+run, and a line-by-line check against `schema.prisma` and the existing
+HPCSA routes they mirror — not by an executed request against a database.
+Worth a real click-through against a nurse flagged `NAME_MISMATCH` or
+similar before relying on it in production.

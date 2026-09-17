@@ -125,6 +125,26 @@ export default function AdminDashboard() {
         }
     };
 
+    const SANC_FLAGGED_STATUSES = ['NOT_FOUND', 'NAME_MISMATCH', 'EXPIRED', 'SUSPENDED'];
+    const [overridingSanc, setOverridingSanc] = useState<string | null>(null);
+
+    const handleOverrideSanc = async (userId: string) => {
+        const reason = prompt('Reason for manually clearing this nurse\'s SANC verification (checked out of band):');
+        if (!reason || reason.trim().length < 3) return;
+
+        setOverridingSanc(userId);
+        try {
+            await adminApi.overrideSancVerification(userId, reason.trim());
+            toast.success('SANC registration manually verified.');
+            loadUsers();
+        } catch (error: unknown) {
+            const err = error as { response?: { data?: { error?: string } } };
+            toast.error(err.response?.data?.error || 'Failed to override SANC verification.');
+        } finally {
+            setOverridingSanc(null);
+        }
+    };
+
     const filteredUsers = useMemo(() => {
         return users.filter((u) => {
             if (roleFilter !== 'ALL' && u.role !== roleFilter) return false;
@@ -235,6 +255,7 @@ export default function AdminDashboard() {
                                         <th className="p-4">Status</th>
                                         <th className="p-4">Verified</th>
                                         <th className="p-4">HPCSA</th>
+                                        <th className="p-4">SANC</th>
                                         <th className="p-4">Actions</th>
                                     </tr>
                                 </thead>
@@ -278,6 +299,28 @@ export default function AdminDashboard() {
                                                                 className="text-xs font-medium text-[var(--primary)] hover:underline disabled:opacity-50"
                                                             >
                                                                 {verifyingHcpsa === u.id ? 'Verifying…' : 'Verify'}
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </td>
+                                            <td className="p-4">
+                                                {u.role !== 'NURSE' ? (
+                                                    <span className="text-xs text-[var(--muted)]">—</span>
+                                                ) : !u.sancVerificationStatus ? (
+                                                    <span className="text-xs text-[var(--muted)]">Not submitted</span>
+                                                ) : (
+                                                    <div className="flex items-center gap-2">
+                                                        <StatusBadge variant={u.sancVerificationStatus === 'Active' ? 'success' : 'warning'} className="text-xs">
+                                                            {u.sancVerificationStatus === 'Active' ? 'Verified' : u.sancVerificationStatus.replace('_', ' ')}
+                                                        </StatusBadge>
+                                                        {SANC_FLAGGED_STATUSES.includes(u.sancVerificationStatus) && (
+                                                            <button
+                                                                onClick={() => handleOverrideSanc(u.id)}
+                                                                disabled={overridingSanc === u.id}
+                                                                className="text-xs font-medium text-[var(--primary)] hover:underline disabled:opacity-50"
+                                                            >
+                                                                {overridingSanc === u.id ? 'Verifying…' : 'Override'}
                                                             </button>
                                                         )}
                                                     </div>

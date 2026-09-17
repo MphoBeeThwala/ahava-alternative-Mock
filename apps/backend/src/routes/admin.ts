@@ -5,6 +5,7 @@ import { UserRole } from '@prisma/client';
 import { AuthenticatedRequest, requireAdmin, invalidateCachedUser } from '../middleware/auth';
 import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 import { emailSchema, passwordComplexitySchema } from './auth';
+import { adminOverrideVerification, SancVerificationStatus } from '../services/sancVerification';
 import prisma from '../lib/prisma';
 
 const router: Router = Router();
@@ -17,6 +18,7 @@ router.get('/users', requireAdmin, async (req: AuthenticatedRequest, res, next) 
         id: true, email: true, firstName: true, lastName: true, role: true,
         isActive: true, isVerified: true, createdAt: true,
         hcpsaNumber: true, hcpsaVerified: true,
+        sancId: true, sancVerificationStatus: true, sancCategory: true,
       },
     });
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'LIST', resource: 'AdminAction', metadata: { entity: 'User', count: users.length }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
@@ -162,6 +164,70 @@ router.patch('/users/:id/hpcsa', requireAdmin, async (req: AuthenticatedRequest,
     await invalidateCachedUser(id);
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'UPDATE', resource: 'AdminAction', resourceId: id, metadata: { entity: 'HpcsaVerification', hcpsaNumber: updated.hcpsaNumber, verified: updated.hcpsaVerified }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
     return res.json({ success: true, hcpsa: updated });
+  } catch (error) { return next(error); }
+});
+
+// Get / manually override a nurse's SANC registration verification (Admin only).
+// `verifySancRegistration` (services/sancVerification.ts) already flags a
+// nurse NAME_MISMATCH / EXPIRED / SUSPENDED / NOT_FOUND during sign-up, and
+// `adminOverrideVerification` already existed to clear that flag out of
+// band — but it was never wired to a route or any admin UI, so a flagged
+// nurse had no path back to verified. Same pattern as the HPCSA fix above.
+const SANC_OVERRIDABLE_STATUSES: SancVerificationStatus[] = [
+  'NOT_FOUND', 'NAME_MISMATCH', 'EXPIRED', 'SUSPENDED',
+];
+
+router.get('/users/:id/sanc', requireAdmin, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select: {
+        id: true, role: true, sancId: true, sancVerificationStatus: true,
+        sancVerificationDate: true, sancCategory: true, isVerified: true,
+      },
+    });
+    if (!user || user.role !== UserRole.NURSE) {
+      return res.status(404).json({ error: 'Nurse not found' });
+    }
+    return res.json({ success: true, sanc: user });
+  } catch (error) { return next(error); }
+});
+
+const sancOverrideSchema = Joi.object({
+  reason: Joi.string().trim().min(3).required(),
+});
+
+router.patch('/users/:id/sanc', requireAdmin, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    const { error, value } = sancOverrideSchema.validate(req.body);
+    if (error) return res.status(400).json({ error: error.details[0].message });
+
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select: { id: true, role: true, sancVerificationStatus: true },
+    });
+    if (!user || user.role !== UserRole.NURSE) {
+      return res.status(404).json({ error: 'Nurse not found' });
+    }
+    const status = user.sancVerificationStatus as SancVerificationStatus | null;
+    if (!status || !SANC_OVERRIDABLE_STATUSES.includes(status)) {
+      return res.status(400).json({ error: 'This nurse is not flagged for manual SANC review' });
+    }
+
+    await adminOverrideVerification(id, req.user!.id, value.reason);
+
+    const updated = await prisma.user.findUnique({
+      where: { id },
+      select: {
+        id: true, sancId: true, sancVerificationStatus: true,
+        sancVerificationDate: true, sancCategory: true, isVerified: true,
+      },
+    });
+    await invalidateCachedUser(id);
+    await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'UPDATE', resource: 'AdminAction', resourceId: id, metadata: { entity: 'SancVerification', reason: value.reason, status: updated?.sancVerificationStatus }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
+    return res.json({ success: true, sanc: updated });
   } catch (error) { return next(error); }
 });
 

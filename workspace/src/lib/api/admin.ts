@@ -11,6 +11,9 @@ export interface User {
   createdAt: string;
   hcpsaNumber?: string | null;
   hcpsaVerified?: boolean;
+  sancId?: string | null;
+  sancVerificationStatus?: string | null;
+  sancCategory?: string | null;
 }
 
 export const adminApi = {
@@ -54,6 +57,14 @@ export const adminApi = {
   },
   getDoctorHpcsa: async (userId: string) => {
     const res = await apiClient.get(`/admin/users/${userId}/hpcsa`);
+    return res.data;
+  },
+  getNurseSanc: async (userId: string) => {
+    const res = await apiClient.get(`/admin/users/${userId}/sanc`);
+    return res.data;
+  },
+  overrideSancVerification: async (userId: string, reason: string) => {
+    const res = await apiClient.patch(`/admin/users/${userId}/sanc`, { reason });
     return res.data;
   },
 };
