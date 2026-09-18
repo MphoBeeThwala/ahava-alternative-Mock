@@ -12,7 +12,7 @@
  * session alone cannot turn this off.
  */
 import { Router, Response } from "express";
-import bcrypt from "bcryptjs";
+import * as bcrypt from "@node-rs/bcrypt";
 import Joi from "joi";
 import { authMiddleware, AuthenticatedRequest, invalidateCachedUser } from "../middleware/auth";
 import { authRateLimiter } from "../middleware/rateLimiter";

@@ -9,23 +9,48 @@
  * Env:
  *   BASE_URL                 Backend base URL (default http://localhost:4000)
  *   MOCK_PATIENT_PASSWORD    Same as used in seed (default MockPatient1!)
- *   COUNT                    Number of users to simulate (default 1000)
- *   CONCURRENCY              Parallel requests per wave (default 20)
+ *   COUNT                    Number of users to simulate (default 1000, max 20000)
+ *   CONCURRENCY              Parallel requests per wave (default 20, max 2000)
+ *   SPOOF_CLIENT_IPS         1 (default) = send a distinct X-Forwarded-For per
+ *                            simulated user, so the per-IP rate limiters
+ *                            (middleware/rateLimiter.ts) don't throttle this
+ *                            single test machine the way they never would
+ *                            throttle 5,000 real users on 5,000 real IPs. Set
+ *                            to 0 to test rate-limiter behavior itself instead
+ *                            of application throughput.
  */
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:4000';
 const PASSWORD = process.env.MOCK_PATIENT_PASSWORD || 'MockPatient1!';
-const COUNT = Math.min(parseInt(process.env.COUNT || '1000', 10) || 1000, 10000);
-const CONCURRENCY = Math.min(Math.max(1, parseInt(process.env.CONCURRENCY || '20', 10)), 100);
+const COUNT = Math.min(parseInt(process.env.COUNT || '1000', 10) || 1000, 20000);
+const CONCURRENCY = Math.min(Math.max(1, parseInt(process.env.CONCURRENCY || '20', 10)), 2000);
+// Real users each arrive from their own IP; a single test machine does not.
+// Without this, the per-IP rate limiters (middleware/rateLimiter.ts) throttle
+// synthetic traffic in a way 5,000 distinct real users never would, making
+// this measure the rate limiter instead of the app. Requires `trust proxy`
+// to see this process as the one trusted hop (true locally / directly
+// against a single instance; NOT true running through a real reverse proxy
+// in front, where the proxy's own hop is what's trusted instead).
+const SPOOF_CLIENT_IPS = process.env.SPOOF_CLIENT_IPS !== '0';
 
 function pad(n) {
   return String(n).padStart(4, '0');
 }
 
-async function login(email) {
+function xffFor(index) {
+  return `10.${Math.floor(index / 65536) % 255}.${Math.floor(index / 256) % 255}.${(index % 254) + 1}`;
+}
+
+function headersFor(index, extra = {}) {
+  const headers = { ...extra };
+  if (SPOOF_CLIENT_IPS) headers['X-Forwarded-For'] = xffFor(index);
+  return headers;
+}
+
+async function login(email, index) {
   const res = await fetch(`${BASE_URL}/api/v1/auth/login`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: headersFor(index, { 'Content-Type': 'application/json' }),
     body: JSON.stringify({ email, password: PASSWORD }),
   });
   const data = await res.json().catch(() => ({}));
@@ -36,14 +61,14 @@ async function login(email) {
   return { ok: true, token };
 }
 
-async function submitBiometrics(token) {
+async function submitBiometrics(token, index) {
   const authHeader = 'Bearer ' + String(token).trim();
   const res = await fetch(`${BASE_URL}/api/v1/patient/biometrics`, {
     method: 'POST',
-    headers: {
+    headers: headersFor(index, {
       'Content-Type': 'application/json',
       Authorization: authHeader,
-    },
+    }),
     body: JSON.stringify({
       heartRate: 72,
       heartRateResting: 70,
@@ -61,18 +86,18 @@ async function submitBiometrics(token) {
   return { ok: true };
 }
 
-async function getAlerts(token) {
+async function getAlerts(token, index) {
   const res = await fetch(`${BASE_URL}/api/v1/patient/alerts`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: headersFor(index, { Authorization: `Bearer ${token}` }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, error: data.error || res.statusText };
   return { ok: true };
 }
 
-async function getHistory(token) {
+async function getHistory(token, index) {
   const res = await fetch(`${BASE_URL}/api/v1/patient/biometrics/history?limit=10&offset=0`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: headersFor(index, { Authorization: `Bearer ${token}` }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, error: data.error || res.statusText };
@@ -83,24 +108,24 @@ async function runOneUser(index) {
   const email = `patient_${pad(index)}@mock.ahava.test`;
   const timings = { login: 0, biometrics: 0, alerts: 0, history: 0 };
   let t0 = Date.now();
-  const loginResult = await login(email);
+  const loginResult = await login(email, index);
   timings.login = Date.now() - t0;
   if (!loginResult.ok) return { ok: false, email, error: loginResult.error, timings };
 
   const token = loginResult.token;
 
   t0 = Date.now();
-  const bioResult = await submitBiometrics(token);
+  const bioResult = await submitBiometrics(token, index);
   timings.biometrics = Date.now() - t0;
   if (!bioResult.ok) return { ok: false, email, error: `biometrics: ${bioResult.error}`, timings };
 
   t0 = Date.now();
-  const alertsResult = await getAlerts(token);
+  const alertsResult = await getAlerts(token, index);
   timings.alerts = Date.now() - t0;
   if (!alertsResult.ok) return { ok: false, email, error: `alerts: ${alertsResult.error}`, timings };
 
   t0 = Date.now();
-  const historyResult = await getHistory(token);
+  const historyResult = await getHistory(token, index);
   timings.history = Date.now() - t0;
   if (!historyResult.ok) return { ok: false, email, error: `history: ${historyResult.error}`, timings };
 

@@ -10,7 +10,7 @@
  * the same way passwords are.
  */
 import crypto from "crypto";
-import bcrypt from "bcryptjs";
+import * as bcrypt from "@node-rs/bcrypt";
 import { authenticator } from "otplib";
 import { encryptData, decryptData } from "../utils/encryption";
 
