@@ -15,6 +15,7 @@ import axios from 'axios';
 import crypto from 'crypto';
 import { withResilientHttp } from '../services/resilientHttp';
 import { mlServiceHeaders } from '../services/mlServiceAuth';
+import { isWebhookReplay } from '../services/webhookReplayGuard';
 
 const router: Router = Router();
 
@@ -338,20 +339,20 @@ export async function handleRookWebhook(
     if (!enforceSignedWebhooks && process.env.NODE_ENV === 'production') {
       console.warn('[rook] Webhook signature verification is DISABLED in production');
     }
-    if (enforceSignedWebhooks) {
-      // ROOK sends HMAC in X-ROOK-HASH header. Keep legacy support for rook-signature.
-      const signatureRaw =
-        (req.headers['x-rook-hash'] as string | undefined) ||
-        (req.headers['rook-signature'] as string | undefined);
-      const signature = (signatureRaw || '').trim();
+    // ROOK sends HMAC in X-ROOK-HASH header. Keep legacy support for rook-signature.
+    const signatureRaw =
+      (req.headers['x-rook-hash'] as string | undefined) ||
+      (req.headers['rook-signature'] as string | undefined);
+    const signature = (signatureRaw || '').trim();
+    const rawBody = (req as any).rawBody as Buffer | undefined;
 
+    if (enforceSignedWebhooks) {
       // Prefer explicit webhook secret, but also keep ROOK API secret as fallback.
       // Some ROOK setups sign with API secret; others with explicit webhook secret.
       const candidateSecrets = [
         (process.env.ROOK_WEBHOOK_SECRET || '').trim(),
         (ROOK_SECRET_KEY || '').trim(),
       ].filter(Boolean);
-      const rawBody = (req as any).rawBody as Buffer | undefined;
 
       if (candidateSecrets.length === 0) {
         console.error('[rook] Missing ROOK secret for webhook signature verification');
@@ -401,6 +402,19 @@ export async function handleRookWebhook(
           `[rook] Webhook HMAC verification failed (sig_len=${signatureNormalized.length}, raw_len=${rawBody.length})`
         );
         res.status(401).json({ error: 'Invalid signature' });
+        return;
+      }
+    }
+
+    // A validly signed payload proves authenticity, not freshness — dedupe
+    // on (signature, body) so a captured or provider-retried delivery
+    // doesn't re-run device-linking/biometric-ingest side effects. Skipped
+    // only when there's no raw body to key on at all.
+    if (rawBody) {
+      const isReplay = await isWebhookReplay('rook', signature, rawBody);
+      if (isReplay) {
+        console.warn('[rook] Duplicate webhook delivery ignored (replay)');
+        res.status(200).json({ success: true, duplicate: true });
         return;
       }
     }
