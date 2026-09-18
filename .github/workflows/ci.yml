@@ -57,6 +57,30 @@ jobs:
       - name: Build
         run: pnpm --filter @ahava-healthcare/api build
 
+  ml-service:
+    name: ML service — pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # DATABASE_URL is deliberately left unset: db.py falls back to an
+      # in-process dict store whenever it's unset, so the suite (see
+      # tests/conftest.py) exercises the real ingest/evaluate path without
+      # needing TimescaleDB/Postgres in CI.
+      - name: Install dependencies
+        working-directory: apps/ml-service
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run tests
+        working-directory: apps/ml-service
+        run: pytest -q
+
   frontend:
     name: Frontend — lint and build
     runs-on: ubuntu-latest
@@ -80,6 +104,9 @@ jobs:
 
       - name: Lint
         run: pnpm --filter workspace lint
+
+      - name: Unit tests
+        run: pnpm --filter workspace test
 
       - name: Build
         env:
