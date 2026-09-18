@@ -109,11 +109,10 @@ describe('useOfflineBiometricSync', () => {
     // retried — the server will reject it again), the next one still syncs.
     await waitFor(() => expect(submitBiometrics).toHaveBeenCalledTimes(2));
     expect(toastSuccess).toHaveBeenCalledWith(expect.stringContaining('Synced 1'));
-    // Note: the hook's dropped-count toast text always says "too old to
-    // sync", even for a drop caused by an outright server rejection like
-    // this one, not staleness — pre-existing message wording, not
-    // something introduced or fixed here.
-    expect(toastError).toHaveBeenCalledWith(expect.stringContaining('too old'));
+    // A server-rejected drop gets its own message, distinct from a
+    // stale-reading drop — not the "too old to sync" text that case uses.
+    expect(toastError).toHaveBeenCalledWith(expect.stringContaining('rejected'));
+    expect(toastError).not.toHaveBeenCalledWith(expect.stringContaining('too old'));
   });
 
   it('does nothing when the device is offline', async () => {

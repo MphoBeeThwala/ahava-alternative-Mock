@@ -32,13 +32,14 @@ export function useOfflineBiometricSync(userId: string | undefined, onSynced?: (
       if (queued.length === 0) return;
 
       let syncedCount = 0;
-      let droppedCount = 0;
+      let droppedStaleCount = 0;
+      let droppedRejectedCount = 0;
 
       for (const entry of queued) {
         const age = Date.now() - new Date(entry.capturedAt).getTime();
         if (age > MAX_QUEUE_AGE_MS) {
           await removeQueuedReading(entry.id);
-          droppedCount += 1;
+          droppedStaleCount += 1;
           continue;
         }
         try {
@@ -52,7 +53,7 @@ export function useOfflineBiometricSync(userId: string | undefined, onSynced?: (
           }
           // Server rejected it outright — it will never succeed on retry.
           await removeQueuedReading(entry.id);
-          droppedCount += 1;
+          droppedRejectedCount += 1;
         }
       }
 
@@ -60,11 +61,18 @@ export function useOfflineBiometricSync(userId: string | undefined, onSynced?: (
         toast.success(`Synced ${syncedCount} offline reading${syncedCount > 1 ? 's' : ''}.`);
         onSynced?.();
       }
-      if (droppedCount > 0) {
+      if (droppedStaleCount > 0) {
         toast.error(
-          droppedCount > 1
-            ? `${droppedCount} offline readings were too old to sync and were discarded.`
+          droppedStaleCount > 1
+            ? `${droppedStaleCount} offline readings were too old to sync and were discarded.`
             : `1 offline reading was too old to sync and was discarded.`
+        );
+      }
+      if (droppedRejectedCount > 0) {
+        toast.error(
+          droppedRejectedCount > 1
+            ? `${droppedRejectedCount} offline readings were rejected and could not be synced.`
+            : `1 offline reading was rejected and could not be synced.`
         );
       }
     } finally {

@@ -12,26 +12,60 @@
  * regardless of NODE_ENV, since these routes only enforce it by default in
  * production and this suite runs with NODE_ENV=test.
  *
- * Known gap (not fixed here — flagged for follow-up): neither handler has
- * any replay protection (no nonce/timestamp check). A genuinely valid,
- * captured signed payload can be POSTed twice and is processed twice — see
- * the "replay" tests below, which pin that as current behavior rather than
- * asserting the (currently absent) protection.
+ * Replay protection (webhookReplayGuard.ts) needs a real Redis to
+ * demonstrate for real — NODE_ENV=test skips index.ts's own Redis startup,
+ * so this file initializes it itself in beforeAll/afterAll rather than
+ * relying on the app's normal boot path, against the redis: service
+ * container ci.yml provisions for this job (REDIS_URL). Every other
+ * integration test file deliberately runs with no Redis reachable at all
+ * (see rateLimiter.test.ts's comment) — this is the one place that matters
+ * enough to set up the real dependency instead of exercising the fail-open
+ * path.
  */
 import request from "supertest";
 import crypto from "crypto";
 import { app } from "../index";
 import prisma from "../lib/prisma";
+import { initializeRedis, closeRedis } from "../services/redis";
 
 const TERRA_SECRET = "test-terra-webhook-secret";
 const ROOK_SECRET = "test-rook-webhook-secret";
 
-beforeAll(() => {
+// Signature tests below don't need Redis at all and must keep passing on a
+// machine with no Redis running; only the replay-specific tests are gated
+// on this actually having succeeded.
+let redisAvailable = false;
+
+beforeAll(async () => {
   process.env.TERRA_WEBHOOK_SECRET = TERRA_SECRET;
   process.env.TERRA_WEBHOOK_SIGNATURE_REQUIRED = "true";
   process.env.ROOK_WEBHOOK_SECRET = ROOK_SECRET;
   process.env.ROOK_WEBHOOK_SIGNATURE_REQUIRED = "true";
+  try {
+    await initializeRedis();
+    redisAvailable = true;
+  } catch (err) {
+    console.warn(
+      "[webhooks.integration.test] Redis unavailable — skipping replay-blocking assertions (they need REDIS_URL/a running redis-server; see ci.yml's redis: service for CI):",
+      (err as Error).message
+    );
+  }
 });
+
+afterAll(async () => {
+  if (redisAvailable) await closeRedis();
+});
+
+// Jest registers every `it(...)` synchronously at file-load time, before
+// beforeAll has run, so redisAvailable can't gate which tests are
+// registered — each Redis-dependent test instead checks it at the top and
+// no-ops (passes trivially, with a warning) when Redis wasn't reachable.
+function skipIfNoRedis(): boolean {
+  if (!redisAvailable) {
+    console.warn("[webhooks.integration.test] Skipping: Redis not available in this run");
+  }
+  return !redisAvailable;
+}
 
 function terraSignature(body: object): string {
   return crypto.createHmac("sha256", TERRA_SECRET).update(JSON.stringify(body)).digest("hex");
@@ -107,15 +141,36 @@ describe("webhooks/terra: signature verification", () => {
     }
   });
 
-  it("a captured valid signature can be replayed (documents the missing replay protection)", async () => {
-    const body = { type: "deauth", user: { user_id: "terra-replay-test-user" } };
+  it("blocks a replay: the same signed payload POSTed twice is only processed once", async () => {
+    if (skipIfNoRedis()) return;
+    // The replay dedup key lives in Redis for WEBHOOK_REPLAY_TTL_SECONDS
+    // (default 300s) — a fixed literal body here would collide with a
+    // leftover key from a prior run within that window against a
+    // persistent (non-ephemeral) Redis, exactly like the unique-constraint
+    // literals elsewhere in this file get a per-run suffix.
+    const body = { type: "deauth", user: { user_id: `terra-replay-test-user-${Date.now()}` } };
     const signature = terraSignature(body);
 
     const first = await request(app).post("/webhooks/terra").set("terra-signature", signature).send(body);
     const second = await request(app).post("/webhooks/terra").set("terra-signature", signature).send(body);
 
     expect(first.status).toBe(200);
+    expect(first.body.duplicate).toBeFalsy();
     expect(second.status).toBe(200);
+    expect(second.body.duplicate).toBe(true);
+  });
+
+  it("does not block two different payloads that happen to share nothing but being valid", async () => {
+    if (skipIfNoRedis()) return;
+    const suffix = Date.now();
+    const bodyA = { type: "deauth", user: { user_id: `terra-replay-distinct-a-${suffix}` } };
+    const bodyB = { type: "deauth", user: { user_id: `terra-replay-distinct-b-${suffix}` } };
+
+    const resA = await request(app).post("/webhooks/terra").set("terra-signature", terraSignature(bodyA)).send(bodyA);
+    const resB = await request(app).post("/webhooks/terra").set("terra-signature", terraSignature(bodyB)).send(bodyB);
+
+    expect(resA.body.duplicate).toBeFalsy();
+    expect(resB.body.duplicate).toBeFalsy();
   });
 });
 
@@ -217,6 +272,21 @@ describe("webhooks/rook: links rookUserId to an existing platform user", () => {
 
     const updated = await prisma.user.findUnique({ where: { id: patient.userId } });
     expect((updated as any).rookUserId).toBe(patient.userId);
+  });
+
+  it("blocks a replay: the same signed ROOK payload POSTed twice is only processed once", async () => {
+    if (skipIfNoRedis()) return;
+    const patient = await registerPatient("rook-replay-event");
+    const body = { category: "physical", user_id: patient.userId };
+    const signature = rookSignature(body);
+
+    const first = await request(app).post("/webhooks/rook").set("x-rook-hash", signature).send(body);
+    const second = await request(app).post("/webhooks/rook").set("x-rook-hash", signature).send(body);
+
+    expect(first.status).toBe(200);
+    expect(first.body.duplicate).toBeFalsy();
+    expect(second.status).toBe(200);
+    expect(second.body.duplicate).toBe(true);
   });
 });
 

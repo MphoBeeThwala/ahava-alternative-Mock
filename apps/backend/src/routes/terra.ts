@@ -18,6 +18,7 @@ import crypto from "crypto";
 import { authMiddleware } from "../middleware/auth";
 import prisma from "../lib/prisma";
 import { mlServiceHeaders } from "../services/mlServiceAuth";
+import { isWebhookReplay } from "../services/webhookReplayGuard";
 
 const router: Router = Router();
 
@@ -219,10 +220,11 @@ export async function handleTerraWebhook(
         "[terra] Webhook signature verification is DISABLED in production",
       );
     }
+    const signature = req.headers["terra-signature"] as string | undefined;
+    const rawBody = (req as any).rawBody as Buffer | undefined;
+
     if (enforceSignedWebhooks) {
       const secret = process.env.TERRA_WEBHOOK_SECRET ?? "";
-      const signature = req.headers["terra-signature"] as string | undefined;
-      const rawBody = (req as any).rawBody as Buffer | undefined;
 
       if (!secret) {
         console.error(
@@ -245,6 +247,19 @@ export async function handleTerraWebhook(
       if (signature !== expected) {
         console.warn("[terra] Webhook HMAC verification failed");
         res.status(401).json({ error: "Invalid signature" });
+        return;
+      }
+    }
+
+    // A validly signed payload proves authenticity, not freshness — dedupe
+    // on (signature, body) so a captured or provider-retried delivery
+    // doesn't re-run device-linking/biometric-ingest side effects. Skipped
+    // only when there's no raw body to key on at all.
+    if (rawBody) {
+      const isReplay = await isWebhookReplay("terra", signature ?? "", rawBody);
+      if (isReplay) {
+        console.warn("[terra] Duplicate webhook delivery ignored (replay)");
+        res.status(200).json({ success: true, duplicate: true });
         return;
       }
     }

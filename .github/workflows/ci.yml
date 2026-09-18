@@ -179,6 +179,22 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      # Only the webhook-replay-protection tests use this (they call
+      # initializeRedis() themselves in a beforeAll — NODE_ENV=test skips
+      # index.ts's own Redis startup for every other test) — see
+      # webhookReplayGuard.ts and webhooks.integration.test.ts. Every other
+      # integration test already passes with no Redis reachable at all,
+      # exercising the app's fail-open behavior, which is the point.
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      REDIS_URL: redis://localhost:6379
     steps:
       - uses: actions/checkout@v4
 
