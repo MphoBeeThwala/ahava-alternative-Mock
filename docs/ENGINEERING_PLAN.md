@@ -57,7 +57,7 @@ found and fixed the same day (repo hygiene pass, see commit history).
 | 1 | Quality gate | Landed, verified 2026-09-08 |
 | 2 | Security blockers | Landed, verified 2026-09-08 |
 | 3 | Cleanup and operability | Landed, verified 2026-09-08 |
-| 4 | Throughput to 5,000 concurrent | Designed, not started |
+| 4 | Throughput to 5,000 concurrent | Measured 2026-09-18 (§24): dominant bottleneck (bcrypt) found and fixed, ~5-8x login throughput improvement verified. Still needs a real Railway-staging re-run — see §24 "Still open" |
 | 5 | Compliance and durability | In progress — AH-13, AH-29, AH-23, AH-26 landed 2026-09-08; AH-15's purge job still open |
 
 ---
@@ -115,11 +115,13 @@ AH-07 (integration tests) — closed 2026-09-08, see below for the full writeup.
 | AH-03b | Double-submit CSRF token, for defence in depth beyond the origin check | P2 |
 | AH-15 | Cross-border PHI transfer to AI providers not named in the consent record | P2 |
 | AH-34 | `demoStream` holds a `setInterval` per user in-process | P2 |
-| AH-35 | The Render `plan: starter` (0.5 vCPU) sizing this was measured against no longer applies — Render was removed in favour of Railway-only (§6). Re-measure against whatever Railway tier is actually deployed before assuming the bcrypt-saturation finding still holds at the same concurrency | P0 for scale — re-verify |
+| AH-35 | The Render `plan: starter` (0.5 vCPU) sizing this was measured against no longer applies — Render was removed in favour of Railway-only (§6). AH-51 (§24) re-measured locally (not against Railway — see §24's methodology caveat) and found the bcrypt-saturation finding held, and worse than the 0.5-vCPU framing suggested (linear degradation, not just slow) | P0 for scale — still needs a real Railway re-verify |
 | AH-36 | Biometrics ingest — partially addressed 2026-09-08, see below | P1 for scale (downgraded — see note) |
-| AH-37 | Load tests hit the Next.js proxy, so proxy and API latency are indistinguishable. Nobody knows which to fix. The load-test script already supports `BASE_URL` pointed at the API directly (it defaults there); the four historical runs just happened to target the production frontend domain instead — re-running against the real backend URL needs a live environment and is a manual step, not a code fix | P0 — measure first |
+| AH-37 | Load tests hit the Next.js proxy, so proxy and API latency are indistinguishable — **measured 2026-09-18, see §24.** Confirmed the bottleneck is in the API, not the proxy: bcrypt serialization (AH-51), not proxy overhead, explained the flat throughput §3a found | Closed — see §24 |
 | AH-38 | The primary dev machine's Application Control policy blocks `pnpm.exe`. `corepack pnpm` works around it, but a new engineer hits this on day one. Get pnpm allowlisted, or commit to builds happening only in CI and Docker | P1 — infrastructure |
 | AH-42 (new) | Frontend monolithic files — `lib/api.ts` and `doctor/dashboard/page.tsx` split 2026-09-08, no behavior change — see below. `patient/ai-doctor/page.tsx` (897 lines), `profile/page.tsx` (738), and `auth/signup/page.tsx` (562) follow the same pattern and are unsplit | P2 — maintainability, not correctness |
+| AH-51 (new) | `bcryptjs` (pure JS, single-threaded) serialized all login traffic onto one core regardless of CPU count — the real cause behind AH-35's finding. Replaced with `@node-rs/bcrypt` (native, threadpool) across all 9 call sites, §24 | Closed 2026-09-18 — see §24 |
+| AH-52 (new) | ML service (`apps/ml-service`) ran a single `uvicorn` worker with no `--workers` flag; synchronous numpy/psycopg2 work in route handlers blocked the whole process per request. `Dockerfile` now takes `ML_SERVICE_WORKERS` (default 1, unchanged) | P1 for scale — mechanism added, real worker count and load-test-under-TimescaleDB still open, §24 |
 
 ---
 
@@ -1720,3 +1722,209 @@ run, and a line-by-line check against `schema.prisma` and the existing
 HPCSA routes they mirror — not by an executed request against a database.
 Worth a real click-through against a nurse flagged `NAME_MISMATCH` or
 similar before relying on it in production.
+
+## 24. AH-37 measured — bcrypt was the dominant capacity bottleneck, not the proxy, 2026-09-18
+
+§3a flagged this as "the single most valuable missing number": run the load
+test against the API directly, not through the Next.js proxy. Done here —
+full stack (real Postgres, real Redis, the real ML service, all hit
+directly) running locally rather than against a staging/production
+Railway environment this session has no access to. That's a real
+methodology limitation (see "What this run can't tell you" below), but it
+answers AH-37's actual question — proxy vs. API — cleanly: the bottleneck
+is in the API, full stop, and it's structural, not proxy overhead.
+
+### Methodology
+
+- `apps/backend` built and run as compiled JS (`node dist/index.js`,
+  `NODE_ENV=production`), against a disposable local Postgres and a local
+  Redis — not the Jest integration harness, a real running server hit over
+  HTTP like production traffic.
+- The real ML service (`apps/ml-service`) also running, not stubbed —
+  `POST /biometrics` genuinely round-trips to it, same as production.
+- `scripts/load-test-patient-pipeline.js` (login → submit biometrics → get
+  alerts → get history, per simulated user) against 2,000 seeded mock
+  patients, waves of 50/100/200/400 concurrent users.
+- **Found and fixed a measurement bug on the way**: the script sent every
+  simulated user from the same source, so `middleware/rateLimiter.ts`'s
+  per-IP limiters — a real, correct production control — throttled the
+  test harness itself well before reaching any genuine application
+  ceiling, the same way they never would across 5,000 real users on 5,000
+  real IPs. Fixed by sending a distinct `X-Forwarded-For` per simulated
+  user (`SPOOF_CLIENT_IPS`, on by default), the same technique
+  `scripts/true-capacity-test.js` already used. This only works because
+  `trust proxy` is set to `1` hop and nothing sits in front of the process
+  locally — running through a real reverse proxy, the proxy's hop is what
+  gets trusted instead, not a client-supplied header.
+
+### What this run can't tell you
+
+This sandbox is a single 4-vCPU/15GB container running the Node backend,
+the Python ML service, *and* Postgres all at once, competing for the same
+four cores. Railway runs these as separate services with their own
+resources. At the higher concurrency waves (400), that cross-service
+contention is visible in the data (see below) and inflates the absolute
+numbers beyond what real, properly-separated infrastructure would show.
+**The relative improvement from a code-level fix (below) is still valid
+regardless of topology — CPU-efficiency gains transfer. The absolute
+flows/sec ceiling from this run should not be quoted as Railway's
+capacity** without re-running against the real deployment topology.
+
+### AH-51 — `bcryptjs` was serializing all login traffic onto one core
+
+Login p50 scaled almost exactly linearly with concurrency — the signature
+of a single-threaded queue, not a CPU-count-limited one:
+
+| Concurrency | login p50 | login p95 |
+|---|---|---|
+| 50 | 16.6 s | 16.6 s |
+| 100 | 32.9 s | 33.0 s |
+| 200 | 65.3 s | 65.5 s |
+| 400 | 90.6 s | 128.1 s |
+
+`top` during a run confirmed it directly: the Node process pinned one core
+at 100% while the other three sat idle — 26% total system CPU used. Root
+cause: `bcryptjs` (`package.json`, all 9 call sites) is a pure-JavaScript
+implementation with no native bindings, so `bcrypt.compare()`/`hash()` runs
+entirely on Node's single main thread. It cannot use libuv's threadpool —
+concurrent calls interleave via `setImmediate`, they don't parallelize.
+
+**Fixed**: replaced with `@node-rs/bcrypt` (napi-rs/Rust, prebuilt binaries
+for Linux/macOS/Windows — no `node-gyp`/C++ toolchain needed on a dev
+machine, which matters given AH-38's existing note about this team's
+Windows build friction) across all 9 call sites
+(`routes/auth.ts`, `routes/admin.ts`, `routes/twoFactor.ts`,
+`services/totp.ts`, and the seed/admin CLI scripts). Same `$2b$` hash
+format — existing password hashes keep verifying, zero migration. Runs on
+libuv's threadpool, so it actually spans cores.
+
+Same test, same waves, after the swap:
+
+| Concurrency | login p50 | login p95 | vs. before |
+|---|---|---|---|
+| 50 | 2.1 s | 3.7 s | **7.9×** |
+| 100 | 4.4 s | 8.2 s | **7.4×** |
+| 200 | 9.0 s | 16.6 s | **7.3×** |
+| 400 | 17.4 s | 32.6 s | **5.2×** |
+
+System CPU during a run rose from 26% to 71% — the work is now actually
+spread across cores instead of queueing on one. Login p50 still scales
+close to linearly with concurrency post-fix, and the model fits almost
+exactly: a ~170ms native bcrypt op (cost factor 10) spread across libuv's
+default 4-thread pool predicts `(concurrency / 4) × 170ms` — 2.1s, 4.3s,
+8.5s, 17.0s against measured 2.1s, 4.4s, 9.0s, 17.4s. That's the next
+lever if login throughput needs to go further: raise `UV_THREADPOOL_SIZE`
+past the default 4 on a box with more cores (libuv doesn't infer it from
+`nproc`), or lower `BCRYPT_ROUNDS` from the current default of 10.
+
+**Verified**: `tsc --noEmit` clean, full unit suite (188/188), and the
+auth + admin integration suites (26/26, real Postgres, real password
+hashing end to end — register, login, wrong-password rejection, admin
+user creation) all pass unchanged.
+
+### Finding: the DB connection pool becomes the next bottleneck once bcrypt is fixed
+
+With login no longer dominating, `history` (`GET
+/patient/biometrics/history`) — a real Postgres round-trip — started
+showing the queueing bcrypt used to mask: p95 hit 31.8s at 400 concurrent
+against `PRISMA_CONNECTION_LIMIT=10` (`lib/prisma.ts`'s documented
+default). Raising it to 30 measurably helped at 200 concurrent (`history`
+p50 8.2s → 4.0s) but not at 400, where the bottleneck had already moved to
+the shared-hardware contention this section's methodology caveat
+describes — Postgres, Node, and Python all fighting for the same four
+cores locally, which isn't how Railway separates these services.
+
+**Not changed here** — this needs the real connection budget worked out
+for the actual replica count once that's decided (see "Path to 5,000 /
+20,000" below), not a single guessed number. `alerts` (no DB write beyond
+the read) stayed flat (10–70ms) at every concurrency tested, confirming
+this is connection-pool queueing specifically, not a general Postgres
+capacity problem.
+
+### AH-52 — the ML service has no worker concurrency
+
+`/tmp/backend-loadtest-v3.log` showed 234 `ML service unavailable: timeout
+of 5000ms exceeded` errors during the higher-concurrency waves.
+`apps/ml-service/Dockerfile` ran `uvicorn` with no `--workers` flag —
+one process, and `engine.py`'s numpy/pandas scoring plus `db.py`'s
+`psycopg2` calls are synchronous, so neither yields to the asyncio event
+loop. Under concurrent load, one request's scoring work blocks every other
+request on the same process regardless of the container's CPU count — the
+same class of bug as the bcrypt one, in the Python service instead of Node.
+
+**Fixed**: `Dockerfile`'s `CMD` now reads `--workers ${ML_SERVICE_WORKERS:-1}`.
+Defaults to 1 (today's behavior, unchanged) because multiple workers are
+only safe with `DATABASE_URL` configured — `db.py`'s no-`DATABASE_URL`
+fallback (local/dev only) is a per-process in-memory dict, so a second
+worker in that mode would silently split a user's history across
+processes. Production always sets `DATABASE_URL` (TimescaleDB), so set
+`ML_SERVICE_WORKERS` to the container's CPU count there.
+
+**Not verified against a real multi-worker run**: this sandbox's Postgres
+doesn't have the TimescaleDB extension available, so `db.py` can only run
+in its in-memory fallback mode here — the exact mode multiple workers
+aren't safe in. Mechanically confirmed instead: started `uvicorn --workers
+2` directly and confirmed via `ps --forest` that it spawns genuine
+worker subprocesses (`multiprocessing.spawn`), not just accepting the
+flag silently. Load-test this for real against a staging environment with
+TimescaleDB configured before trusting the concurrency improvement, not
+just the process count.
+
+### Path to 5,000 / 20,000 concurrent
+
+Little's Law, same method §3a used: 5,000 active users each transacting
+every 30–60s is 83–167 flows/sec needed. This run measured *login*
+throughput specifically, not the full mixed-flow rate §3a's original
+production runs measured — the two aren't directly comparable, but the
+login ceiling is a real, now much-higher, input to the same arithmetic.
+
+- **Per-replica login ceiling on this 4-core box**: ~4.4 logins/sec before
+  the bcrypt fix, ~23 logins/sec after — a ~5× improvement in how many
+  replicas a given login rate needs, independent of deployment topology.
+- **Getting to 5,000 concurrent is now a horizontal-scaling problem, not a
+  hashing problem.** The architecture was already built for it (§3a):
+  PgBouncer transaction pooling, Redis-backed sessions and rate limits,
+  WebSocket pub/sub across replicas. What changed here is that the code no
+  longer artificially caps what one replica can do before infrastructure
+  becomes the limit.
+- **Connection budget, worked as a formula, not a guess** (§3a/§4's own
+  standing instruction): `replica_count × PRISMA_CONNECTION_LIMIT` must
+  stay under PgBouncer's own pool size into Postgres, which must stay
+  under Postgres `max_connections` with margin for migrations, the ML
+  service, and any direct admin access. Pick the replica count first from
+  the measured per-replica ceiling and the target flows/sec, then size
+  `PRISMA_CONNECTION_LIMIT` to fit the budget — not the other way around.
+- **The ML service needs the same replica/worker math as the Node
+  backend** — it was invisible as a bottleneck before because bcrypt
+  saturated first; §"Finding: the ML service has no worker concurrency"
+  above is the fix, `ML_SERVICE_WORKERS` still needs a real number picked
+  from a staging load test once TimescaleDB is in the loop.
+- **20,000 concurrent is the same architecture, more replicas and more
+  DB/Redis headroom** — nothing measured here points at a rewrite being
+  needed, unlike §3a's original "if 5,000 means genuinely in flight at
+  once, the gap is two orders of magnitude" caveat, which was written
+  against the *old*, single-core-serialized ceiling. Re-run this same test
+  after 5,000 is actually reached in staging before assuming the same
+  holds at 20,000 — Redis and Postgres both need their own capacity
+  planning at that scale (connection count, memory, replication) that
+  hasn't been sized here.
+
+### Still open, in priority order
+
+1. **Re-run against real Railway staging**, not this local sandbox — the
+   one number that actually answers "does this hold at 5,000," per this
+   section's own methodology caveat.
+2. **Size `PRISMA_CONNECTION_LIMIT` and PgBouncer's pool size together**
+   against a chosen replica count, using the formula above — not the
+   `10`/`30` values tried here, which were exploratory.
+3. **Load-test the ML service with multiple workers against real
+   TimescaleDB** — the fix here is verified to start correctly, not yet
+   verified to fix the timeout under load.
+4. **Re-measure AH-35** (Render's 0.5 vCPU sizing no longer applies —
+   confirm what Railway tier is actually deployed and whether it changes
+   any of the above).
+5. Consider whether `UV_THREADPOOL_SIZE` should be set explicitly to match
+   the deployed container's core count, rather than relying on libuv's
+   default of 4 — free throughput on any instance size larger than 4
+   cores, unlocked by nothing more than an env var, now that bcrypt
+   actually uses the threadpool.

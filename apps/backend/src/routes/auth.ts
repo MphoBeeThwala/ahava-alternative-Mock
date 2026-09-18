@@ -1,5 +1,5 @@
 import { Request, Router } from "express";
-import bcrypt from "bcryptjs";
+import * as bcrypt from "@node-rs/bcrypt";
 import crypto from "crypto";
 import { Prisma } from "@prisma/client";
 import { authRateLimiter } from "../middleware/rateLimiter";

@@ -1,4 +1,4 @@
-import bcrypt from 'bcryptjs';
+import * as bcrypt from '@node-rs/bcrypt';
 import 'dotenv/config';
 import prisma from '../lib/prisma';
 

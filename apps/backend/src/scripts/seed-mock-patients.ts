@@ -14,7 +14,7 @@
  */
 
 import 'dotenv/config';
-import bcrypt from 'bcryptjs';
+import * as bcrypt from '@node-rs/bcrypt';
 import prisma from '../lib/prisma';
 
 const COUNT = Math.min(parseInt(process.env.MOCK_PATIENT_COUNT || '1000', 10) || 1000, 10000);

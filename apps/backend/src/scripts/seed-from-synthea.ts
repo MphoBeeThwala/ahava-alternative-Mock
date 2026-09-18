@@ -18,7 +18,7 @@
 import 'dotenv/config';
 import * as fs from 'fs';
 import * as path from 'path';
-import bcrypt from 'bcryptjs';
+import * as bcrypt from '@node-rs/bcrypt';
 import prisma from '../lib/prisma';
 
 // Resolve CSV path: env wins; else try cwd, parent, and repo root (pnpm runs with cwd=apps/backend)

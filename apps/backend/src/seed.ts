@@ -4,7 +4,7 @@
  * Run: pnpm prisma:seed  or  npx prisma db seed
  */
 import 'dotenv/config';
-import bcrypt from 'bcryptjs';
+import * as bcrypt from '@node-rs/bcrypt';
 import prisma from './lib/prisma';
 
 async function main() {

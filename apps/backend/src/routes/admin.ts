@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import bcrypt from 'bcryptjs';
+import * as bcrypt from '@node-rs/bcrypt';
 import Joi from 'joi';
 import { UserRole } from '@prisma/client';
 import { AuthenticatedRequest, requireAdmin, invalidateCachedUser } from '../middleware/auth';

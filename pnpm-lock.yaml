@@ -29,15 +29,15 @@ importers:
       '@google/generative-ai':
         specifier: ^0.24.1
         version: 0.24.1
+      '@node-rs/bcrypt':
+        specifier: ^1.10.9
+        version: 1.10.9
       '@prisma/client':
         specifier: 6.19.3
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
       axios:
         specifier: ^1.6.2
         version: 1.13.4
-      bcryptjs:
-        specifier: ^2.4.3
-        version: 2.4.3
       bullmq:
         specifier: ^5.67.2
         version: 5.67.2
@@ -108,9 +108,6 @@ importers:
       '@eslint/js':
         specifier: ^9.0.0
         version: 9.39.2
-      '@types/bcryptjs':
-        specifier: ^2.4.6
-        version: 2.4.6
       '@types/compression':
         specifier: ^1.8.1
         version: 1.8.1
@@ -1646,6 +1643,88 @@ packages:
     resolution: {integrity: sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A==}
     engines: {node: ^14.21.3 || >=16}
 
+  '@node-rs/bcrypt-android-arm-eabi@1.10.9':
+    resolution: {integrity: sha512-vBPwBjVpzgRxkGb7I30kXHnliswLXCjRhPB1c4rC81SKTuyO1orDtOYrYBE+e2D/UwxeD86bh7EfV77Bl1gx4g==}
+    engines: {node: '>= 10'}
+    cpu: [arm]
+    os: [android]
+
+  '@node-rs/bcrypt-android-arm64@1.10.9':
+    resolution: {integrity: sha512-6Y/05z2dUywtm/Wfxd5Otn8zG4Mbx/s3dGjIMBDO6U06+WIp7qlOqv76gxwZRhS3LytxwZQSaidVs7mB9WN4+w==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [android]
+
+  '@node-rs/bcrypt-darwin-arm64@1.10.9':
+    resolution: {integrity: sha512-SxUAONcopekTaPywIJBxbwKFP5gsj92W8xVvBCJQCbz1GSAL2+WMz/g9Rz7mxoRa8/hS3YsawklD0G2c5lptvw==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@node-rs/bcrypt-darwin-x64@1.10.9':
+    resolution: {integrity: sha512-l6D5qVPtqVQE21ohPRXtTtNRtaE2n7LwOSfcMIRKSQEToIDvDK9mKHexipTRBSYoDreLIGeG1wbQJUK3ryF12g==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [darwin]
+
+  '@node-rs/bcrypt-freebsd-x64@1.10.9':
+    resolution: {integrity: sha512-U2Wxt7ZHfKwokpxfYigHDJUX4bUo54n7CePF9buyMT2uxQL8/NHgE8gB4P6619ZSE5UqWaeUMFUA3ZZ6ZzvvbQ==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [freebsd]
+
+  '@node-rs/bcrypt-linux-arm-gnueabihf@1.10.9':
+    resolution: {integrity: sha512-A0uyGKYyuWnPP1lnF+aV+OEsy0ecuDrWpSyYHozhym15aenf2Pyf9DU16r8T242B5fOsronWtX4sOZjvKERL8g==}
+    engines: {node: '>= 10'}
+    cpu: [arm]
+    os: [linux]
+
+  '@node-rs/bcrypt-linux-arm64-gnu@1.10.9':
+    resolution: {integrity: sha512-L3ht9u2LeqCx1riXkvFrkcXz846h6u9r9STe5LjYc2GrDxynUPx1bD3j9+RZgoS8w+I+nbe3ZgLk8jQde18fvQ==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [linux]
+
+  '@node-rs/bcrypt-linux-arm64-musl@1.10.9':
+    resolution: {integrity: sha512-Lm1qOvbalbp6GO6U/DfVMj26eIHR8YNQLoiaxxhxHd4N+QnW980IkWULuajG4cDJM4zRqbBpuqum9Eh8di/PSg==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [linux]
+
+  '@node-rs/bcrypt-linux-x64-gnu@1.10.9':
+    resolution: {integrity: sha512-4pJOS2ARmi76gKB8mCC3TIewpkPD5iHUX1KBFnfPH8FfKrXA0qd7aXinLc1RdqOG/JCjycEnoMiIpvEs5DpUlw==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [linux]
+
+  '@node-rs/bcrypt-linux-x64-musl@1.10.9':
+    resolution: {integrity: sha512-z90GZhwm3HiF9je+qKa0PBw1Ysw31iyTUvkTgzIf+2KCe32Q8wDjEkJb4rB9zSvlYLeVwEa2V/DyZyZdSKUVLA==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [linux]
+
+  '@node-rs/bcrypt-win32-arm64-msvc@1.10.9':
+    resolution: {integrity: sha512-B1GC/iD05n2qm6HStzzkYtdNrJP5rmOEwyH38qBvT3UQo6Jiiu0lUEnzmsoJUAYgtJHVTx93z6q1tFSxvlCdkA==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [win32]
+
+  '@node-rs/bcrypt-win32-ia32-msvc@1.10.9':
+    resolution: {integrity: sha512-go8vbfoqjTEiQmtCedvJe22I2/6yzgwjfHQUurWvTDoUnaSlwLNRAFtAnhx6pJW+xMty+Nl2hldhyXv9RCQ7nw==}
+    engines: {node: '>= 10'}
+    cpu: [ia32]
+    os: [win32]
+
+  '@node-rs/bcrypt-win32-x64-msvc@1.10.9':
+    resolution: {integrity: sha512-BN1avW9YFcsm3Ph9YKW0kNU4xzH3yspc6hrR+G6g1ELSiDXQ1tWFs6uBY4nGnvmDo6ebENdICdQ0SQ64ytfBaw==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [win32]
+
+  '@node-rs/bcrypt@1.10.9':
+    resolution: {integrity: sha512-RV8BE8S4Fa8iNLYiGOutYtXrV9wq7ONeoD/DgNNLqBUmmJtzfLkza1JkHH1J/QQzZLUeDNXEBAofjugdwGiHYQ==}
+    engines: {node: '>= 10'}
+
   '@nodelib/fs.scandir@2.1.5':
     resolution: {integrity: sha512-vq24Bq3ym5HEQm2NKCr3yXDwjc7vTsEThRDnkp2DK9p1uqLR+DHurm/NOTo0KG7HYHU7eppKZj3MyqYuMBf62g==}
     engines: {node: '>= 8'}
@@ -2076,9 +2155,6 @@ packages:
 
   '@types/babel__traverse@7.28.0':
     resolution: {integrity: sha512-8PvcXf70gTDZBgt9ptxJ8elBeBjcLOAcOtoO/mPJjtji1+CdGbHgm77om1GrsPxsiE+uXIpNSK64UYaIwQXd4Q==}
-
-  '@types/bcryptjs@2.4.6':
-    resolution: {integrity: sha512-9xlo6R2qDs5uixm0bcIqCeMCE6HiQsIyel9KQySStiyqNl2tnj2mP3DX1Nf56MD6KMenNNlBBsy3LJ7gUEQPXQ==}
 
   '@types/body-parser@1.19.6':
     resolution: {integrity: sha512-HLFeCYgz89uk22N5Qg3dvGvsv46B8GLvKKo1zKG4NybA8U2DiEO3w9lqGg29t/tfLRJpJ6iQxnVw4OnB7MoM9g==}
@@ -2640,9 +2716,6 @@ packages:
   basic-ftp@5.1.0:
     resolution: {integrity: sha512-RkaJzeJKDbaDWTIPiJwubyljaEPwpVWkm9Rt5h9Nd6h7tEXTJ3VB4qxdZBioV7JO5yLUaOKwz7vDOzlncUsegw==}
     engines: {node: '>=10.0.0'}
-
-  bcryptjs@2.4.3:
-    resolution: {integrity: sha512-V/Hy/X9Vt7f3BbPJEi8BdVFMByHi+jNXrYkW3huaybV/kQ0KJg0Y6PkEMbn+zeT+i+SiKZ/HMqJGIIt4LZDqNQ==}
 
   bidi-js@1.1.0:
     resolution: {integrity: sha512-fX1Onk0tdVPC7obPWB5EbJ1z7NVhLq4m2xZLq2YXBkxzMXIGRpNMU88n0EPgWseKl12J7zXs7qrDxPK4sRs2fg==}
@@ -7302,6 +7375,61 @@ snapshots:
 
   '@noble/hashes@1.8.0': {}
 
+  '@node-rs/bcrypt-android-arm-eabi@1.10.9':
+    optional: true
+
+  '@node-rs/bcrypt-android-arm64@1.10.9':
+    optional: true
+
+  '@node-rs/bcrypt-darwin-arm64@1.10.9':
+    optional: true
+
+  '@node-rs/bcrypt-darwin-x64@1.10.9':
+    optional: true
+
+  '@node-rs/bcrypt-freebsd-x64@1.10.9':
+    optional: true
+
+  '@node-rs/bcrypt-linux-arm-gnueabihf@1.10.9':
+    optional: true
+
+  '@node-rs/bcrypt-linux-arm64-gnu@1.10.9':
+    optional: true
+
+  '@node-rs/bcrypt-linux-arm64-musl@1.10.9':
+    optional: true
+
+  '@node-rs/bcrypt-linux-x64-gnu@1.10.9':
+    optional: true
+
+  '@node-rs/bcrypt-linux-x64-musl@1.10.9':
+    optional: true
+
+  '@node-rs/bcrypt-win32-arm64-msvc@1.10.9':
+    optional: true
+
+  '@node-rs/bcrypt-win32-ia32-msvc@1.10.9':
+    optional: true
+
+  '@node-rs/bcrypt-win32-x64-msvc@1.10.9':
+    optional: true
+
+  '@node-rs/bcrypt@1.10.9':
+    optionalDependencies:
+      '@node-rs/bcrypt-android-arm-eabi': 1.10.9
+      '@node-rs/bcrypt-android-arm64': 1.10.9
+      '@node-rs/bcrypt-darwin-arm64': 1.10.9
+      '@node-rs/bcrypt-darwin-x64': 1.10.9
+      '@node-rs/bcrypt-freebsd-x64': 1.10.9
+      '@node-rs/bcrypt-linux-arm-gnueabihf': 1.10.9
+      '@node-rs/bcrypt-linux-arm64-gnu': 1.10.9
+      '@node-rs/bcrypt-linux-arm64-musl': 1.10.9
+      '@node-rs/bcrypt-linux-x64-gnu': 1.10.9
+      '@node-rs/bcrypt-linux-x64-musl': 1.10.9
+      '@node-rs/bcrypt-win32-arm64-msvc': 1.10.9
+      '@node-rs/bcrypt-win32-ia32-msvc': 1.10.9
+      '@node-rs/bcrypt-win32-x64-msvc': 1.10.9
+
   '@nodelib/fs.scandir@2.1.5':
     dependencies:
       '@nodelib/fs.stat': 2.0.5
@@ -7704,8 +7832,6 @@ snapshots:
   '@types/babel__traverse@7.28.0':
     dependencies:
       '@babel/types': 7.29.0
-
-  '@types/bcryptjs@2.4.6': {}
 
   '@types/body-parser@1.19.6':
     dependencies:
@@ -8372,8 +8498,6 @@ snapshots:
       safe-buffer: 5.1.2
 
   basic-ftp@5.1.0: {}
-
-  bcryptjs@2.4.3: {}
 
   bidi-js@1.1.0:
     dependencies:
