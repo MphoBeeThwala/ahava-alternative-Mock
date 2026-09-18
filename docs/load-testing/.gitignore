@@ -1,0 +1,16 @@
+# Load test credentials and results
+test-credentials.json
+results.json
+results-report.json
+*.json
+
+# Node modules
+node_modules/
+
+# Logs
+*.log
+npm-debug.log
+
+# OS
+.DS_Store
+Thumbs.db
