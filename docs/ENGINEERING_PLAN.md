@@ -115,13 +115,13 @@ AH-07 (integration tests) — closed 2026-09-08, see below for the full writeup.
 | AH-03b | Double-submit CSRF token, for defence in depth beyond the origin check | P2 |
 | AH-15 | Cross-border PHI transfer to AI providers not named in the consent record | P2 |
 | AH-34 | `demoStream` holds a `setInterval` per user in-process | P2 |
-| AH-35 | The Render `plan: starter` (0.5 vCPU) sizing this was measured against no longer applies — Render was removed in favour of Railway-only (§6). AH-51 (§24) re-measured locally (not against Railway — see §24's methodology caveat) and found the bcrypt-saturation finding held, and worse than the 0.5-vCPU framing suggested (linear degradation, not just slow) | P0 for scale — still needs a real Railway re-verify |
+| AH-35 | The Render `plan: starter` (0.5 vCPU) sizing this was measured against no longer applies — Render was removed in favour of Railway-only (§6). AH-51 (§24) re-measured locally, and **§25 (2026-09-21) re-confirmed against real Railway production**: 0% failures at 200 concurrent, login scaling sub-linearly | Closed — confirmed against real Railway traffic, §25 |
 | AH-36 | Biometrics ingest — partially addressed 2026-09-08, see below | P1 for scale (downgraded — see note) |
 | AH-37 | Load tests hit the Next.js proxy, so proxy and API latency are indistinguishable — **measured 2026-09-18, see §24.** Confirmed the bottleneck is in the API, not the proxy: bcrypt serialization (AH-51), not proxy overhead, explained the flat throughput §3a found | Closed — see §24 |
 | AH-38 | The primary dev machine's Application Control policy blocks `pnpm.exe`. `corepack pnpm` works around it, but a new engineer hits this on day one. Get pnpm allowlisted, or commit to builds happening only in CI and Docker | P1 — infrastructure |
 | AH-42 (new) | Frontend monolithic files — `lib/api.ts` and `doctor/dashboard/page.tsx` split 2026-09-08, no behavior change — see below. `patient/ai-doctor/page.tsx` (897 lines), `profile/page.tsx` (738), and `auth/signup/page.tsx` (562) follow the same pattern and are unsplit | P2 — maintainability, not correctness |
-| AH-51 (new) | `bcryptjs` (pure JS, single-threaded) serialized all login traffic onto one core regardless of CPU count — the real cause behind AH-35's finding. Replaced with `@node-rs/bcrypt` (native, threadpool) across all 9 call sites, §24 | Closed 2026-09-18 — see §24 |
-| AH-52 (new) | ML service (`apps/ml-service`) ran a single `uvicorn` worker with no `--workers` flag; synchronous numpy/psycopg2 work in route handlers blocked the whole process per request. `Dockerfile` now takes `ML_SERVICE_WORKERS` (default 1, unchanged) | P1 for scale — mechanism added, real worker count and load-test-under-TimescaleDB still open, §24 |
+| AH-51 (new) | `bcryptjs` (pure JS, single-threaded) serialized all login traffic onto one core regardless of CPU count — the real cause behind AH-35's finding. Replaced with `@node-rs/bcrypt` (native, threadpool) across all 9 call sites, §24. **Confirmed holding in real production traffic, §25** | Closed 2026-09-18, confirmed in production 2026-09-21 — see §24, §25 |
+| AH-52 (new) | ML service (`apps/ml-service`) ran a single `uvicorn` worker with no `--workers` flag; synchronous numpy/psycopg2 work in route handlers blocked the whole process per request. `Dockerfile` now takes `ML_SERVICE_WORKERS` (default 1, unchanged). **§25 (2026-09-21): confirmed this is the live production bottleneck** — `monitor`/`biometrics` endpoints (the two that call the ML service) hit a flat ~22-25 req/s ceiling in production regardless of concurrency, while non-ML endpoints scale fine | P0 for scale — mechanism shipped, needs `ML_SERVICE_WORKERS` actually set on Railway, §25 |
 
 ---
 
@@ -1913,13 +1913,16 @@ login ceiling is a real, now much-higher, input to the same arithmetic.
 
 1. **Re-run against real Railway staging**, not this local sandbox — the
    one number that actually answers "does this hold at 5,000," per this
-   section's own methodology caveat.
+   section's own methodology caveat. **Superseded — see §25**, but re-run
+   again after §25's ML_SERVICE_WORKERS change lands.
 2. **Size `PRISMA_CONNECTION_LIMIT` and PgBouncer's pool size together**
    against a chosen replica count, using the formula above — not the
    `10`/`30` values tried here, which were exploratory.
 3. **Load-test the ML service with multiple workers against real
    TimescaleDB** — the fix here is verified to start correctly, not yet
-   verified to fix the timeout under load.
+   verified to fix the timeout under load. **§25 found the mechanism is
+   the live bottleneck in production**; setting `ML_SERVICE_WORKERS` on
+   Railway and re-running is the direct next step.
 4. **Re-measure AH-35** (Render's 0.5 vCPU sizing no longer applies —
    confirm what Railway tier is actually deployed and whether it changes
    any of the above).
@@ -1928,3 +1931,61 @@ login ceiling is a real, now much-higher, input to the same arithmetic.
    default of 4 — free throughput on any instance size larger than 4
    cores, unlocked by nothing more than an env var, now that bcrypt
    actually uses the threadpool.
+
+## 25. Real production load test — 2026-09-21
+
+Ran `scripts/true-capacity-test.js` directly against the live production
+backend (`https://backend-production-9a3b.up.railway.app`), not a sandbox
+— waves of 10/25/50/100/150/200 concurrent virtual users, each
+self-registering, logging in, and hitting `/me`, `/bookings`,
+`/monitor`, and `/patient/biometrics`.
+
+**Result: 0% failures at every wave, including 200 concurrent.** This is
+the first real, non-local evidence the AH-51 bcrypt fix (§24) holds in
+production — login p95 went from 224ms (10 VU) to 1598ms (200 VU), a
+~7× latency increase for a 20× concurrency increase, i.e. sub-linear
+degradation, not a wall.
+
+| Wave (VU) | TPS | login p95 | me p95 | bookings p95 | monitor p95 | biometrics p95 |
+|---|---|---|---|---|---|---|
+| 10 | 9.98 | 224ms | 125ms | 139ms | 300ms | 462ms |
+| 25 | 18.59 | 347ms | 89ms | 115ms | 247ms | 975ms |
+| 50 | 16.59 | 643ms | 177ms | 211ms | 697ms | 2351ms |
+| 100 | 17.57 | 848ms | 184ms | 162ms | 2450ms | 4113ms |
+| 150 | 16.74 | 1309ms | 216ms | 272ms | 2546ms | 6453ms |
+| 200 | 18.54 | 1598ms | 402ms | 663ms | 4033ms | 8596ms |
+
+**Reading the shape of this data, not just the pass/fail column:**
+`me`, `bookings`, and `login` — none of which call the ML service — scale
+well (3-7× latency for 20× load). `monitor` and `biometrics` — both of
+which call into `apps/ml-service` (`processBiometricReading` in
+`services/monitoring.ts` calls `/ingest` then `/readiness-score`;
+`routes/patient.ts`'s biometrics submission calls `/early-warning/summary`
+and, for any user with no ML-side history yet, `/ingest` +
+`/early-warning/analyze`) — degrade 13-19× for the same 20× load, and
+total throughput across the whole run **never exceeds ~17-19 TPS**
+regardless of concurrency (10 VU: 9.98, 200 VU: 18.54 — a flat ceiling,
+not a slope).
+
+Flat throughput plus linearly-growing latency as concurrency rises is the
+signature of a single-server queue: everyone is waiting behind one thing
+that processes at a fixed rate. That fixed rate works out to ~22-25
+requests/second across every wave (`concurrency ÷ biometrics-p95-seconds`
+lands at 21-26 for every row in the table above) — consistent with one
+CPU core doing the risk-scoring math for every request, one at a time,
+which is exactly **AH-52**: `apps/ml-service` still runs uvicorn with no
+`--workers` flag set, so it's one Python process regardless of how many
+CPUs the container has. This production run is the confirmation AH-52
+asked for — the mechanism isn't just correct, it's the live bottleneck.
+
+**This was not a failure.** No request errored or timed out even at 200
+concurrent users hitting the ML-backed endpoints — they just queued and
+got slow. The fix is a config change already supported by code shipped in
+AH-52, not a new code change: set `ML_SERVICE_WORKERS` on the ML service
+in Railway to that service's allocated vCPU count (check the service's
+Railway resource settings for the real number; do not guess). Each
+worker is a separate OS process with its own GIL, so N workers should
+raise the ~22-25 req/s ceiling roughly N×, directly lowering `monitor`
+and `biometrics` latency at the same concurrency. Re-run this exact same
+test after making that change — same waves, same script — to confirm the
+ceiling actually moves, and update this section with the result.
