@@ -121,7 +121,7 @@ AH-07 (integration tests) — closed 2026-09-08, see below for the full writeup.
 | AH-38 | The primary dev machine's Application Control policy blocks `pnpm.exe`. `corepack pnpm` works around it, but a new engineer hits this on day one. Get pnpm allowlisted, or commit to builds happening only in CI and Docker | P1 — infrastructure |
 | AH-42 (new) | Frontend monolithic files — `lib/api.ts` and `doctor/dashboard/page.tsx` split 2026-09-08, no behavior change — see below. `patient/ai-doctor/page.tsx` (897 lines), `profile/page.tsx` (738), and `auth/signup/page.tsx` (562) follow the same pattern and are unsplit | P2 — maintainability, not correctness |
 | AH-51 (new) | `bcryptjs` (pure JS, single-threaded) serialized all login traffic onto one core regardless of CPU count — the real cause behind AH-35's finding. Replaced with `@node-rs/bcrypt` (native, threadpool) across all 9 call sites, §24. **Confirmed holding in real production traffic, §25** | Closed 2026-09-18, confirmed in production 2026-09-21 — see §24, §25 |
-| AH-52 (new) | ML service (`apps/ml-service`) ran a single `uvicorn` worker with no `--workers` flag; synchronous numpy/psycopg2 work in route handlers blocked the whole process per request. `Dockerfile` now takes `ML_SERVICE_WORKERS` (default 1, unchanged). **§25 (2026-09-21): confirmed this is the live production bottleneck** — `monitor`/`biometrics` endpoints (the two that call the ML service) hit a flat ~22-25 req/s ceiling in production regardless of concurrency, while non-ML endpoints scale fine | P0 for scale — mechanism shipped, needs `ML_SERVICE_WORKERS` actually set on Railway, §25 |
+| AH-52 (new) | ML service (`apps/ml-service`) ran a single `uvicorn` worker with no `--workers` flag; synchronous numpy/psycopg2 work in route handlers blocked the whole process per request. `Dockerfile` now takes `ML_SERVICE_WORKERS`. **§25 (2026-09-21): confirmed live in production** — set `ML_SERVICE_WORKERS=8` (matching the service's 8 vCPU) on Railway; safe concurrency went 25→100 VU (+300%), 0% failures 10-200 VU | Closed 2026-09-21 — see §25. Next ceiling is replica count, not worker count |
 
 ---
 
@@ -1989,3 +1989,55 @@ raise the ~22-25 req/s ceiling roughly N×, directly lowering `monitor`
 and `biometrics` latency at the same concurrency. Re-run this exact same
 test after making that change — same waves, same script — to confirm the
 ceiling actually moves, and update this section with the result.
+
+### Verified: `ML_SERVICE_WORKERS=8` re-run, same day
+
+The ML service is provisioned at 8 vCPU / 8 GB on Railway. Set
+`ML_SERVICE_WORKERS=8` (matching vCPU count — more workers than cores just
+contends for the same cores) and re-ran the identical test against the
+same production backend.
+
+| Metric | Before (1 worker) | After (8 workers) | Change |
+|---|---|---|---|
+| Safe wave (all endpoints under 1200ms p95) | 25 VU | 100 VU | +300% |
+| Biometrics p95 @ 100 VU | N/A — 100 VU wasn't safely reachable | 1030ms | Now viable (barely, under the 1200ms budget) |
+| Aggregate TPS @ 100 VU | N/A | 46.36 tx/s | ~2.5× the old flat ~18 TPS ceiling |
+| Failure rate, 10-200 VU | Mixed/queued | 0% at every wave | Solid |
+
+**AH-52 is closed** — 8 parallel ML workers eliminated the single-process
+queueing; requests that previously backed up now execute concurrently.
+
+**New ceiling, same shape as before, one layer up:** biometrics p95
+climbs back over the 1200ms budget above 100 VU (1236ms at 150 VU), and
+`monitor` follows the same pattern (936ms → 1318ms p95, 50→200 VU).
+`login` and `me` continue to handle load well (330-1465ms and
+84-319ms respectively) — confirming the bottleneck is specifically the
+ML-backed endpoints, not the Node backend. This is the physical limit of
+**one** 8 vCPU replica: 8 workers is the most this container can run
+without workers contending for the same cores. Going further means more
+replicas, not more workers per replica.
+
+**Path to beyond 100 VU safe, in order:**
+1. **Add a second ML service replica** (1×8 vCPU/8 GB running 8 workers →
+   2×8 vCPU/8 GB running 16 workers total, load-balanced by Railway).
+   Direct continuation of this same fix, same mechanism.
+2. **Profile `biometrics`/`monitor` themselves** — find what inside the
+   ~1000-1300ms is DB query time vs ML computation vs the sequential
+   ingest→analyze round-trips patient.ts makes for first-time users
+   (§25 above) — there may be algorithmic latency to cut before paying for
+   more replicas.
+3. **Scale the Backend to 4 replicas** (currently maxed at 3) to keep
+   request routing from becoming the next bottleneck once the ML tier
+   is no longer the limiter.
+4. **Upgrade off the Hobby plan** — more headroom for Postgres connections
+   and better per-resource pricing at this scale.
+
+Extrapolating with caution: one 8-core ML replica safely carries ~100
+concurrent users running the full biometrics/monitoring flow. Reaching
+5,000 total logged-in users does **not** need 50 replicas at that ratio —
+§3a and this section's own Little's Law framing (users transacting every
+30-60s, not all in flight every second) means the real requirement is
+sized off *active flow rate*, not raw concurrent-login count. That
+calculation still needs redoing with today's real 46 tx/s-at-100-VU
+number in place of the old projected figures — flagged in "Still open"
+below.
