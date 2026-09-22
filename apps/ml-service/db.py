@@ -408,8 +408,12 @@ def save_context(user_id: str, profile: ContextualProfile) -> None:
             "cholesterolValue": profile.cholesterol_mmol_per_L,
         })
         with conn.cursor() as cur:
+            # Shallow-merge instead of replacing the column outright — riskProfile
+            # also holds medicalPassport/passportCompletionPercent (and other
+            # fields) written by the Node API's /patient/risk-profile route,
+            # which this background context sync must not clobber.
             cur.execute(
-                'UPDATE users SET "riskProfile" = %s::jsonb WHERE id = %s',
+                'UPDATE users SET "riskProfile" = COALESCE("riskProfile", \'{}\'::jsonb) || %s::jsonb WHERE id = %s',
                 (profile_json, user_id),
             )
         conn.commit()
