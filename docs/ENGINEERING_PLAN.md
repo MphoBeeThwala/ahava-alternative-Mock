@@ -2094,18 +2094,42 @@ cuff readings) can accumulate before sign-off, without the gated
 the API response, so a future consumer can defensively check it rather
 than trust that the gate was applied correctly upstream.
 
-**Verification gap, disclosed rather than glossed over**: unlike §25's
-9-scenario run, the gate itself was *not* verified by execution. Between
-that session and this one, this machine's Application Control policy
-started blocking pandas' own compiled extension (`pandas._libs.internals`)
-— not just psycopg2 as before — persistently, confirmed by deleting and
-recreating the venv from scratch and hitting the identical block both
-times. `python -m py_compile` is clean; the gate logic itself is a
-one-line `bool(signals) and signed_off` on top of already-verified
-signal-computation code, reasoned through by hand, but this is a real gap
-against this section's own stated bar for "verified," not silently
-claimed as equivalent to §25's run. Flagged to the user directly. If this
-recurs, it's worth checking with whoever manages endpoint security on this
+**Verification gap — closed same day.** At the time this section was first
+written, the gate had *not* been verified by execution: this machine's
+Application Control policy (identified as Windows 11 Smart App Control,
+via `VerifiedAndReputablePolicyState` in the registry) started blocking
+pandas' own compiled extension in addition to psycopg2, persistently,
+confirmed by deleting and recreating the venv from scratch. SAC has no
+per-file exclusion mechanism — the only fixes are disabling it machine-wide
+(one-way, requires a Windows reinstall to re-enable) or developing
+somewhere it doesn't apply. Set up WSL2 (`wsl --install -d Ubuntu`,
+completed 2026-09-23) instead of disabling a security feature to unblock a
+dev-tooling problem. Also matches production more closely (Railway runs
+Linux containers; local dev was Windows-native).
+
+Ubuntu's first-launch step needs an interactively-created personal
+username/password, which hung waiting on stdin in a non-interactive
+session (and isn't something to set on the user's behalf regardless — it's
+their account). Created a non-root `ahava` dev user instead
+(`adduser --disabled-password`, passwordless sudo) rather than continuing
+to operate as root for routine setup — the first attempt at root-level
+venv creation was correctly blocked by the session's own safety classifier
+("Security Weaken"). ml-service dependencies installed clean from the real
+`requirements.txt` (Python 3.14 — Ubuntu 26.04's default, no 3.12 package
+available via apt, tried anyway since a same-generation wheel gap seemed
+unlikely by this point and it installed without issue) — `psycopg2`,
+`pandas`, `numpy` all import without any Application Control interference,
+confirmed directly.
+
+**With a working interpreter, actually verified the gate.** Re-ran the
+original 9 scenarios from §25 plus 2 new ones covering the gate
+specifically (explicit `false`, `true` with real signals, `true` with no
+signals) — 11/11 passed against the real engine in WSL2. This closes the
+gap this section originally flagged: the gate is no longer "reasoned
+through by hand," it's been executed.
+
+If this Smart App Control block recurs for other tooling, it's worth
+checking with whoever manages endpoint security on this
 machine — the policy state changed between two points in the same day
 with no local action taken to cause it.
 
@@ -2149,3 +2173,64 @@ and against letting it influence `AcuityRow` or any other acuity display.
 Typechecked clean (`tsc --noEmit`) — the only errors in the full run are
 pre-existing missing devDependencies (`vitest`, `@testing-library/react`,
 `fake-indexeddb`) in unrelated test files, not caused by this change.
+
+## 27. Row 7 (WHO 2019 chart) — sourced, transcription attempted and correctly abandoned, 2026-09-23
+
+Sourced the real primary document per `CLINICAL_SIGNOFF_CHECKLIST.md` row 7:
+downloaded `docs/references/Appendix-VII-Cardiovascular-Risk-Assessment-F2020-4-Version-1.0-1-November-2024.pdf`
+directly from health.gov.za, confirmed it matches the citation already in
+§13 (2020-4_Version 1.0, 25 October 2024). Also pulled WHO's own HEARTS
+technical package PDF from WHO's IRIS repository as a cross-check source —
+same underlying chart. Both saved under `docs/references/` with a README
+explaining provenance and status, rather than left as URLs that can rot.
+
+Confirmed the chart's real structure directly (not assumed): 2 sexes × 2
+smoking statuses × 7 age bands × 6 BMI bands × 5 systolic-BP bands = 840
+cells, 4 WHO risk categories (green <5%, yellow 5–10%, orange 10–20%, red
+>20%), laid out as a colour grid — genuinely an image in the source, not a
+data table, confirming §13's account of why the earlier automated
+extraction attempt failed.
+
+**Attempted manual transcription, caught it failing its own reliability bar
+before shipping anything.** Rendered page 2 at 400 DPI (once poppler-utils
+was actually working — see §26) and did a first-pass read of the full Man
+and Woman blocks. Then, re-reading the *same* already-rendered image a
+second time as a cross-check, produced a different answer for the
+45-49/Man/Non-smoker row than the first pass — not a boundary judgment call
+(e.g. "is this orange or red"), a flatly different transcription of the
+same cells. That's disqualifying on its own terms: this section's own
+standard throughout has been that a transcription this codebase ships needs
+to be independently re-derivable, and catching an inconsistency in your own
+two reads of the same static image is direct evidence it currently isn't,
+not excessive caution.
+
+Also caught a monotonicity violation in the first pass while cross-checking
+by hand (70-74/Man/Smoker block: row 3, which sits at higher SBP than row 4
+and should therefore carry equal-or-higher risk, was read as lower risk at
+one BMI column) — exactly the failure mode that sank the earlier automated
+extraction effort (§13: "produced non-monotonic (impossible) values on real
+cells"). Doing this by a single human-relayed visual pass, however careful,
+hit the same wall a script did.
+
+**Did not ship a transcription.** No cell values were written into
+`engine.py`/`models.py` — `_who2019_non_lab_risk_category` is unchanged and
+still correctly refuses to score. Cropped, complete, legible reference
+images (`left_man.png`, `right_woman.png`, both confirmed fully readable
+end-to-end, unlike several intermediate sub-crops that had a boundary-math
+bug cutting off the last row of a block — deleted before commit, not saved)
+are kept in `docs/references/chart-crops/` so whoever transcribes this next
+doesn't need to re-source or re-render anything, only look and enter
+values.
+
+**Recommended path, recorded rather than just said in chat**: either (a) a
+human transcribes directly from `left_man.png`/`right_woman.png` on their
+own screen with native zoom, which is inherently more reliable than a
+relayed description, or (b) transcription is attempted again but one row (5
+cells) at a time, written down immediately adjacent to viewing it rather
+than batched from memory across multiple blocks — slow (~140 steps) but
+doesn't have the failure mode observed here. Whichever path is taken, the
+monotonicity check (non-decreasing risk with age, BMI, SBP, for fixed
+sex/smoking) is mandatory before any value from this chart reaches
+`computable: true`, and the result still needs the clinician sign-off
+`CLINICAL_SIGNOFF_CHECKLIST.md` row 7 already calls for regardless of how
+clean the transcription looks.
