@@ -2234,3 +2234,95 @@ sex/smoking) is mandatory before any value from this chart reaches
 `computable: true`, and the result still needs the clinician sign-off
 `CLINICAL_SIGNOFF_CHECKLIST.md` row 7 already calls for regardless of how
 clean the transcription looks.
+
+## 28. Row 7 done properly — colour-classification instead of human transcription, wired in behind a sign-off gate, 2026-09-23
+
+§27's human transcription attempt correctly caught itself failing (a second
+read of the same image disagreed with the first, plus a monotonicity
+violation) and stopped before shipping anything. Rather than retry the same
+method more slowly, replaced it with a different method entirely: instead
+of a person describing colours from a rendered image, sample each cell's
+actual pixel colour programmatically and classify it against reference
+colours — deterministic, reproducible, and not subject to the
+memory-reconstruction drift that sank the manual attempt.
+
+**Method:**
+1. Rendered page 1 (the legend) and page 2 (the chart) at 400 DPI inside
+   WSL2 (poppler-utils installed there after Windows's `pdftoppm.exe` got
+   quarantined by Smart App Control mid-session, same delayed-block pattern
+   as psycopg2/pandas earlier — see §26).
+2. Sampled the 4 legend swatch colours from page 1 at visually-confirmed
+   coordinates: GREEN (0,176,80), YELLOW (255,255,0), ORANGE (255,192,0),
+   RED (255,0,0) — standard values, high confidence.
+3. Detected the actual chart grid on page 2 programmatically: summing a
+   saturation mask by row/column found exactly 4 column bands (the 4
+   sex×smoking groups) and 7 uniform-height row bands (the age groups) with
+   real gaps between them — no manual boundary guessing, unlike the
+   sub-crop attempts in §27 that had a cutoff bug. Each block divided
+   evenly into its known 5×5 sub-grid (BMI × SBP).
+4. Sampled the central 50% of each of the 700 cells (avoiding
+   border/gridline pixels) and classified against the legend colours —
+   which surfaced something real: the chart's actual cell colours
+   ((10,164,129), (254,194,16), (243,110,33), (238,29,35)) are
+   systematically different from the page-1 legend swatches, by a small
+   but *exactly consistent* offset per category (not noise — same distance
+   repeated across every red cell, every orange cell). Almost certainly the
+   legend and the chart image were produced by different tools/rendering
+   paths using close-but-not-identical palettes for the same 4 semantic
+   categories.
+5. Re-calibrated: collected the distinct colours actually present across
+   all 700 sampled cells directly, rather than trusting the legend page.
+   Result: **exactly 4 distinct RGB values, zero cells outside them, zero
+   blended/ambiguous colours** — strong independent confirmation the grid
+   detection in step 3 was pixel-accurate, since a boundary error would
+   have produced blended edge colours somewhere across 700 samples.
+   Mapped those 4 to categories by hue (unambiguous: teal→GREEN,
+   yellow→YELLOW, orange→ORANGE, red→RED).
+
+**Validation, mechanical not eyeballed:** checked monotonicity on all 700
+cells across all three axes — non-decreasing risk with rising BMI,
+non-decreasing risk with rising SBP, non-decreasing risk with rising age,
+within each of the 4 sex×smoking groups. **Zero violations.** Also spot-
+checked 5 cells against values already independently confirmed by eye
+earlier in this session (obvious corners plus two specific cells from the
+§27 manual read) — 5/5 matched.
+
+**Shipped as gated data, not flipped live.** `apps/ml-service/who_2019_chart_data.py`
+(the 700-entry table, generated from the validated JSON, with the method
+note above in its header) and `who_2019_chart_lookup.py` (band-boundary
+helpers: age→5-year band, SBP→band, BMI→band, `lookup()`). Wired into
+`_who2019_non_lab_risk_category` in `engine.py` behind a new
+`WHO_2019_CHART_SIGNED_OFF` env var — same fail-safe pattern as
+`BP_CHECK_PROMPT_SIGNED_OFF` (§25/§26) and `PAEDIATRIC_TEWS_SIGNED_OFF`
+(§12). Unset/false (the default everywhere today): behaviour is unchanged
+from before this section — `computable: false` — except the reason code is
+now `WHO_2019_CHART_AWAITING_CLINICIAN_SIGNOFF` instead of
+`WHO_2019_CHART_NOT_YET_DIGITIZED`, which is now simply accurate: it *has*
+been digitized, what's left is the signature, matching every other gated
+item on the checklist rather than being a unique double-blocked case.
+
+**Verified for real**, in WSL2: 7 scenarios covering gate-off (old
+behaviour preserved, new reason code), gate-on with a known RED cell and a
+known GREEN cell matching the validated data exactly, out-of-range age
+still refusing even with the gate on, a missing required field still
+refusing even with the gate on, and a full `full_analysis()` end-to-end
+call returning a real category while `bp_risk` stays independently
+computed (structural guarantee from §25 still holds — confirmed again, not
+assumed). All 7 passed. `main.py` still imports and builds its FastAPI app
+cleanly with the new modules wired in.
+
+**Still open — same as every other row, now genuinely just this**: a named
+HPCSA-registered clinician needs to review the transcription (the two
+source crop images plus `who_2019_chart_data.py`) and the instrument choice
+itself, and flip `WHO_2019_CHART_SIGNED_OFF`. `CLINICAL_SIGNOFF_CHECKLIST.md`
+row 7 updated accordingly — no longer "structurally blocked regardless of
+sign-off," now a normal sign-off-gated row like the rest.
+
+Disposable verification scripts and intermediate renders (`_extract_chart.py`,
+`_finalize_chart.py`, `_verify_who2019.py`, `page1.png`, broken sub-crops
+from §27) deleted before commit, matching this file's established
+convention. Kept: the two source PDFs, `left_man.png`/`right_woman.png`
+(clean, complete, still useful for the clinician's own visual cross-check),
+`page2-2.png` (full-page reference), and `chart_data_final.json` (the raw
+extracted+validated data the `.py` module was generated from, for
+independent re-verification without re-running the extraction).

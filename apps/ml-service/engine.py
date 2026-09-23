@@ -15,6 +15,7 @@ from typing import List, Dict, Tuple, Optional
 from datetime import datetime, timedelta
 import hashlib
 import os
+import who_2019_chart_lookup
 from models import (
     BiometricData, AlertLevel, ContextualProfile,
     CvdRiskAssessment, BpRiskAssessment, FusionOutput, EarlyWarningSummary,
@@ -689,6 +690,12 @@ class EarlyWarningEngine:
     WHO_2019_MIN_AGE = 40
     WHO_2019_MAX_AGE = 74
 
+    def _who_2019_chart_signed_off(self) -> bool:
+        # Same pattern as _bp_check_prompt_signed_off (AH-45.5a) and
+        # triageSafety.ts's PAEDIATRIC_TEWS_SIGNED_OFF — unset/false by
+        # default, fails safe. See CLINICAL_SIGNOFF_CHECKLIST.md row 7.
+        return os.environ.get("WHO_2019_CHART_SIGNED_OFF", "").strip().lower() == "true"
+
     def _who2019_non_lab_risk_category(
         self, profile: ContextualProfile, systolic_bp: Optional[float]
     ) -> CvdRiskAssessment:
@@ -714,20 +721,43 @@ class EarlyWarningEngine:
         # chart), is a published COLOUR GRID of age x SBP x BMI x sex x
         # smoking-status cells, each mapping to one of four risk categories
         # (<5% / 5-10% / 10-20% / >20% — SA's own four-band collapse of
-        # WHO's five-band default). It is an image, not a data table — the
-        # primary-source PDF itself confirms this, which is exactly why an
-        # automated extraction attempt (a parallel effort, see
-        # docs/ENGINEERING_PLAN.md §12) produced impossible, non-monotonic
-        # values on real cells and had to be abandoned rather than shipped.
-        # The exact cell values are not reproduced here from memory —
-        # doing so would be exactly the kind of unsourced clinical number
-        # this whole engagement exists to remove. Every input this function
-        # validates above is real and wired end-to-end; only the final
-        # table lookup is a stub until someone transcribes the actual chart
-        # from the primary WHO/Lancet publication (with the same clinician
-        # sign-off as the SATS tables in triageThresholds/).
-        reasons.append("WHO_2019_CHART_NOT_YET_DIGITIZED")
-        return CvdRiskAssessment(computable=False, reasons_not_computable=reasons)
+        # WHO's five-band default). It is an image, not a data table — an
+        # earlier automated extraction attempt (docs/ENGINEERING_PLAN.md
+        # §12/§13) and a first manual transcription attempt (§27) both
+        # produced non-monotonic/self-inconsistent values and were
+        # abandoned rather than shipped. §28 re-did this by rendering the
+        # source at 400 DPI and colour-classifying every cell against the
+        # chart's own self-calibrated palette (not the page-1 legend, which
+        # uses a slightly different but consistent palette) — 700/700 cells
+        # matched with zero ambiguity (only 4 distinct exact RGB values
+        # across the whole grid) and zero monotonicity violations across
+        # age, SBP and BMI. See who_2019_chart_data.py for the full method
+        # note and docs/references/ for the source images.
+        #
+        # That resolves the *transcription-accuracy* gap this comment used
+        # to describe — it does not resolve the separate, still-open
+        # clinician sign-off gap (CLINICAL_SIGNOFF_CHECKLIST.md row 7).
+        # Gated the same way as AH-45.5a (§25/§26) and paediatric TEWS
+        # (§12): unset/false by default, fails safe to the same
+        # not-computable response as before, just with a reason code that
+        # accurately reflects which gap remains.
+        if not self._who_2019_chart_signed_off():
+            reasons.append("WHO_2019_CHART_AWAITING_CLINICIAN_SIGNOFF")
+            return CvdRiskAssessment(computable=False, reasons_not_computable=reasons)
+
+        color = who_2019_chart_lookup.lookup(
+            profile.sex, profile.smoker, profile.age, systolic_bp, profile.bmi
+        )
+        if color is None:
+            # age passed the WHO_2019_MIN_AGE/MAX_AGE check above but fell
+            # outside the chart's own 5-year band edges somehow — should be
+            # unreachable given those bounds are 40/74 matching the chart,
+            # kept as a defensive non-crash rather than assumed impossible.
+            reasons.append("OUT_OF_VALIDATED_AGE_RANGE")
+            return CvdRiskAssessment(computable=False, reasons_not_computable=reasons)
+
+        category_map = {"GREEN": "<5%", "YELLOW": "5-10%", "ORANGE": "10-20%", "RED": ">20%"}
+        return CvdRiskAssessment(computable=True, risk_category=category_map[color])
 
     def _physiological_trend_flags(
         self, hr_trend: Optional[str], hrv_vs_baseline: Optional[str], sleep_pattern: Optional[str]
