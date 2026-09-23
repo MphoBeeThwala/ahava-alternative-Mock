@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 import hashlib
 from models import (
     BiometricData, AlertLevel, ContextualProfile,
-    CvdRiskAssessment, FusionOutput, EarlyWarningSummary,
+    CvdRiskAssessment, BpRiskAssessment, FusionOutput, EarlyWarningSummary,
     UncertaintyProfile, ClinicalProvenance,
 )
 import db
@@ -746,6 +746,43 @@ class EarlyWarningEngine:
             flags.append("SLEEP_DISRUPTED")
         return flags
 
+    def _bp_risk_trend(
+        self, history: List[dict], data: BiometricData, age: Optional[int]
+    ) -> BpRiskAssessment:
+        # AH-45.5a, 2026-09-22: reuses the same AH-50-hardened deviation
+        # primitives _evaluate() uses for HR/HRV, rather than the weaker,
+        # ungated hr_trend_2w/hrv_vs_baseline from _extract_features (raw
+        # 14-day slope; raw z-score on right-skewed RMSSD — exactly what
+        # AH-50 replaced HRV's general handling with _hrv_deviation over).
+        # Independent of _evaluate()'s own call to these same functions —
+        # see BpRiskAssessment docstring for why this must never feed
+        # cvd_risk.risk_category or override an AH-43/44 floor escalation.
+        signals: List[str] = []
+
+        hr_deviation = False
+        mean, std = self._calculate_blended_baseline(history, "heart_rate_resting", age)
+        if std > 0:
+            recent = self._recent_metric_values(history, data.heart_rate_resting, "heart_rate_resting")
+            hr_deviation, _ = self._persistent_anomaly(recent, mean, std, "high")
+            if hr_deviation:
+                signals.append("RESTING_HR_PERSISTENTLY_ABOVE_OWN_BASELINE")
+
+        hrv_deviation, _ = self._hrv_deviation(history, data)
+        if hrv_deviation:
+            signals.append("HRV_SHIFTED_FROM_OWN_BASELINE")
+
+        short_sleep = bool(data.sleep_duration_hours and 0 < data.sleep_duration_hours < 5.5)
+        if short_sleep:
+            signals.append("SHORT_SLEEP_DURATION")  # Itani et al. 2016, 10.1016/j.sleep.2016.08.006
+
+        return BpRiskAssessment(
+            prompt_bp_check=bool(signals),
+            hr_deviation=hr_deviation,
+            hrv_deviation=hrv_deviation,
+            short_sleep=short_sleep,
+            contributing_signals=signals,
+        )
+
     def _epidemiological_flags(self, profile: ContextualProfile) -> List[str]:
         # AH-45 §45.6: no major CVD calculator (including WHO 2019) accounts
         # for HIV or active TB, both common in this population — surfaced
@@ -808,6 +845,7 @@ class EarlyWarningEngine:
             hr_trend, hrv_vs_baseline, sleep_pattern
         )
         cvd_risk.epidemiological_flags = self._epidemiological_flags(profile)
+        bp_risk = self._bp_risk_trend(history, data, age)
         fusion = self._fusion_from_cvd_risk(cvd_risk)
 
         clinical_flags: List[str] = []
@@ -857,6 +895,7 @@ class EarlyWarningEngine:
             hrv_vs_baseline=hrv_vs_baseline,
             sleep_pattern=sleep_pattern,
             cvd_risk=cvd_risk,
+            bp_risk=bp_risk,
             fusion=fusion,
             clinical_flags=clinical_flags,
             alert_level=alert_level,

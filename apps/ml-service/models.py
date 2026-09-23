@@ -96,6 +96,54 @@ class CvdRiskAssessment(BaseModel):
     # §45.6: HIV/TB status the instrument does not account for.
     epidemiological_flags: List[str] = Field(default_factory=list)
 
+class BpRiskAssessment(BaseModel):
+    """AH-45.5a change-detection signal for prompting a measured blood
+    pressure reading — NOT a hypertension-risk prediction and NOT a blood
+    pressure estimate (see docs/ENGINEERING_PLAN.md §25, and the
+    2026-09-22 evidence review it records).
+
+    An earlier version of this model tried to turn resting-HR trend, HRV
+    deviation and sleep disruption into a GREEN/AMBER/RED *risk level*,
+    gated on finding a cited threshold for this population. That threshold
+    does not exist to find: ARIC and Framingham disagree on which HRV
+    measure predicts incident hypertension (and Framingham found nothing
+    in women at all), both report a population quartile contrast rather
+    than a personal cut-point, and wrist-PPG HRV bias runs in the wrong
+    direction for exactly the patients such a cut-point would need to
+    catch (Nuuttila et al. 2021, 10.3390/s22010137). Asking a clinician to
+    sign a threshold under those citations would be asking them to attest
+    to something the literature doesn't contain — the same transport
+    problem AH-45 already used to reject Framingham/QRISK3 outright.
+
+    The claim here is narrower and does not need that threshold: has this
+    patient's own signal moved from their own baseline, such that a cuff
+    reading is warranted. `hr_deviation`/`hrv_deviation` reuse the exact
+    AH-50-hardened primitives (_persistent_anomaly, _hrv_deviation) the
+    general alert pipeline already relies on — not a new statistic invented
+    for this flag. `short_sleep` is the one absolute (non-baseline) signal,
+    per Itani et al. 2016's short-sleep definition (pooled RR 1.17 for
+    incident hypertension, 153 cohorts, 10.1016/j.sleep.2016.08.006) — the
+    strongest of the three, and a population exposure category rather than
+    a personalised cut-point, so it doesn't have the same transport problem.
+
+    Structural guarantees (AH-45.5a sign-off conditions #2/#3): this flag
+    must never be blended into CvdRiskAssessment.risk_category, and must
+    never suppress or downgrade an AH-43/44 absolute-floor escalation.
+    `full_analysis` computes this independently of both — see engine.py.
+    """
+    prompt_bp_check: bool = False
+    hr_deviation: bool = False
+    hrv_deviation: bool = False
+    short_sleep: bool = False
+    contributing_signals: List[str] = Field(default_factory=list)
+    disclaimer: str = (
+        "Not a blood pressure measurement or a hypertension risk score. "
+        "Your own signals have shifted from your own baseline — a measured "
+        "blood pressure reading is recommended to follow up. This flag "
+        "cannot diagnose anything on its own."
+    )
+
+
 class FusionOutput(BaseModel):
     # AH-45 §45.1: no longer computed by any arithmetic projection — a
     # 2-year trajectory from a "+6.0 if rising" heuristic was exactly the
@@ -136,6 +184,7 @@ class EarlyWarningSummary(BaseModel):
     sleep_pattern: Optional[str] = None  # "disrupted", "adequate", "good"
     # Risk scores
     cvd_risk: CvdRiskAssessment
+    bp_risk: BpRiskAssessment
     fusion: FusionOutput
     # Clinical flags
     clinical_flags: List[str] = []

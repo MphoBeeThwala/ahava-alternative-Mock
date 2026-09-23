@@ -1928,3 +1928,145 @@ login ceiling is a real, now much-higher, input to the same arithmetic.
    default of 4 — free throughput on any instance size larger than 4
    cores, unlocked by nothing more than an env var, now that bcrypt
    actually uses the threadpool.
+
+## 25. AH-45.5a — wearable-derived BP risk flag: rejected a threshold, shipped change-detection instead, 2026-09-22
+
+Cuffless-BP feature exploration (product research, no BP measurement or
+estimation claim — see the Sep 2026 strategy report) proposed a "BP risk
+trend" signal derived from wearable HR/HRV/sleep data. First cut of
+`BpRiskAssessment`/`_bp_risk_trend` (`apps/ml-service/models.py`,
+`engine.py`) landed as a deliberate stub — `computable: false`,
+`reasons_not_computable: ["AWAITING_CLINICAL_SIGN_OFF_ON_THRESHOLDS"]` —
+on the same bar as `_who2019_non_lab_risk_category`: no GREEN/AMBER/RED
+*risk level* without a cited source and clinician sign-off.
+
+A same-day evidence memo (`Wearable trend signals → hypertension risk:
+the evidence, and why there is no table to sign`, dated 2026-09-22)
+reviewed the actual primary literature and concluded the blocker as
+written was unresolvable, not because nobody looked but because the
+literature doesn't support a threshold:
+
+- **ARIC vs. Framingham HRV-hypertension findings disagree.** ARIC
+  (Schroeder et al., *Hypertension* 2003, 10.1161/01.HYP.0000100444.71069.73,
+  n=7,099) found RMSSD/SDNN/R-R quartile contrasts predicted incident
+  hypertension (HR 1.24–1.44, lowest vs. highest quartile). Framingham
+  (Singh et al., *Hypertension* 1998, 10.1161/01.hyp.32.2.293, n=1,434)
+  largely didn't replicate it — only LF power in men reached significance,
+  nothing in women at all. A quartile contrast from either isn't a
+  personal cut-point, and the two landmark cohorts don't agree on which
+  measure matters.
+- **This is the same transport problem §13 already used to reject
+  Framingham/QRISK3 outright** for CVD risk in African cohorts (Ghana
+  RODAM, Nairobi PCE, H3Africa — "not merely imprecise but mutually
+  uncorrelated"). A 1998/2003 US-cohort HRV odds ratio has a weaker claim
+  to transport than the risk equations already rejected on those grounds.
+- **Wrist PPG's own HRV bias makes it worse, not better.** Nuuttila et
+  al., *Sensors* 2021 (10.3390/s22010137): wrist PPG overestimates
+  lnRMSSD, and the bias is largest in participants with low LnRMSSD —
+  exactly the people a low-HRV flag would need to catch. Structurally the
+  same shape of problem already accepted in §12/AH-50 §50.4 for SpO2 and
+  skin tone: a device-level bias running in the dangerous direction, where
+  the fix is to widen margin and refuse to score, not add a correction
+  coefficient.
+- **Sleep is the one signal that does transport**, and it's still a
+  population exposure, not a personal cut-point: short sleep → incident
+  hypertension, RR 1.17 (95% CI 1.09–1.26), pooled across 153 prospective
+  cohorts, 5,172,710 participants (Itani et al., *Sleep Medicine* 2016,
+  10.1016/j.sleep.2016.08.006). Long sleep shows no association (Jike et
+  al., *Sleep Medicine Reviews* 2017, 10.1016/j.smrv.2017.06.011).
+
+**Decision, accepted and acted on immediately**: don't source the
+threshold, narrow the claim instead. `BpRiskAssessment` no longer has a
+`risk_level` or a `computable` gate at all — asking "is this patient's BP
+elevated" was the wrong question for this evidence base. It now asks
+"has this patient's own signal moved from their own baseline," which
+needs no population threshold:
+
+- `hr_deviation` / `hrv_deviation` now call the *actual* AH-50-hardened
+  primitives (`_persistent_anomaly`, `_hrv_deviation`) — the same ones
+  `_evaluate()` uses for the general alert pipeline — not the older,
+  ungated `_extract_features` output (raw 14-day HR slope; raw z-score on
+  right-skewed RMSSD) the first cut was wired to by mistake. Reusing
+  `_extract_features` here would have quietly reintroduced the exact
+  defect AH-50 fixed, under a new label.
+- `short_sleep` keeps the literature-defined absolute cutoff (<5.5h, per
+  Itani et al.'s short-sleep category) rather than a personal baseline —
+  correct, since this is a population exposure claim, not a personal-
+  deviation one, and personalising it would misrepresent the citation.
+- `prompt_bp_check` is `true` whenever any of the three signals fire.
+  `disclaimer` states explicitly this is not a measurement or a risk
+  score.
+- **Structural guarantee, verified by inspection of `full_analysis`**:
+  `bp_risk` is computed independently of `cvd_risk` and `alert_level` and
+  is not referenced by `_fusion_from_cvd_risk` or
+  `requires_clinician_review` — it cannot alter the CVD risk category and
+  cannot suppress or downgrade an AH-43/44 absolute-floor escalation,
+  satisfying sign-off conditions #2 and #3 below.
+
+**Still open — sign-off, not code**: the evidence memo's own framing is
+that a named HPCSA-registered clinician can sign this version on ordinary
+conservative-judgment grounds (not a predictive-accuracy claim): (1) the
+AH-50 deviation flags are a reasonable trigger for recommending a cuff
+reading, (2) the flags are displayed as non-diagnostic and cannot alter a
+risk category, (3) no flag suppresses or downgrades an absolute-threshold
+escalation. Per §12's own precedent ("build and land on main now;
+sign-off is a parallel track, not a merge gate"), this lands now; nothing
+in the backend or frontend consumes `bp_risk` yet, so it reaches no
+patient before that signature exists regardless.
+
+**Discrepancy resolved**: the evidence memo named two companion documents
+— `claude/clinical-thresholds-spec.md` and
+`claude/threshold-transcription-status.md` — that turned out not to exist
+anywhere, confirmed directly by the user. Rather than reconstruct files to
+match a citation that didn't point at anything real, the actual gap they
+were pointing at — every item in this codebase awaiting a named
+clinician's signature is scattered across `ENGINEERING_PLAN.md` prose with
+no single enumerable list — is now addressed for real:
+**`docs/CLINICAL_SIGNOFF_CHECKLIST.md`**, built from a fresh grep of every
+"sign-off" reference in `apps/` and `docs/`, cited by file and line. It
+covers all ten live items, including this section's own AH-45.5a
+conditions, and makes explicit that exactly one of them (paediatric TEWS)
+has an actual code-level gate — everything else, including AH-45.5a, ships
+live under §12's "parallel track, not a merge gate" precedent.
+
+**Not yet done**: backend TS types / patient / clinician dashboard wiring
+for `bp_risk` (all still Tier B scope, still unbuilt); the
+`Visit`-linked `BpCalibrationEvent` model for the clinic/pharmacy
+workflow, needed later to actually validate `prompt_bp_check` against
+real cuff readings.
+
+**Verified:** a real Python 3.12 venv with the service's actual dependencies
+(pydantic, numpy, pandas, psycopg2-binary) was created for this session
+(none existed before). `main.py` — the actual Railway entrypoint — imports
+and builds its FastAPI app cleanly end-to-end, confirming `/early-warning/analyze`
+now returns `bp_risk` alongside the existing fields.
+
+One real environment constraint hit and worked around, not bypassed: this
+machine's Application Control policy blocks psycopg2's native DLL
+(`_psycopg`) from loading at all — persistent across retries, not a
+transient first-scan block like numpy's own compiled extension was. Since
+`_bp_risk_trend` and the AH-50 primitives it calls (`_persistent_anomaly`,
+`_hrv_deviation`, `_calculate_blended_baseline`) operate only on the
+`history`/`data` arguments passed in and never call `db.*` themselves,
+verification stubbed `sys.modules["db"]` with a no-op `ensure_schema`
+before import — ordinary dependency substitution for a unit test, not an
+attempt to defeat the policy; psycopg2 itself stays blocked and unused by
+this check, and production still needs it. The one-time `main.py` import
+check above used the same stub, since its routes also only need `engine`
+to build, not a live DB connection.
+
+A disposable verification script (`_verify_ah45_5a.py`, deleted before
+commit, same convention as §12) exercised 9 scenarios against the real
+engine, all passing: cold start with no history makes no claim; a stable
+baseline at the current reading raises no signal; HR elevated on the
+current reading *and* persisting on a prior one (2-of-3, AH-50 §50.3)
+flags `hr_deviation`, while the identical current-reading spike with a
+normal prior history does not (the exact single-spike-vs-persistent
+distinction §50.3 exists for); HRV shifted well past the smallest-
+worthwhile-change from its first-week baseline flags `hrv_deviation`, a
+stable HRV series does not; short sleep (<5.5h) flags `short_sleep`,
+normal sleep does not; a combined HR-deviation + short-sleep scenario
+correctly sets `prompt_bp_check=True` with both signals listed; and
+`full_analysis`'s own source was inspected to confirm `bp_risk` is
+computed after `cvd_risk`/before `fusion` without either referencing the
+other, matching the structural guarantee claimed above.
