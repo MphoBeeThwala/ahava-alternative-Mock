@@ -14,6 +14,7 @@ import pandas as pd
 from typing import List, Dict, Tuple, Optional
 from datetime import datetime, timedelta
 import hashlib
+import os
 from models import (
     BiometricData, AlertLevel, ContextualProfile,
     CvdRiskAssessment, BpRiskAssessment, FusionOutput, EarlyWarningSummary,
@@ -746,6 +747,15 @@ class EarlyWarningEngine:
             flags.append("SLEEP_DISRUPTED")
         return flags
 
+    def _bp_check_prompt_signed_off(self) -> bool:
+        # AH-45.5a, 2026-09-23: mirrors triageSafety.ts's
+        # PAEDIATRIC_TEWS_SIGNED_OFF gate (docs/ENGINEERING_PLAN.md §12) —
+        # unset/false by default, fails safe. Gates only the actionable
+        # prompt_bp_check claim (sign-off condition #1); the underlying
+        # deviation signals stay computed regardless — see BpRiskAssessment
+        # docstring and CLINICAL_SIGNOFF_CHECKLIST.md row 10.
+        return os.environ.get("BP_CHECK_PROMPT_SIGNED_OFF", "").strip().lower() == "true"
+
     def _bp_risk_trend(
         self, history: List[dict], data: BiometricData, age: Optional[int]
     ) -> BpRiskAssessment:
@@ -775,11 +785,13 @@ class EarlyWarningEngine:
         if short_sleep:
             signals.append("SHORT_SLEEP_DURATION")  # Itani et al. 2016, 10.1016/j.sleep.2016.08.006
 
+        signed_off = self._bp_check_prompt_signed_off()
         return BpRiskAssessment(
-            prompt_bp_check=bool(signals),
+            prompt_bp_check=bool(signals) and signed_off,
             hr_deviation=hr_deviation,
             hrv_deviation=hrv_deviation,
             short_sleep=short_sleep,
+            signed_off=signed_off,
             contributing_signals=signals,
         )
 

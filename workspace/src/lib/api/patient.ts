@@ -71,6 +71,21 @@ export interface EarlyWarningSummary {
     alert_triggered?: boolean;
     alert_message?: string;
   };
+  // AH-45.5a (docs/ENGINEERING_PLAN.md §25): change-detection only, not a
+  // BP measurement or a hypertension risk score. `prompt_bp_check` stays
+  // false until BP_CHECK_PROMPT_SIGNED_OFF is set server-side (see
+  // docs/CLINICAL_SIGNOFF_CHECKLIST.md row 10) — do not render this as an
+  // actionable prompt without checking `signed_off` first, and do not let
+  // it influence any acuity/risk display (e.g. AcuityRow).
+  bp_risk?: {
+    prompt_bp_check?: boolean;
+    hr_deviation?: boolean;
+    hrv_deviation?: boolean;
+    short_sleep?: boolean;
+    signed_off?: boolean;
+    contributing_signals?: string[];
+    disclaimer?: string;
+  };
   clinical_flags?: string[];
   anomalies?: string[];
 }

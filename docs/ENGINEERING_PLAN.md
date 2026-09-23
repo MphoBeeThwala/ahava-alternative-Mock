@@ -2070,3 +2070,82 @@ correctly sets `prompt_bp_check=True` with both signals listed; and
 `full_analysis`'s own source was inspected to confirm `bp_risk` is
 computed after `cvd_risk`/before `fusion` without either referencing the
 other, matching the structural guarantee claimed above.
+
+## 26. AH-45.5a follow-up — sign-off gate added, two more corrections, 2026-09-23
+
+**Reminder, since this is easy to lose track of**: `prompt_bp_check` is
+now gated behind `BP_CHECK_PROMPT_SIGNED_OFF` (unset/false by default) and
+still reaches no patient regardless, since no backend/frontend code reads
+`bp_risk` yet. Row 10 of `docs/CLINICAL_SIGNOFF_CHECKLIST.md` is the
+single source of truth for whether sign-off condition #1 has actually
+happened — check there, not memory, before wiring this into any dashboard.
+
+**Gate added** (`apps/ml-service/models.py`, `engine.py`): mirrors
+`triageSafety.ts`'s `PAEDIATRIC_TEWS_SIGNED_OFF` pattern exactly.
+`_bp_check_prompt_signed_off()` reads `BP_CHECK_PROMPT_SIGNED_OFF`; when
+unset/false, `prompt_bp_check` is forced `false` regardless of detected
+signals. Deliberately does **not** suppress `hr_deviation`/
+`hrv_deviation`/`short_sleep`/`contributing_signals` — those stay
+computed and visible even while gated, so retrospective validation data
+(comparing what the algorithm would have flagged against manually-entered
+cuff readings) can accumulate before sign-off, without the gated
+`prompt_bp_check` ever reaching a patient as an actionable claim. New
+`BpRiskAssessment.signed_off` field surfaces the gate's state directly in
+the API response, so a future consumer can defensively check it rather
+than trust that the gate was applied correctly upstream.
+
+**Verification gap, disclosed rather than glossed over**: unlike §25's
+9-scenario run, the gate itself was *not* verified by execution. Between
+that session and this one, this machine's Application Control policy
+started blocking pandas' own compiled extension (`pandas._libs.internals`)
+— not just psycopg2 as before — persistently, confirmed by deleting and
+recreating the venv from scratch and hitting the identical block both
+times. `python -m py_compile` is clean; the gate logic itself is a
+one-line `bool(signals) and signed_off` on top of already-verified
+signal-computation code, reasoned through by hand, but this is a real gap
+against this section's own stated bar for "verified," not silently
+claimed as equivalent to §25's run. Flagged to the user directly. If this
+recurs, it's worth checking with whoever manages endpoint security on this
+machine — the policy state changed between two points in the same day
+with no local action taken to cause it.
+
+**Two corrections to the "three things" follow-on plan** (§25's "Not yet
+done" list), caught before building the wrong thing rather than after:
+
+1. **No new `BpCalibrationEvent` model.** `BiometricReading` already has
+   `bloodPressureSystolic`/`Diastolic` and `source` — the only real gap
+   was linking a reading to the visit it was taken during. Added
+   `BiometricReading.visitId` (nullable FK to `Visit`,
+   migration `20260923120000_add_visit_id_to_biometric_readings`) instead
+   of a parallel table. Schema validated (`prisma validate`, real
+   Prisma CLI — no DB connection needed for schema-only validation, ran
+   clean).
+2. **`Visit.biometrics` (the JSON field that looked like an existing
+   calibration-data mechanism) turned out to be dead schema** — its own
+   comment says "for patients without wearable devices," but a repo-wide
+   search found no route anywhere that reads or writes it. Building the
+   calibration-data link on top of it would have meant building two
+   unproven things at once (the link, and the write-path that was never
+   actually implemented). Went with `visitId` on the already-live
+   `BiometricReading` table instead — see #1.
+
+**Retrospective-data-banking check**: no scheduled/automatic retention job
+purges `BiometricReading` — confirmed by search. Two manual deletion paths
+exist, both intentional and gated: `POST /admin/reset-trial-data`
+(`admin.ts`, requires `confirm: "RESET"` in the body, admin-only — the
+"nuclear option" on the admin dashboard) and
+`scripts/targeted-reset.ts` (a hand-run dev/ops script, not exposed over
+HTTP). Neither is a code defect to fix here, but worth naming as an
+operational caution: either one, run during the validation window,
+deletes exactly the history the retrospective-validation effort is
+counting on, with no special protection for that use case.
+
+**Frontend**: `workspace/src/lib/api/patient.ts`'s `EarlyWarningSummary`
+interface gained a `bp_risk` field mirroring the Python response shape
+exactly (raw snake_case passthrough — confirmed in §-era investigation
+that the backend route does no case transformation). Comment on the field
+warns against rendering `prompt_bp_check` without checking `signed_off`,
+and against letting it influence `AcuityRow` or any other acuity display.
+Typechecked clean (`tsc --noEmit`) — the only errors in the full run are
+pre-existing missing devDependencies (`vitest`, `@testing-library/react`,
+`fake-indexeddb`) in unrelated test files, not caused by this change.

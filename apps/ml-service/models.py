@@ -130,11 +130,24 @@ class BpRiskAssessment(BaseModel):
     must never be blended into CvdRiskAssessment.risk_category, and must
     never suppress or downgrade an AH-43/44 absolute-floor escalation.
     `full_analysis` computes this independently of both — see engine.py.
+
+    Sign-off condition #1 ("AH-50 deviation flags are a reasonable trigger
+    for recommending a cuff reading") is still a pending named-clinician
+    judgment call (CLINICAL_SIGNOFF_CHECKLIST.md row 10) — `prompt_bp_check`
+    is gated on `BP_CHECK_PROMPT_SIGNED_OFF` (mirrors triageSafety.ts's
+    PAEDIATRIC_TEWS_SIGNED_OFF: unset/false by default, fails safe). The
+    underlying `hr_deviation`/`hrv_deviation`/`short_sleep`/
+    `contributing_signals` stay populated either way — internal visibility
+    only, so retrospective validation data can accumulate before sign-off —
+    but `prompt_bp_check` cannot be true until the gate is.
     """
     prompt_bp_check: bool = False
     hr_deviation: bool = False
     hrv_deviation: bool = False
     short_sleep: bool = False
+    signed_off: bool = Field(
+        False, description="BP_CHECK_PROMPT_SIGNED_OFF at evaluation time — see CLINICAL_SIGNOFF_CHECKLIST.md row 10"
+    )
     contributing_signals: List[str] = Field(default_factory=list)
     disclaimer: str = (
         "Not a blood pressure measurement or a hypertension risk score. "

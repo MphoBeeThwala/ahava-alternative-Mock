@@ -245,11 +245,12 @@ model Visit {
   doctor          User?       @relation("DoctorOversight", fields: [doctorId], references: [id])
   messages        Message[]
   payments        Payment[]
-  
+  biometricReadings BiometricReading[]
+
   // Audit
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
-  
+
   @@index([nurseId])
   @@index([doctorId])
   @@index([status])
@@ -372,19 +373,31 @@ model BiometricReading {
   // Source tracking
   source          String      @default("manual") // "wearable" | "manual"
   deviceType      String?    // e.g., "apple_watch", "fitbit", "manual_entry"
-  
+
+  // AH-45.5a follow-up, 2026-09-23: links a manual BP reading to the visit
+  // it was taken during, when applicable — the intended purpose of this
+  // reading (e.g. clinic/nurse-visit cuff calibration for the wearable
+  // trend flag, CLINICAL_SIGNOFF_CHECKLIST.md row 10) vs. an arbitrary
+  // self-reported entry, without needing a parallel table. Not backed by
+  // Visit.biometrics (a separate, currently-unwired JSON field on Visit —
+  // no route reads or writes it; not reused here to avoid building on top
+  // of an untested path).
+  visitId         String?
+
   // Early warning analysis results
   alertLevel      String?    // "GREEN" | "YELLOW" | "RED"
   anomalies       Json?      // Array of detected anomalies
   readinessScore  Int?       // 0-100
-  
+
   // Audit
   createdAt       DateTime   @default(now())
-  
+
   // Relations
   user            User       @relation("UserBiometrics", fields: [userId], references: [id], onDelete: Cascade)
-  
+  visit           Visit?     @relation(fields: [visitId], references: [id], onDelete: SetNull)
+
   @@index([userId, createdAt])
+  @@index([visitId])
   @@map("biometric_readings")
 }
 
