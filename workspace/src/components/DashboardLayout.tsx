@@ -230,10 +230,20 @@ export default function DashboardLayout({
             </div>
           )}
           {user.role === "DOCTOR" && (
-            <div className="mt-4 flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold" style={{ background: 'rgba(37,99,235,0.08)', color: 'var(--role-doctor)' }}>
-              <Icon name="building" size={14} />
-              <span>Licensed Doctor</span>
-            </div>
+            <>
+              <Link
+                href="/doctor/monitoring"
+                className={linkClass(pathname === "/doctor/monitoring")}
+                aria-current={pathname === "/doctor/monitoring" ? "page" : undefined}
+                onClick={() => setIsSidebarOpen(false)}
+              >
+                <Icon name="pulse" size={18} /><span>Patient Monitoring</span>
+              </Link>
+              <div className="mt-4 flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold" style={{ background: 'rgba(37,99,235,0.08)', color: 'var(--role-doctor)' }}>
+                <Icon name="building" size={14} />
+                <span>Licensed Doctor</span>
+              </div>
+            </>
           )}
           {/* Profile — all roles */}
           <Link

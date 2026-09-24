@@ -2419,3 +2419,53 @@ behavior for features currently working in production on engineering
 judgment — a bigger, more consequential call than anything else in this
 session, and one that should be made deliberately, not swept in as a
 "remaining work" item.
+
+## 30. Clinician-facing monitoring dashboard — the gap from §29 filled in, 2026-09-24
+
+Built the doctor-facing counterpart §29 found missing: a monitoring
+worklist, the clinician-side equivalent of the patient Early Warning page.
+
+**Backend**: `apps/backend/src/routes/doctorMonitoring.ts`, mounted at
+`GET /api/v1/doctor/monitoring` behind `authMiddleware` + `requireDoctor`,
+following `triageCaseReview.ts`'s exact conventions (same audit-log
+pattern via `writeRequestAudit`, same `requireDoctor` middleware). Kept
+deliberately separate from `triageCaseReview.ts`/`TriageCase` — continuous
+biometric monitoring is a different concern from AI-triage case review,
+not a variant of it.
+
+Only patients with active `BIOMETRIC_MONITORING` consent
+(`PatientConsent`, `withdrawn: false`) are visible — the first route ever
+to read that consent type for this purpose. One row per patient (their
+single most recent `BiometricReading`, via Prisma `distinct` on `userId`
+ordered by `createdAt desc`) — deliberately fetched *before* filtering by
+severity, not after, so a patient whose latest reading is GREEN can't
+appear here on the strength of an older RED reading; the where-clause-first
+approach would have picked whichever old row matched instead of confirming
+the current state. Flagged (surfaced at all) on `alertLevel IN
+(YELLOW,RED)` OR `bpPromptCheck` OR `cvdRiskCategory = '>20%'`, using the
+retrospective-snapshot fields §29 just added.
+
+**Frontend**: `workspace/src/app/doctor/monitoring/page.tsx` — new page,
+added to `DashboardLayout`'s nav under the `DOCTOR` role (previously just
+a "Licensed Doctor" badge with no nav links at all). Carries the same
+Tier-2 "not a diagnosis" framing as the patient page. BP-check and CVD-risk
+columns explicitly render their pending-sign-off state
+(`— (pending sign-off — row 10/7)`) rather than a blank cell, so a doctor
+looking at this page today sees *why* those columns are empty, not just
+that they are.
+
+**Verified**: `tsc --noEmit` clean on both `apps/backend` and `workspace`
+(only pre-existing, unrelated errors — `@node-rs/bcrypt` resolution on the
+backend, missing test-tooling devDependencies on the frontend, both
+predating this session). Started the real Next.js dev server
+(`workspace-dev`) and loaded both `/doctor/monitoring` and
+`/patient/early-warning` directly: both compiled and returned real 200
+responses, `RoleGuard` correctly redirected the unauthenticated session to
+login (expected — no live session available), and the frontend's own call
+to the new endpoint failed with a clean 502 (no backend process running in
+this sandbox) rather than crashing the page. **Not verified**: the actual
+query logic against real data — no Postgres instance in this environment,
+same disclosed limitation as §29. The `distinct`-then-filter approach is
+reasoned through carefully (see comments in `doctorMonitoring.ts`) but
+hasn't been run against a database with real flagged/unflagged patients
+mixed together.

@@ -84,7 +84,33 @@ export interface PatientTriageCase {
   } | null;
 }
 
+export interface MonitoringWorklistPatient {
+  userId: string;
+  firstName: string;
+  lastName: string;
+  dateOfBirth: string | null;
+  latestReadingAt: string;
+  alertLevel: 'GREEN' | 'YELLOW' | 'RED';
+  anomalies: string[];
+  readinessScore: number | null;
+  // AH-45.5a — always false until BP_CHECK_PROMPT_SIGNED_OFF (server-side
+  // gate, CLINICAL_SIGNOFF_CHECKLIST.md row 10). Do not treat absence as
+  // "no signal was detected" — check bpContributingSignals for that.
+  bpPromptCheck: boolean;
+  bpContributingSignals: string[];
+  // Gated behind WHO_2019_CHART_SIGNED_OFF (row 7) — null until signed off.
+  cvdRiskCategory: '<5%' | '5-10%' | '10-20%' | '>20%' | null;
+  heartRateResting: number | null;
+  hrvRmssd: number | null;
+  oxygenSaturation: number | null;
+}
+
 export const doctorApi = {
+  getMonitoringWorklist: async (): Promise<MonitoringWorklistPatient[]> => {
+    const res = await apiClient.get('/doctor/monitoring');
+    const data = res.data ?? {};
+    return Array.isArray(data.patients) ? data.patients : [];
+  },
   getPendingVisits: async () => {
     const res = await apiClient.get('/visits?status=PENDING_REVIEW');
     const data = res.data ?? {};
