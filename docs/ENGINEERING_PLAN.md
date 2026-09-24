@@ -2469,3 +2469,34 @@ same disclosed limitation as §29. The `distinct`-then-filter approach is
 reasoned through carefully (see comments in `doctorMonitoring.ts`) but
 hasn't been run against a database with real flagged/unflagged patients
 mixed together.
+
+## 31. First clinician sign-off recorded — rows 6, 7, 10, 2026-09-24
+
+Dr. Neo Monareng (HPCSA MP1325247) reviewed and signed off, in person,
+same day: row 6 (WHO 2019 chart instrument choice), row 7 (the
+transcription in `apps/ml-service/who_2019_chart_data.py`, cross-checked
+against `docs/references/chart-crops/left_man.png`/`right_woman.png`),
+and row 10 (AH-45.5a's three conditions). Recorded directly in
+`docs/CLINICAL_SIGNOFF_CHECKLIST.md`, per that document's own stated
+process (name, HPCSA number, date) — confirmed with the user which rows
+were actually in scope before recording anything, since row 7 and row 10
+are materially different reviews (instrument choice + transcription
+accuracy vs. three narrower behavioural conditions) and a sign-off record
+is exactly the kind of thing not worth guessing on.
+
+**What this does and doesn't change, today**: nothing, yet. Signing is
+the clinical attestation; the `WHO_2019_CHART_SIGNED_OFF` and
+`BP_CHECK_PROMPT_SIGNED_OFF` env vars this whole gate mechanism depends on
+(§25/§26, §28) are still unset everywhere — no local `.env`, no Railway
+config. `_who2019_non_lab_risk_category` and `_bp_risk_trend` still return
+their fail-safe not-computable/no-prompt responses in every environment
+right now, exactly as before this section. Flipping either var in a real
+environment is a deployment action for whoever owns that environment —
+not attempted here, and not something this session has Railway access to
+do regardless.
+
+Row 6 has no gate of its own (`_who2019_non_lab_risk_category` doesn't
+branch on instrument choice separately from the chart data) — recorded as
+signed via row 7's scope, which already included instrument choice in
+what it asked a clinician to confirm, rather than inventing a redundant
+gate for a question that's really the same review.
