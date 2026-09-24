@@ -16,17 +16,19 @@ truth to defer to.
 **How to read "Enforcement today"**: per the precedent set in
 `ENGINEERING_PLAN.md` §12 ("build and land on main now; sign-off is a
 parallel track, not a merge gate"), most items here shipped to `main`
-without a code-level gate blocking them pending signature. Three items
-(paediatric TEWS, AH-45.5a, and the WHO 2019 chart) have an actual
-enforced env-var gate, fail-safe by default. Everything else is live in
-production today, running on the engineering team's best-sourced
-judgment, not yet a named clinician's.
+without a code-level gate blocking them pending signature. Four items
+(paediatric TEWS, AH-45.5a, the WHO 2019 chart, and the Framingham
+lab-based chart) have an actual enforced env-var gate, fail-safe by
+default. Everything else is live in production today, running on the
+engineering team's best-sourced judgment, not yet a named clinician's.
 
 **Signed so far**: rows 6, 7 and 10 — Dr. Neo Monareng (HPCSA MP1325247),
 2026-09-24. Signing is the clinical attestation; it does not by itself
 flip the corresponding env var in any running environment — that's a
 separate deployment step, not yet done anywhere as of this record. See
-`ENGINEERING_PLAN.md` §31.
+`ENGINEERING_PLAN.md` §31. **Row 11 is new since that sign-off session and
+is not yet reviewed** — it did not exist when Dr. Monareng signed rows
+6/7/10, so that signature does not cover it.
 
 | # | Item | Location | What needs signing | Enforcement today |
 |---|------|----------|---------------------|--------------------|
@@ -40,12 +42,13 @@ separate deployment step, not yet done anywhere as of this record. See
 | 8 | SpO2 indeterminate band (94–96%, NEWS2-based) | `engine.py` `__init__`, `SPO2_INDETERMINATE`; mirrored in `triageSafety.ts` (§11) | The band boundaries and the "escalates only alongside RR deviation" rule | None — live |
 | 9 | AH-50 σ floors + persistence rule | `engine.py` `__init__` — `HR_SIGMA_FLOOR`, `RR_SIGMA_FLOOR(_OVER_60)`, `PERSISTENCE_REQUIRED`/`PERSISTENCE_WINDOW`, `HRV_SWC_MULTIPLIER`, `HRV_MIN_CV` | The specific numeric floors (sourced to Quer et al. 2020, Natarajan et al. 2021, per code comments) | None — live |
 | 10 | AH-45.5a — BP-check change-detection flag | `apps/ml-service/models.py` (`BpRiskAssessment`), `engine.py` (`_bp_risk_trend`); decision recorded `ENGINEERING_PLAN.md` §25 | ~~Three narrower conditions (not a threshold): (a) AH-50 deviation flags are a reasonable trigger for recommending a cuff reading, (b) flags display as non-diagnostic and cannot alter `cvd_risk.risk_category`, (c) flags cannot suppress/downgrade an AH-43/44 absolute-floor escalation.~~ **Done.** | **SIGNED** — Dr. Neo Monareng, HPCSA MP1325247, 2026-09-24. `BP_CHECK_PROMPT_SIGNED_OFF` still defaults unset/false in every environment as of this record — signing is the clinical attestation, flipping the env var in a real environment is a separate deployment action, not yet done — see `ENGINEERING_PLAN.md` §31. |
+| 11 | Framingham lab-based (cholesterol) 10-year CVD score — instrument choice, transcription, and the discordance-vs-WHO-chart band-gap threshold | `apps/ml-service/framingham_lab_data.py`, `framingham_lab_lookup.py`, used by `_framingham_lab_risk` in `engine.py`; decision recorded `ENGINEERING_PLAN.md` §32 | Three things: (a) confirm this is the correct second instrument to run alongside the WHO 2019 chart, (b) review the transcription (plain numeric points table, SA NDoH Appendix VII pages 3-5 — not a colour image like row 7) against `framingham_lab_data.py`, (c) confirm the >=2-band gap used to set `cvd_risk.discordance_flag` (`engine.py`, `_framingham_discordance_band`) is a reasonable threshold — that number is an engineering judgment call, not itself sourced from the primary document. | **`FRAMINGHAM_LAB_CHART_SIGNED_OFF` env var** — defaults unset/false, fails safe to `computable: false` with reason `FRAMINGHAM_LAB_CHART_AWAITING_CLINICIAN_SIGNOFF`. **Not yet signed** — built 2026-09-24, after Dr. Monareng's sign-off session on rows 6/7/10, so that signature doesn't cover it. |
 
 ## What actually needs a named clinician
 
 Per `ENGINEERING_PLAN.md` §12's own framing for item #1/#4: a named
 HPCSA-registered clinician, ideally a specialist physician for the
-CVD/BP-adjacent items (#6–#10), attesting with HPCSA number and date. For
+CVD/BP-adjacent items (#6–#11), attesting with HPCSA number and date. For
 paediatric TEWS (#4) specifically, standard practice would favour a
 paediatrician or paediatric emergency clinician given the higher stakes of
 an unreviewed chart already gated in code.
@@ -53,6 +56,11 @@ an unreviewed chart already gated in code.
 Items #6/#7 (WHO chart) additionally need someone to actually transcribe
 the chart image into data — that's a data-entry/verification task a
 clinician would need to review, not something a signature alone resolves.
+Item #11 (Framingham) needs the same transcription review in kind, but not
+in difficulty — its source is a plain numeric points table already read as
+clean PDF text, not a colour image requiring pixel classification (see
+`ENGINEERING_PLAN.md` §32 for why that made it a meaningfully easier, more
+reliable transcription than row 7's).
 
 ## What this document does not do
 

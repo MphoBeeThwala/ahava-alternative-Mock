@@ -401,6 +401,12 @@ model BiometricReading {
   bpContributingSignals Json?  // string[] from BpRiskAssessment.contributing_signals
   cvdRiskCategory String?      // "<5%"|"5-10%"|"10-20%"|">20%", null if not computable
 
+  // Framingham lab-based score (docs/ENGINEERING_PLAN.md #32) — a second,
+  // separate instrument from cvdRiskCategory's WHO chart. Null whenever
+  // not computable (missing inputs or FRAMINGHAM_LAB_CHART_SIGNED_OFF unset).
+  framinghamRiskPct Float?     // exact 10-year risk %, null if only a bound applies
+  framinghamRiskBound String?  // "<1"|">30", the source's own open-ended rows
+
   // Audit
   createdAt       DateTime   @default(now())
 

@@ -229,6 +229,16 @@ export default function DashboardLayout({
               <span>Verified Nurse</span>
             </div>
           )}
+          {user.role === "ADMIN" && (
+            <Link
+              href="/admin/bp-validation"
+              className={linkClass(pathname === "/admin/bp-validation")}
+              aria-current={pathname === "/admin/bp-validation" ? "page" : undefined}
+              onClick={() => setIsSidebarOpen(false)}
+            >
+              <Icon name="check-circle" size={18} /><span>BP-Check Validation</span>
+            </Link>
+          )}
           {user.role === "DOCTOR" && (
             <>
               <Link

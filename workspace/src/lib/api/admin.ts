@@ -16,7 +16,34 @@ export interface User {
   sancCategory?: string | null;
 }
 
+export interface BpFlagValidationReport {
+  sampleSize: number;
+  totalCalibrationReadings?: number;
+  unpairedCalibrationReadings?: number;
+  pairingWindowDays?: number;
+  elevatedThreshold?: { systolic: number; diastolic: number };
+  confusionMatrix?: { truePositive: number; falsePositive: number; falseNegative: number; trueNegative: number };
+  sensitivity?: number | null;
+  specificity?: number | null;
+  positivePredictiveValue?: number | null;
+  caveat?: string | null;
+  message?: string;
+  pairs?: Array<{
+    userId: string;
+    calibrationReadingId: string;
+    calibrationAt: string;
+    elevated: boolean;
+    flaggedReadingId: string;
+    flaggedAt: string;
+    promptBpCheck: boolean;
+  }>;
+}
+
 export const adminApi = {
+  getBpFlagValidationReport: async (): Promise<BpFlagValidationReport> => {
+    const res = await apiClient.get('/admin/bp-flag-validation');
+    return res.data;
+  },
   getAllUsers: async (): Promise<User[]> => {
     const res = await apiClient.get('/admin/users');
     return res.data.users || [];

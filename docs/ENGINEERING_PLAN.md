@@ -2500,3 +2500,115 @@ branch on instrument choice separately from the chart data) — recorded as
 signed via row 7's scope, which already included instrument choice in
 what it asked a clinician to confirm, rather than inventing a redundant
 gate for a question that's really the same review.
+
+## 32. Three remaining builds completed — calibration workflow, validation analysis, Framingham lab chart, 2026-09-24
+
+Closed out the three items flagged as "real remaining feature work, not
+started" after §30/§31: the calibration data pipeline had one side
+persisted (§29's `bpPromptCheck`/`cvdRiskCategory`) and no way to record
+the other side; nobody had built the actual comparison; and the lab-based
+Framingham instrument identified as real and transcribable back in §13
+was still just a citation.
+
+**Calibration workflow.** `BiometricReading.visitId` existed since §26 as
+the link for exactly this, but nothing ever wrote to it — confirmed
+before building anything that no route anywhere recorded vitals during a
+visit (`Visit.biometrics`, §26's dead JSON field, was the only prior
+attempt, and it's still dead). Added `POST /visits/:id/biometrics`
+(`apps/backend/src/routes/visits.ts`), nurse-only, requires the visit be
+`IN_PROGRESS`, writes a normal `BiometricReading` with `visitId` set and
+`deviceType: "nurse_calibration"` — a marker, not a parallel schema.
+Frontend: a `CalibrationForm` component in `nurse/dashboard/page.tsx`,
+appears only on in-progress visits, systolic/diastolic/heart-rate inputs
+with the same validation bounds as the backend.
+
+**Validation analysis.** `apps/backend/src/routes/bpValidation.ts`
+(`GET /admin/bp-flag-validation`, admin-only — this is population-level
+QA data, not a single patient's clinical record, so doesn't belong on the
+doctor monitoring worklist from §30). Pairs each `nurse_calibration`
+reading with the most recent `bpPromptCheck`-bearing reading for the same
+patient within a 7-day window *before* it (chosen to match AH-45.5a's own
+"prompt for a reading within days" framing — a month-old flag validating
+today's cuff reading tests coincidence, not the actual claim), classifies
+the cuff reading as elevated at systolic ≥140 or diastolic ≥90 (standard
+clinical convention, cited inline, used only for this internal comparison
+— never fed back into `bp_risk` or shown to a patient), and computes a
+real confusion matrix: sensitivity, specificity, positive predictive
+value, sample size. Returns a caveat string below 30 paired samples
+rather than presenting a number with no context. Frontend:
+`admin/bp-validation/page.tsx`, new `ADMIN`-role nav link (previously
+none existed for admins beyond the dashboard itself).
+
+**Framingham lab-based chart.** The genuinely large piece, but a
+different kind of large than the WHO chart: its source (SA NDoH Appendix
+VII pages 3-5, already downloaded in §27) is a **plain numeric points
+table**, already captured as clean text in this session's very first PDF
+read — not a colour image needing pixel classification. Transcribed
+directly into `apps/ml-service/framingham_lab_data.py` (age/cholesterol/
+HDL/smoker/diabetic/SBP-by-treatment-status point tables, plus the
+points-to-risk-% lookup for both sexes, including the two tables' own
+open-ended boundary rows — men's `<=-3`/`>=18` and women's `<=-2` — kept
+as bounds rather than forced into fabricated exact percentages).
+`framingham_lab_lookup.py` does the point arithmetic and lookup.
+`ContextualProfile` gained `hdl_mmol_per_L` and `bp_treatment` — inputs
+the WHO chart never needed. New `FraminghamLabRiskAssessment` model,
+computed in `engine.py`'s `_framingham_lab_risk`, gated behind
+`FRAMINGHAM_LAB_CHART_SIGNED_OFF` (same fail-safe pattern as every other
+gate this session).
+
+**Not the deleted `_framingham_adapted`** (AH-45, §12) — that function
+used resting HR and hypertension as Framingham stand-ins, which aren't
+real Framingham inputs. This uses the instrument's actual own inputs, as
+printed in the primary source.
+
+**§45.2's `discordance_flag` infrastructure, used for real for the first
+time.** It existed since AH-45 as "infrastructure for a second validated
+instrument to flag disagreement... always False today — there is
+currently no second real instrument implemented to compare against."
+There now is one, and WHO-2019/Framingham are genuinely independent (BMI
+vs. cholesterol/HDL — different required inputs), unlike AH-45's deleted
+pair that were secretly one calculation wearing two names. When both are
+computable for the same patient, their risk is mapped onto the same
+4-band scheme and `cvd_risk.discordance_flag` is set when they land ≥2
+bands apart — adjacent-band disagreement is treated as normal variation
+between two legitimate instruments, not something to alarm on.
+`_fusion_from_cvd_risk` already had a real branch for this
+("CVD risk instruments disagree — recommend clinician review.") sitting
+unused since AH-45; this is the first time it can actually fire. The
+≥2-band threshold itself is disclosed as an engineering judgment call,
+not a sourced clinical number — added to what `CLINICAL_SIGNOFF_CHECKLIST.md`
+row 11 asks a clinician to confirm, not left implicit.
+
+**Full-stack consistency, not just the ml-service.** Extended
+`BiometricReading` with `framinghamRiskPct`/`framinghamRiskBound`
+(migration `20260924150000_add_framingham_lab_fields`) and persisted them
+alongside the existing retrospective snapshot (§29). Added
+`framingham_lab_risk` to the backend's ML-service-unavailable fallback
+shape — deliberately, to not reintroduce the exact shape-inconsistency
+bug §29 found and fixed (the fallback and the real ml-service response
+must stay one contract, not two that happen to usually match). Doctor
+monitoring worklist (§30) and patient Early Warning page both updated:
+new cards/columns, both correctly showing the pending-sign-off state
+today rather than a number, matching the pattern already established for
+rows 7/10.
+
+**Verified.** `py_compile` clean; 12 scenarios run against the real WSL2
+interpreter (gate on/off, a hand-calculated mid-table value checked
+against the code's own output — 5 points → 3.9%, exactly — missing-field
+refusals, out-of-range age, both tables' open-ended boundary rows, the
+diabetic statin-flag footnote, and a constructed discordance case: same
+age/sex/SBP/smoker, low BMI vs. extreme cholesterol/HDL/diabetic status,
+confirmed WHO computes `<5%` while Framingham computes `13.2%`,
+`discordance_flag` fires, and `fusion.alert_message` reads exactly the
+existing AH-45-era string). All 12 passed. `main.py` imports cleanly with
+every new module wired in. `tsc --noEmit` clean on both `apps/backend`
+and `workspace`. `prisma validate`/`generate` clean. Started the real
+Next.js dev server and loaded `/patient/early-warning`,
+`/doctor/monitoring`, `/nurse/dashboard`, and `/admin/bp-validation`
+directly — all four compiled and returned real 200s, no crashes; the
+missing-backend 502s on data calls are expected in this sandbox (no
+Postgres here), same disclosed limitation as §29/§30.
+
+**Not verified**: the calibration endpoint and validation-report query
+logic against real data — no Postgres instance in this environment, same
+limitation disclosed at §29/§30, not resolved by this section either.

@@ -60,9 +60,27 @@ export interface EarlyWarningSummary {
     computable?: boolean;
     risk_category?: '<5%' | '5-10%' | '10-20%' | '>20%' | null;
     reasons_not_computable?: string[];
+    // Now genuinely set when framingham_lab_risk disagrees by >=2 bands —
+    // see docs/ENGINEERING_PLAN.md #32. Not a hidden average of the two;
+    // always check framingham_lab_risk separately for its own value.
     discordance_flag?: boolean;
     physiological_trend_flags?: string[];
     epidemiological_flags?: string[];
+  };
+
+  // Framingham lab-based score (docs/ENGINEERING_PLAN.md #32) — a second,
+  // separate instrument from cvd_risk's WHO chart, needs cholesterol/HDL/
+  // BP-treatment status the WHO chart doesn't use. Gated behind
+  // FRAMINGHAM_LAB_CHART_SIGNED_OFF server-side (CLINICAL_SIGNOFF_CHECKLIST.md
+  // row 11) — `computable` is false until that gate is flipped.
+  framingham_lab_risk?: {
+    instrument?: string;
+    computable?: boolean;
+    ten_year_risk_pct?: number | null;
+    risk_bound?: '<1' | '>30' | null;
+    total_points?: number | null;
+    reasons_not_computable?: string[];
+    statin_indicated_by_diabetes_flag?: boolean;
   };
 
   // AH-45.5a (docs/ENGINEERING_PLAN.md §25): change-detection only, not a

@@ -61,6 +61,8 @@ router.get("/", requireDoctor, async (req: AuthenticatedRequest, res, next) => {
         bpPromptCheck: true,
         bpContributingSignals: true,
         cvdRiskCategory: true,
+        framinghamRiskPct: true,
+        framinghamRiskBound: true,
         heartRateResting: true,
         hrvRmssd: true,
         oxygenSaturation: true,
@@ -117,6 +119,10 @@ router.get("/", requireDoctor, async (req: AuthenticatedRequest, res, next) => {
         // Gated behind WHO_2019_CHART_SIGNED_OFF — null today regardless
         // of profile. See CLINICAL_SIGNOFF_CHECKLIST.md row 7.
         cvdRiskCategory: r.cvdRiskCategory,
+        // Gated behind FRAMINGHAM_LAB_CHART_SIGNED_OFF — null today
+        // regardless of profile. See CLINICAL_SIGNOFF_CHECKLIST.md row 11.
+        framinghamRiskPct: r.framinghamRiskPct,
+        framinghamRiskBound: r.framinghamRiskBound,
         heartRateResting: r.heartRateResting,
         hrvRmssd: r.hrvRmssd,
         oxygenSaturation: r.oxygenSaturation,

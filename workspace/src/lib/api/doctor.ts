@@ -100,6 +100,9 @@ export interface MonitoringWorklistPatient {
   bpContributingSignals: string[];
   // Gated behind WHO_2019_CHART_SIGNED_OFF (row 7) — null until signed off.
   cvdRiskCategory: '<5%' | '5-10%' | '10-20%' | '>20%' | null;
+  // Gated behind FRAMINGHAM_LAB_CHART_SIGNED_OFF (row 11) — null until signed off.
+  framinghamRiskPct: number | null;
+  framinghamRiskBound: '<1' | '>30' | null;
   heartRateResting: number | null;
   hrvRmssd: number | null;
   oxygenSaturation: number | null;

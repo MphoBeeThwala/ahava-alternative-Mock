@@ -649,6 +649,15 @@ router.get(
             physiological_trend_flags: [],
             epidemiological_flags: [],
           },
+          framingham_lab_risk: {
+            instrument: "FRAMINGHAM_LAB_2008_SA_NDOH_APPENDIX_VII",
+            computable: false,
+            ten_year_risk_pct: null,
+            risk_bound: null,
+            total_points: null,
+            reasons_not_computable: ["ML_SERVICE_UNAVAILABLE"],
+            statin_indicated_by_diabetes_flag: false,
+          },
           bp_risk: {
             prompt_bp_check: false,
             hr_deviation: false,
@@ -724,6 +733,10 @@ router.get(
             bpContributingSignals:
               (mlData as any)?.bp_risk?.contributing_signals ?? [],
             cvdRiskCategory: (mlData as any)?.cvd_risk?.risk_category ?? null,
+            framinghamRiskPct:
+              (mlData as any)?.framingham_lab_risk?.ten_year_risk_pct ?? null,
+            framinghamRiskBound:
+              (mlData as any)?.framingham_lab_risk?.risk_bound ?? null,
           },
         });
       } catch (persistErr: any) {

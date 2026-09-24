@@ -38,4 +38,20 @@ export const visitsApi = {
     const res = await apiClient.patch(`/visits/${id}/status`, { status });
     return res.data;
   },
+  // BP-calibration reading during an in-progress visit (docs/ENGINEERING_PLAN.md
+  // #32). Backend requires the visit to be IN_PROGRESS and the caller to be
+  // the assigned nurse.
+  recordBiometrics: async (
+    id: string,
+    data: {
+      bloodPressureSystolic: number;
+      bloodPressureDiastolic: number;
+      heartRate?: number;
+      temperature?: number;
+      oxygenSaturation?: number;
+    },
+  ) => {
+    const res = await apiClient.post(`/visits/${id}/biometrics`, data);
+    return res.data;
+  },
 };

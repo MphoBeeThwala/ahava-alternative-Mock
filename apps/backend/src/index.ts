@@ -32,6 +32,7 @@ import rookRoutes from "./routes/rook";
 import consentRoutes from "./routes/consent";
 import healthConnectRoutes from "./routes/healthConnect";
 import doctorMonitoringRoutes from "./routes/doctorMonitoring";
+import bpValidationRoutes from "./routes/bpValidation";
 
 // Import middleware
 import { errorHandler } from "./middleware/errorHandler";
@@ -214,6 +215,7 @@ app.use(`${API_V1}/messages`, authMiddleware, messageRoutes);
 app.use("/api/payments", paymentRoutes); // unversioned: see comment above
 app.use(`${API_V1}/payments`, paymentRoutes);
 app.use(`${API_V1}/admin`, authMiddleware, adminRoutes);
+app.use(`${API_V1}/admin`, authMiddleware, bpValidationRoutes);
 app.use(`${API_V1}/triage`, authMiddleware, triageRoutes);
 app.use(`${API_V1}/triage-cases`, authMiddleware, triageCasesRoutes);
 app.use(`${API_V1}/triage-review`, authMiddleware, triageCaseReviewRoutes);

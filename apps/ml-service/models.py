@@ -30,17 +30,22 @@ class ContextualProfile(BaseModel):
     non-smoker"), so absence must be distinguishable from a real "no".
     hypertension is kept for display/other use but is not a WHO 2019
     non-lab input (systolic_bp is the actual input). cholesterol_known/
-    cholesterol_mmol_per_L and diabetes are for the future WHO 2019
-    laboratory-chart upgrade path, not used by the non-lab chart.
+    cholesterol_mmol_per_L and diabetes also feed the separate Framingham
+    lab-based score (framingham_lab_lookup.py, §32) — a different
+    instrument from the WHO 2019 non-lab chart, not a "WHO lab chart"
+    upgrade path as an earlier version of this docstring said. hdl_mmol_per_L
+    and bp_treatment are Framingham-only inputs the WHO chart never uses.
     """
     age: int = Field(..., ge=18, le=120, description="Patient age (years)")
     sex: Optional[Literal["male", "female"]] = None
     smoker: Optional[bool] = None
-    systolic_bp: Optional[float] = Field(None, ge=60, le=300, description="Systolic BP (mmHg) — WHO 2019 input")
+    systolic_bp: Optional[float] = Field(None, ge=60, le=300, description="Systolic BP (mmHg) — WHO 2019 and Framingham input")
     bmi: Optional[float] = Field(None, ge=10, le=80, description="Body mass index — WHO 2019 non-lab input")
     hypertension: bool = False
     cholesterol_known: bool = False
-    cholesterol_mmol_per_L: Optional[float] = Field(None, ge=2.0, le=15.0)
+    cholesterol_mmol_per_L: Optional[float] = Field(None, ge=2.0, le=15.0, description="Total cholesterol — Framingham input")
+    hdl_mmol_per_L: Optional[float] = Field(None, ge=0.3, le=5.0, description="HDL cholesterol — Framingham-only input")
+    bp_treatment: Optional[bool] = Field(None, description="On BP-lowering treatment — Framingham-only input, changes which SBP points column applies")
     diabetes: Optional[bool] = None
     # AH-45 §45.6: no calculator adjusts for either, and both are common in
     # this population — surfaced as flags, never as a hidden multiplier.
@@ -95,6 +100,34 @@ class CvdRiskAssessment(BaseModel):
     physiological_trend_flags: List[str] = Field(default_factory=list)
     # §45.6: HIV/TB status the instrument does not account for.
     epidemiological_flags: List[str] = Field(default_factory=list)
+
+class FraminghamLabRiskAssessment(BaseModel):
+    """Framingham lab-based (cholesterol) 10-year CVD risk score — SA NDoH
+    Appendix VII pages 3-5, a genuinely different, separate instrument from
+    CvdRiskAssessment's WHO 2019 non-lab chart (needs total cholesterol,
+    HDL, and BP-treatment status; the WHO chart uses none of those). Not
+    the deleted _framingham_adapted from AH-45 — that used resting HR and
+    hypertension as stand-in inputs that aren't real Framingham variables;
+    this uses the instrument's actual own inputs, transcribed from the
+    source's plain numeric table (framingham_lab_data.py), not a colour
+    image. Gated behind FRAMINGHAM_LAB_CHART_SIGNED_OFF — see
+    CLINICAL_SIGNOFF_CHECKLIST.md row 11.
+    """
+    instrument: str = "FRAMINGHAM_LAB_2008_SA_NDOH_APPENDIX_VII"
+    computable: bool = False
+    ten_year_risk_pct: Optional[float] = Field(
+        None, description="Exact 10-year risk %, only when the point total falls inside the source table's non-open-ended rows"
+    )
+    risk_bound: Optional[Literal["<1", ">30"]] = Field(
+        None, description="Source table's own open-ended rows (men: <=-3 and >=18; women: <=-2) — a bound, not an exact percentage"
+    )
+    total_points: Optional[int] = None
+    reasons_not_computable: List[str] = Field(default_factory=list)
+    # Source footnote, not a scoring input: "Type 2 diabetics > 40 years of
+    # age qualify for statin therapy irrespective of risk score." Surfaced
+    # as a flag exactly like AH-45's epidemiological_flags pattern — never
+    # blended into total_points.
+    statin_indicated_by_diabetes_flag: bool = False
 
 class BpRiskAssessment(BaseModel):
     """AH-45.5a change-detection signal for prompting a measured blood
@@ -197,6 +230,7 @@ class EarlyWarningSummary(BaseModel):
     sleep_pattern: Optional[str] = None  # "disrupted", "adequate", "good"
     # Risk scores
     cvd_risk: CvdRiskAssessment
+    framingham_lab_risk: FraminghamLabRiskAssessment
     bp_risk: BpRiskAssessment
     fusion: FusionOutput
     # Clinical flags

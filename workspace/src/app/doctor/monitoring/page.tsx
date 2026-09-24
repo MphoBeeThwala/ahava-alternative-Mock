@@ -159,9 +159,17 @@ export default function DoctorMonitoringPage() {
                           )}
                         </div>
                         <div className="text-xs">
-                          <span className="text-[var(--muted)]">10-yr CVD risk: </span>
+                          <span className="text-[var(--muted)]">10-yr CVD risk (WHO): </span>
                           <span className="font-medium text-[var(--foreground)]">
                             {p.cvdRiskCategory ?? "— (pending sign-off — row 7)"}
+                          </span>
+                        </div>
+                        <div className="text-xs">
+                          <span className="text-[var(--muted)]">10-yr CVD risk (Framingham): </span>
+                          <span className="font-medium text-[var(--foreground)]">
+                            {p.framinghamRiskPct != null
+                              ? `${p.framinghamRiskPct}%`
+                              : p.framinghamRiskBound ?? "— (pending sign-off — row 11)"}
                           </span>
                         </div>
                       </div>

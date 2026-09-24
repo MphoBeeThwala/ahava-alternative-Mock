@@ -16,9 +16,11 @@ from datetime import datetime, timedelta
 import hashlib
 import os
 import who_2019_chart_lookup
+import framingham_lab_lookup
 from models import (
     BiometricData, AlertLevel, ContextualProfile,
-    CvdRiskAssessment, BpRiskAssessment, FusionOutput, EarlyWarningSummary,
+    CvdRiskAssessment, BpRiskAssessment, FraminghamLabRiskAssessment,
+    FusionOutput, EarlyWarningSummary,
     UncertaintyProfile, ClinicalProvenance,
 )
 import db
@@ -759,6 +761,96 @@ class EarlyWarningEngine:
         category_map = {"GREEN": "<5%", "YELLOW": "5-10%", "ORANGE": "10-20%", "RED": ">20%"}
         return CvdRiskAssessment(computable=True, risk_category=category_map[color])
 
+    def _framingham_lab_chart_signed_off(self) -> bool:
+        # Same fail-safe pattern as _who_2019_chart_signed_off /
+        # _bp_check_prompt_signed_off. See CLINICAL_SIGNOFF_CHECKLIST.md row 11.
+        return os.environ.get("FRAMINGHAM_LAB_CHART_SIGNED_OFF", "").strip().lower() == "true"
+
+    def _framingham_lab_risk(
+        self, profile: ContextualProfile, systolic_bp: Optional[float]
+    ) -> FraminghamLabRiskAssessment:
+        # SA NDoH Appendix VII pages 3-5 (framingham_lab_data.py) — a
+        # separate instrument from the WHO 2019 non-lab chart above, needs
+        # cholesterol/HDL/BP-treatment status the WHO chart never uses.
+        # systolic_bp passed separately (not read off profile directly),
+        # mirroring _who2019_non_lab_risk_category's own call convention.
+        reasons: List[str] = []
+        if profile.sex is None:
+            reasons.append("MISSING_SEX")
+        if profile.age < framingham_lab_lookup.AGE_MIN or profile.age > framingham_lab_lookup.AGE_MAX:
+            reasons.append("OUT_OF_VALIDATED_AGE_RANGE")
+        if profile.smoker is None:
+            reasons.append("MISSING_SMOKING_STATUS")
+        if not profile.cholesterol_known or profile.cholesterol_mmol_per_L is None:
+            reasons.append("MISSING_TOTAL_CHOLESTEROL")
+        if profile.hdl_mmol_per_L is None:
+            reasons.append("MISSING_HDL_CHOLESTEROL")
+        if profile.diabetes is None:
+            reasons.append("MISSING_DIABETES_STATUS")
+        if systolic_bp is None:
+            reasons.append("MISSING_SYSTOLIC_BP")
+        if profile.bp_treatment is None:
+            reasons.append("MISSING_BP_TREATMENT_STATUS")
+
+        if reasons:
+            return FraminghamLabRiskAssessment(computable=False, reasons_not_computable=reasons)
+
+        if not self._framingham_lab_chart_signed_off():
+            return FraminghamLabRiskAssessment(
+                computable=False, reasons_not_computable=["FRAMINGHAM_LAB_CHART_AWAITING_CLINICIAN_SIGNOFF"]
+            )
+
+        total_points = framingham_lab_lookup.compute_points(
+            sex=profile.sex, age=profile.age, total_cholesterol=profile.cholesterol_mmol_per_L,
+            hdl=profile.hdl_mmol_per_L, smoker=bool(profile.smoker), diabetic=bool(profile.diabetes),
+            systolic_bp=systolic_bp, bp_treated=bool(profile.bp_treatment),
+        )
+        if total_points is None:
+            # A band lookup missed (e.g. an HDL/cholesterol value that
+            # falls in a gap between the source's own printed ranges) —
+            # every input already passed validation above, so this reflects
+            # the source table itself, not a missing input. Disclosed
+            # rather than silently defaulted.
+            return FraminghamLabRiskAssessment(
+                computable=False, reasons_not_computable=["VALUE_OUTSIDE_SOURCE_TABLE_BANDS"]
+            )
+
+        risk_pct, bound = framingham_lab_lookup.points_to_risk(profile.sex, total_points)
+        if risk_pct is None and bound is None:
+            # Only reachable for women above 19 points — the source prints
+            # no open-ended top row for women (unlike men's ">=18" row),
+            # so there is nothing to return without inventing a number.
+            return FraminghamLabRiskAssessment(
+                computable=False, total_points=total_points,
+                reasons_not_computable=["POINTS_ABOVE_HIGHEST_TABLE_ROW_NO_SOURCE_VALUE"],
+            )
+
+        statin_flag = bool(profile.diabetes) and profile.age > 40
+        return FraminghamLabRiskAssessment(
+            computable=True, ten_year_risk_pct=risk_pct, risk_bound=bound,
+            total_points=total_points, statin_indicated_by_diabetes_flag=statin_flag,
+        )
+
+    def _framingham_discordance_band(self, framingham: FraminghamLabRiskAssessment) -> Optional[int]:
+        # Maps a computable Framingham result onto the same 4-band scheme
+        # as CvdRiskCategory (0=<5%, 1=5-10%, 2=10-20%, 3=>20%), purely for
+        # the discordance comparison below — never surfaced as a category
+        # of its own, since the real output stays the exact percentage.
+        if framingham.risk_bound == "<1":
+            return 0
+        if framingham.risk_bound == ">30":
+            return 3
+        pct = framingham.ten_year_risk_pct
+        if pct is None:
+            return None
+        if pct < 5:
+            return 0
+        if pct < 10:
+            return 1
+        if pct < 20:
+            return 2
+        return 3
+
     def _physiological_trend_flags(
         self, hr_trend: Optional[str], hrv_vs_baseline: Optional[str], sleep_pattern: Optional[str]
     ) -> List[str]:
@@ -887,6 +979,22 @@ class EarlyWarningEngine:
             hr_trend, hrv_vs_baseline, sleep_pattern
         )
         cvd_risk.epidemiological_flags = self._epidemiological_flags(profile)
+        framingham_lab_risk = self._framingham_lab_risk(profile, profile.systolic_bp)
+        # §45.2's discordance_flag infrastructure, used for real for the
+        # first time: WHO 2019 and Framingham-lab are genuinely independent
+        # instruments (different required inputs — BMI vs cholesterol/HDL),
+        # unlike AH-45's deleted pair that were secretly one calculation.
+        # Flags only a >=2-band gap (of 4 bands), not any difference — two
+        # legitimate instruments landing in adjacent bands is normal
+        # disagreement, not something to alarm on. This band-gap threshold
+        # is an engineering judgment call, not itself a sourced clinical
+        # number — worth the same clinician review as everything else on
+        # CLINICAL_SIGNOFF_CHECKLIST.md row 11 covers.
+        if cvd_risk.computable and framingham_lab_risk.computable:
+            who_band = {"<5%": 0, "5-10%": 1, "10-20%": 2, ">20%": 3}[cvd_risk.risk_category]
+            fram_band = self._framingham_discordance_band(framingham_lab_risk)
+            if fram_band is not None and abs(who_band - fram_band) >= 2:
+                cvd_risk.discordance_flag = True
         bp_risk = self._bp_risk_trend(history, data, age)
         fusion = self._fusion_from_cvd_risk(cvd_risk)
 
@@ -937,6 +1045,7 @@ class EarlyWarningEngine:
             hrv_vs_baseline=hrv_vs_baseline,
             sleep_pattern=sleep_pattern,
             cvd_risk=cvd_risk,
+            framingham_lab_risk=framingham_lab_risk,
             bp_risk=bp_risk,
             fusion=fusion,
             clinical_flags=clinical_flags,

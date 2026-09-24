@@ -26,6 +26,114 @@ interface IncomingBooking {
 
 const ACCEPT_WINDOW_SEC = 30;
 
+// BP-calibration reading during an in-progress visit (docs/ENGINEERING_PLAN.md
+// #32) — the nurse-facing counterpart to visits.ts's POST /:id/biometrics.
+// Local to this file since it's only used from one visit card.
+function CalibrationForm({ visitId, onRecorded }: { visitId: string; onRecorded: () => void }) {
+    const toast = useToast();
+    const [open, setOpen] = useState(false);
+    const [systolic, setSystolic] = useState('');
+    const [diastolic, setDiastolic] = useState('');
+    const [heartRate, setHeartRate] = useState('');
+    const [submitting, setSubmitting] = useState(false);
+
+    if (!open) {
+        return (
+            <button
+                onClick={() => setOpen(true)}
+                className="mt-2 w-full rounded-lg border text-sm font-semibold"
+                style={{ borderColor: 'var(--role-nurse)', color: 'var(--role-nurse)', minHeight: 'var(--tap-min)' }}
+            >
+                Record BP Calibration
+            </button>
+        );
+    }
+
+    const submit = async () => {
+        const sys = Number(systolic);
+        const dia = Number(diastolic);
+        if (!Number.isFinite(sys) || sys < 60 || sys > 300) {
+            toast.error('Enter a valid systolic reading (60-300).');
+            return;
+        }
+        if (!Number.isFinite(dia) || dia < 30 || dia > 200) {
+            toast.error('Enter a valid diastolic reading (30-200).');
+            return;
+        }
+        setSubmitting(true);
+        try {
+            await visitsApi.recordBiometrics(visitId, {
+                bloodPressureSystolic: sys,
+                bloodPressureDiastolic: dia,
+                heartRate: heartRate ? Number(heartRate) : undefined,
+            });
+            toast.success('Calibration reading recorded.');
+            setOpen(false);
+            setSystolic('');
+            setDiastolic('');
+            setHeartRate('');
+            onRecorded();
+        } catch (error: unknown) {
+            const e = error as { response?: { data?: { error?: string } } };
+            toast.error(e.response?.data?.error || 'Failed to record reading.');
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    return (
+        <div className="mt-2 rounded-lg border p-3 space-y-2" style={{ borderColor: 'var(--role-nurse)' }}>
+            <p className="text-xs font-semibold text-[var(--foreground)]">Record cuff BP reading</p>
+            <div className="grid grid-cols-3 gap-2">
+                <input
+                    type="number"
+                    inputMode="numeric"
+                    placeholder="Systolic"
+                    value={systolic}
+                    onChange={(e) => setSystolic(e.target.value)}
+                    className="rounded-lg border px-2 py-1.5 text-sm"
+                    style={{ borderColor: 'var(--border)', minHeight: 'var(--tap-min)' }}
+                />
+                <input
+                    type="number"
+                    inputMode="numeric"
+                    placeholder="Diastolic"
+                    value={diastolic}
+                    onChange={(e) => setDiastolic(e.target.value)}
+                    className="rounded-lg border px-2 py-1.5 text-sm"
+                    style={{ borderColor: 'var(--border)', minHeight: 'var(--tap-min)' }}
+                />
+                <input
+                    type="number"
+                    inputMode="numeric"
+                    placeholder="Heart rate"
+                    value={heartRate}
+                    onChange={(e) => setHeartRate(e.target.value)}
+                    className="rounded-lg border px-2 py-1.5 text-sm"
+                    style={{ borderColor: 'var(--border)', minHeight: 'var(--tap-min)' }}
+                />
+            </div>
+            <div className="flex gap-2">
+                <button
+                    onClick={submit}
+                    disabled={submitting}
+                    className="flex-1 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
+                    style={{ background: 'var(--role-nurse)', minHeight: 'var(--tap-min)' }}
+                >
+                    {submitting ? 'Saving…' : 'Save reading'}
+                </button>
+                <button
+                    onClick={() => setOpen(false)}
+                    className="rounded-lg border px-3 text-sm"
+                    style={{ borderColor: 'var(--border)', minHeight: 'var(--tap-min)' }}
+                >
+                    Cancel
+                </button>
+            </div>
+        </div>
+    );
+}
+
 const VISIT_STATUS_FLOW: Record<string, { next: string; label: string } | undefined> = {
     SCHEDULED: { next: 'EN_ROUTE', label: 'Start journey' },
     EN_ROUTE: { next: 'ARRIVED', label: 'Mark arrived' },
@@ -341,6 +449,9 @@ export default function NurseDashboard() {
                                                 >
                                                     {flow.label}
                                                 </button>
+                                            )}
+                                            {visit.status === 'IN_PROGRESS' && (
+                                                <CalibrationForm visitId={visit.id} onRecorded={loadVisits} />
                                             )}
                                         </div>
                                     );

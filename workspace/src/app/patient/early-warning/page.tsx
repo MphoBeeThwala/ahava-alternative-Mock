@@ -190,6 +190,45 @@ export default function EarlyWarningPage() {
                           : ''}.
                       </p>
                     )}
+                    {data.cvd_risk?.discordance_flag && (
+                      <p className="text-xs text-amber-700">
+                        This estimate and the Framingham lab-based estimate below disagree — clinical correlation recommended.
+                      </p>
+                    )}
+                  </div>
+                </Card>
+
+                {/* Framingham lab-based risk — FRAMINGHAM_LAB_CHART_SIGNED_OFF
+                    gated (CLINICAL_SIGNOFF_CHECKLIST.md row 11). A separate
+                    instrument from the WHO chart above (needs cholesterol/
+                    HDL/BP-treatment status), not a duplicate. */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>10-Year Cardiovascular Risk (lab-based)</CardTitle>
+                  </CardHeader>
+                  <div className="p-4 space-y-2">
+                    {data.framingham_lab_risk?.computable ? (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-[var(--muted)]">Framingham lab-based estimate</span>
+                        <span className="font-bold px-3 py-1 rounded-full text-white bg-slate-700">
+                          {data.framingham_lab_risk.ten_year_risk_pct != null
+                            ? `${data.framingham_lab_risk.ten_year_risk_pct}%`
+                            : data.framingham_lab_risk.risk_bound}
+                        </span>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-[var(--muted)]">
+                        Not yet available for your profile
+                        {data.framingham_lab_risk?.reasons_not_computable?.length
+                          ? ` (${data.framingham_lab_risk.reasons_not_computable.join(', ').toLowerCase().replaceAll('_', ' ')})`
+                          : ''}.
+                      </p>
+                    )}
+                    {data.framingham_lab_risk?.statin_indicated_by_diabetes_flag && (
+                      <p className="text-xs text-[var(--muted)]">
+                        Type 2 diabetes at your age may qualify for statin therapy regardless of this score — discuss with your clinician.
+                      </p>
+                    )}
                   </div>
                 </Card>
 
