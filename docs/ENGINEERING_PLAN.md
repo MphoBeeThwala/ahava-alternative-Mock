@@ -2326,3 +2326,96 @@ convention. Kept: the two source PDFs, `left_man.png`/`right_woman.png`
 `page2-2.png` (full-page reference), and `chart_data_final.json` (the raw
 extracted+validated data the `.py` module was generated from, for
 independent re-verification without re-running the extraction).
+
+## 29. Patient-facing UI for cvd_risk/bp_risk, and a real bug found along the way, 2026-09-24
+
+Went to add `cvd_risk`/`bp_risk` to the patient Early Warning page
+(`workspace/src/app/patient/early-warning/page.tsx`) and found the page
+was built against a response shape real traffic never actually sends.
+
+**The bug**: `GET /patient/early-warning` (`apps/backend/src/routes/patient.ts`)
+forwards the real ml-service response (`mlData`) completely unmodified —
+`alert_level`, `cvd_risk`, `hr_trend_2w`, etc., matching
+`apps/ml-service/models.py` exactly. But `mlServiceAvailable` is false
+whenever `ML_SERVICE_URL` contains `"localhost"` — true for essentially
+all local dev, not just when the service is genuinely down — and the
+fallback branch used for that case built a *different*, older shape:
+`riskLevel`, `trendAnalysis`, `baselineMetrics`. The frontend page was
+written against that older shape. Net effect: in local dev (always) and
+any real prod outage (sometimes), the page's primary display
+(`data.riskLevel`, `data.trendAnalysis.heartRate`, ...) silently rendered
+nothing meaningful, because those keys don't exist on the real payload —
+and in the one case where the real payload *does* flow through unmodified,
+the page was reading fields that were never there either. This predates
+today; not introduced by this session, just never caught because nothing
+until now needed `cvd_risk`/`bp_risk` to render correctly enough to notice.
+
+**Fixed at the source, not patched at the display layer**: rewrote the
+fallback in `patient.ts` to build the exact same shape as the real
+ml-service response (`cvd_risk: {computable:false, reasons_not_computable:
+["ML_SERVICE_UNAVAILABLE"], ...}`, `bp_risk` with the real disclaimer text,
+etc.) instead of adding shape-detection logic to the frontend. One
+contract, regardless of which branch fills `mlData`. Also fixed a
+dangling reference in the clinical audit log
+(`riskLevel: (mlData as any)?.riskLevel` — always `"UNKNOWN"` now that
+neither branch sets that key) to log `cvdRiskCategory`/`bpPromptCheck`
+instead, the two signals actually worth auditing.
+
+**Frontend**: `workspace/src/lib/api/patient.ts`'s `EarlyWarningSummary`
+interface rewritten to match the real shape exactly — dropped
+`riskLevel`/`trendAnalysis`/`baselineMetrics` and the dead
+`risk_scores.framingham_10y_pct`/`qrisk3_10y_pct` fields (unused since
+AH-45 removed those instruments), added `cvd_risk`, top-level biometric
+fields, `uncertainty`/`provenance`/`requires_clinician_review`.
+`early-warning/page.tsx` rewritten against the corrected type: a BP-check
+card (renders on `bp_risk.prompt_bp_check`, which stays false everywhere
+until `BP_CHECK_PROMPT_SIGNED_OFF` — inert today by design, not
+unfinished) and a CVD risk card that explicitly renders the
+"not yet available, here's why" state rather than hiding silently when
+`cvd_risk.computable` is false (true everywhere until
+`WHO_2019_CHART_SIGNED_OFF`). Also fixed stale intro copy referencing
+Framingham/QRISK3, which AH-45 replaced with the WHO 2019 chart.
+`tsc --noEmit` clean on both `workspace` and `apps/backend` (backend's
+only errors are the pre-existing, unrelated `@node-rs/bcrypt` module
+resolution gap already visible in git history before this session).
+
+**A larger gap found, not built**: went looking for where the clinician
+side surfaces any of this, expecting something partial. There is nothing
+— `doctor/dashboard` is entirely triage-case-focused (`Worklist`,
+`ReviewPane`, referral/prescription modals); no page anywhere under
+`workspace/src/app/doctor` or `.../nurse` reads `EarlyWarningSummary`,
+`cvd_risk`, `bp_risk`, or `BiometricReading` at all (confirmed by search,
+not assumed). Building a clinician-facing biometric monitoring view is a
+real feature — dashboard placement, whether nurses need it too, how it
+relates to the existing triage worklist — not a small addition alongside
+this fix, and not something to design silently. Flagged rather than built.
+
+**Retrospective validation, actually persisted this time**: `bp_risk`/
+`cvd_risk` were computed fresh on every page load and discarded after the
+HTTP response — nothing existed to compare against a later manual cuff
+entry for `CLINICAL_SIGNOFF_CHECKLIST.md` rows 7/10 validation, despite
+that being called out as a goal twice already (§25, §26). Added
+`BiometricReading.bpPromptCheck`/`bpContributingSignals`/`cvdRiskCategory`
+(migration `20260924120000_add_bp_risk_retrospective_fields`) and a
+best-effort persist (wrapped in try/catch — must never fail the response
+a patient is waiting on) onto the reading each analysis was computed from.
+`prisma validate` and `prisma generate` both clean; `tsc --noEmit` clean
+on the updated route.
+
+**Not tested against a live database or Jest** — this environment has no
+Postgres instance running and standing one up was out of scope for this
+pass. `patient.integration.test.ts` exists and covers biometrics
+submission/history/alerts but not `/early-warning` specifically, and
+wasn't run (would need a real DB connection). Confirmed by static
+typecheck and code review only — flagged rather than silently claimed
+equivalent to the ml-service-side verification earlier in this file, which
+did have a real interpreter to run against.
+
+**Explicitly not done, and why**: the other 6 checklist rows with no code
+gate (adult TEWS, emergency-signs override, SpO2 band, AH-50 σ/persistence
+rule, age/height band rule) were not retrofitted with the same
+`*_SIGNED_OFF` pattern as rows 7/10. Adding one changes live runtime
+behavior for features currently working in production on engineering
+judgment — a bigger, more consequential call than anything else in this
+session, and one that should be made deliberately, not swept in as a
+"remaining work" item.

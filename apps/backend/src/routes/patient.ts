@@ -605,7 +605,18 @@ router.get(
         }
       }
 
-      // Fallback to database-only analysis if ML service unavailable
+      // Fallback to database-only analysis if ML service unavailable (this
+      // is the path taken for essentially all of local dev, since
+      // mlServiceAvailable is false whenever ML_SERVICE_URL contains
+      // "localhost" — not just when the service is genuinely down).
+      //
+      // Shape matches the real ml-service EarlyWarningSummary exactly
+      // (apps/ml-service/models.py) — this used to be a different, older
+      // shape (riskLevel/trendAnalysis/baselineMetrics) that predated the
+      // AH-45 refactor and that the real ml_service response was never
+      // reshaped into either, so the frontend was built against a payload
+      // shape real traffic never actually sent. One consistent contract
+      // now, regardless of which branch fills mlData.
       if (!mlData) {
         const allReadings = await prisma.biometricReading.findMany({
           where: { userId },
@@ -614,7 +625,48 @@ router.get(
         });
 
         mlData = {
-          riskLevel: allReadings.length === 0 ? "unknown" : "low",
+          _source: "db_rules",
+          user_id: userId,
+          processed_at: new Date().toISOString(),
+          heart_rate_resting: biometrics.heart_rate_resting,
+          hrv_rmssd: biometrics.hrv_rmssd,
+          spo2: biometrics.spo2,
+          sleep_duration_hours: biometrics.sleep_duration_hours,
+          step_count: biometrics.step_count,
+          ecg_rhythm: biometrics.ecg_rhythm,
+          temperature_trend: biometrics.temperature_trend,
+          hr_baseline: null,
+          hrv_baseline: null,
+          hr_trend_2w: null,
+          hrv_vs_baseline: null,
+          sleep_pattern: null,
+          cvd_risk: {
+            instrument: "WHO_2019_NON_LAB_SOUTHERN_SUB_SAHARAN_AFRICA",
+            computable: false,
+            risk_category: null,
+            reasons_not_computable: ["ML_SERVICE_UNAVAILABLE"],
+            discordance_flag: false,
+            physiological_trend_flags: [],
+            epidemiological_flags: [],
+          },
+          bp_risk: {
+            prompt_bp_check: false,
+            hr_deviation: false,
+            hrv_deviation: false,
+            short_sleep: false,
+            signed_off: false,
+            contributing_signals: [],
+            disclaimer:
+              "Not a blood pressure measurement or a hypertension risk score. Your own signals have shifted from your own baseline — a measured blood pressure reading is recommended to follow up. This flag cannot diagnose anything on its own.",
+          },
+          fusion: {
+            trajectory_risk_2y_pct: null,
+            alert_triggered: false,
+            alert_message: null,
+          },
+          clinical_flags: [],
+          alert_level: "GREEN",
+          anomalies: [],
           recommendations:
             allReadings.length === 0
               ? [
@@ -624,19 +676,6 @@ router.get(
                   "Maintain current health habits",
                   "Continue regular monitoring of vital signs",
                 ],
-          trendAnalysis: {
-            heartRate: "stable",
-            oxygenSaturation: "stable",
-            sleepQuality: "unknown",
-          },
-          baselineMetrics: biometrics,
-          fusion: {
-            alert_triggered: false,
-            alert_message: undefined,
-            trajectory_risk_2y_pct: undefined,
-          },
-          alert_level: "GREEN",
-          anomalies: [],
         };
       }
 
@@ -671,6 +710,29 @@ router.get(
         (mlData as any)?.alert_level === "YELLOW",
       );
 
+      // Retrospective-validation snapshot (docs/ENGINEERING_PLAN.md #29):
+      // bp_risk/cvd_risk were computed fresh here and discarded after the
+      // response, leaving nothing to compare against a later manual cuff
+      // entry for CLINICAL_SIGNOFF_CHECKLIST.md rows 7/10. Persisted onto
+      // the reading this analysis was computed from — best-effort, must
+      // never fail the actual response the patient is waiting on.
+      try {
+        await prisma.biometricReading.update({
+          where: { id: latestReading.id },
+          data: {
+            bpPromptCheck: Boolean((mlData as any)?.bp_risk?.prompt_bp_check),
+            bpContributingSignals:
+              (mlData as any)?.bp_risk?.contributing_signals ?? [],
+            cvdRiskCategory: (mlData as any)?.cvd_risk?.risk_category ?? null,
+          },
+        });
+      } catch (persistErr: any) {
+        console.warn(
+          "[EarlyWarning] Failed to persist retrospective bp_risk/cvd_risk snapshot:",
+          persistErr.message,
+        );
+      }
+
       const responseSource = String((mlData as any)?._source ?? "ml_service");
       await writeClinicalAudit({
         userId,
@@ -681,7 +743,8 @@ router.get(
         metadata: {
           source: responseSource,
           alertLevel: (mlData as any)?.alert_level ?? "UNKNOWN",
-          riskLevel: (mlData as any)?.riskLevel ?? "UNKNOWN",
+          cvdRiskCategory: (mlData as any)?.cvd_risk?.risk_category ?? null,
+          bpPromptCheck: Boolean((mlData as any)?.bp_risk?.prompt_bp_check),
           anomalyCount: Array.isArray((mlData as any)?.anomalies)
             ? (mlData as any).anomalies.length
             : 0,

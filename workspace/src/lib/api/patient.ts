@@ -24,53 +24,47 @@ export interface BiometricReading {
   deviceType?: string;
 }
 
+// Mirrors apps/ml-service/models.py EarlyWarningSummary exactly (raw
+// snake_case passthrough — apps/backend/src/routes/patient.ts's
+// GET /patient/early-warning forwards mlData unmodified, and its
+// ML-service-unavailable fallback is built to the same shape — see
+// docs/ENGINEERING_PLAN.md #29). Do not reintroduce a
+// riskLevel/trendAnalysis/baselineMetrics-shaped mock; real traffic never
+// sends that shape and didn't since the AH-45 refactor.
 export interface EarlyWarningSummary {
-  // Required fields from fallback or ML response
-  riskLevel?: string;
-  alert_level?: 'GREEN' | 'YELLOW' | 'RED';
-  recommendations?: string[];
-
-  // Trend analysis from fallback or ML response
-  trendAnalysis?: {
-    heartRate?: string;
-    oxygenSaturation?: string;
-    sleepQuality?: string;
-  };
-
-  // Baseline metrics or current biometrics
-  baselineMetrics?: {
-    timestamp?: string;
-    heart_rate_resting?: number;
-    hrv_rmssd?: number;
-    spo2?: number;
-    skin_temp_offset?: number;
-    respiratory_rate?: number;
-    step_count?: number;
-    active_calories?: number;
-    sleep_duration_hours?: number;
-    ecg_rhythm?: string;
-    temperature_trend?: string;
-  };
-
-  // Optional ML-specific fields
   user_id?: string;
   processed_at?: string;
+
+  // Current biometrics (latest reading)
+  heart_rate_resting?: number;
+  hrv_rmssd?: number;
+  spo2?: number;
+  sleep_duration_hours?: number;
+  step_count?: number;
+  ecg_rhythm?: string;
+  temperature_trend?: string;
+
+  // Personal baselines + extracted trend features
   hr_baseline?: number;
   hrv_baseline?: number;
-  hr_trend_2w?: string;
-  hrv_vs_baseline?: string;
-  sleep_pattern?: string;
-  risk_scores?: {
-    framingham_10y_pct?: number;
-    qrisk3_10y_pct?: number;
-    ml_cvd_risk_pct?: number;
-    ml_confidence?: number;
+  hr_trend_2w?: 'rising' | 'stable' | 'declining';
+  hrv_vs_baseline?: 'below' | 'at' | 'above';
+  sleep_pattern?: 'disrupted' | 'adequate' | 'good';
+
+  // WHO 2019 non-lab CVD risk category — gated behind WHO_2019_CHART_SIGNED_OFF
+  // server-side (CLINICAL_SIGNOFF_CHECKLIST.md row 7). `computable` is
+  // false (with reasons_not_computable explaining why) until that gate is
+  // flipped — render the "why not available" state, don't hide it silently.
+  cvd_risk?: {
+    instrument?: string;
+    computable?: boolean;
+    risk_category?: '<5%' | '5-10%' | '10-20%' | '>20%' | null;
+    reasons_not_computable?: string[];
+    discordance_flag?: boolean;
+    physiological_trend_flags?: string[];
+    epidemiological_flags?: string[];
   };
-  fusion?: {
-    trajectory_risk_2y_pct?: number;
-    alert_triggered?: boolean;
-    alert_message?: string;
-  };
+
   // AH-45.5a (docs/ENGINEERING_PLAN.md §25): change-detection only, not a
   // BP measurement or a hypertension risk score. `prompt_bp_check` stays
   // false until BP_CHECK_PROMPT_SIGNED_OFF is set server-side (see
@@ -86,8 +80,29 @@ export interface EarlyWarningSummary {
     contributing_signals?: string[];
     disclaimer?: string;
   };
+
+  fusion?: {
+    trajectory_risk_2y_pct?: number | null;
+    alert_triggered?: boolean;
+    alert_message?: string | null;
+  };
+
   clinical_flags?: string[];
+  alert_level?: 'GREEN' | 'YELLOW' | 'RED';
   anomalies?: string[];
+  recommendations?: string[];
+
+  uncertainty?: {
+    score?: number;
+    reasons?: string[];
+  };
+  provenance?: {
+    evidence_sources?: string[];
+    clinical_basis?: string[];
+    model_version?: string;
+    decision_trace_id?: string;
+  };
+  requires_clinician_review?: boolean;
 }
 
 export interface RiskProfile {

@@ -389,6 +389,18 @@ model BiometricReading {
   anomalies       Json?      // Array of detected anomalies
   readinessScore  Int?       // 0-100
 
+  // Retrospective-validation snapshot, 2026-09-24 (docs/ENGINEERING_PLAN.md
+  // #29): bp_risk/cvd_risk from /early-warning/analyze were computed fresh
+  // on every page load and discarded after the HTTP response — nothing to
+  // compare against a later manual cuff entry for CLINICAL_SIGNOFF_CHECKLIST.md
+  // rows 7/10 validation. Persisted here, best-effort, on the reading the
+  // analysis was computed from. bpPromptCheck mirrors BpRiskAssessment's
+  // gated value (false unless BP_CHECK_PROMPT_SIGNED_OFF), not a raw signal
+  // — see bpContributingSignals for what actually fired regardless of gate.
+  bpPromptCheck   Boolean?
+  bpContributingSignals Json?  // string[] from BpRiskAssessment.contributing_signals
+  cvdRiskCategory String?      // "<5%"|"5-10%"|"10-20%"|">20%", null if not computable
+
   // Audit
   createdAt       DateTime   @default(now())
 

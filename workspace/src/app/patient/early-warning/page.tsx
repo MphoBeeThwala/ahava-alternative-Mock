@@ -80,8 +80,9 @@ export default function EarlyWarningPage() {
             </div>
 
             <p className="text-sm text-[var(--muted)] mb-6 max-w-2xl">
-              Early Warning uses biometrics (resting heart rate, HRV, sleep, activity, ECG rhythm, temperature trend) and validated risk models
-              (Framingham, QRISK3) to surface risk signals. Not a medical diagnosis — for informational purposes only.
+              Early Warning uses biometrics (resting heart rate, HRV, sleep, activity, ECG rhythm, temperature trend) and the WHO 2019
+              non-laboratory cardiovascular risk chart (Southern sub-Saharan Africa) to surface risk signals. Not a medical diagnosis —
+              for informational purposes only.
             </p>
 
             {loading && (
@@ -104,24 +105,24 @@ export default function EarlyWarningPage() {
 
             {data && !loading && (
               <div className="space-y-6">
-                {/* Risk Level */}
+                {/* Alert Level */}
                 <Card>
                   <CardHeader>
                     <CardTitle>Health Status</CardTitle>
                   </CardHeader>
                   <div className="p-4 space-y-3">
                     <div className="flex items-center justify-between">
-                      <span className="text-sm text-[var(--muted)]">Risk Signal</span>
+                      <span className="text-sm text-[var(--muted)]">Alert Level</span>
                       <span className={`font-bold px-3 py-1 rounded-full text-white ${
-                        data.riskLevel === 'high' ? 'bg-red-500' :
-                        data.riskLevel === 'moderate' ? 'bg-yellow-500' :
+                        data.alert_level === 'RED' ? 'bg-red-500' :
+                        data.alert_level === 'YELLOW' ? 'bg-yellow-500' :
                         'bg-green-500'
                       }`}>
-                        {String(data.riskLevel ?? 'STABLE').toUpperCase()}
+                        {data.alert_level ?? 'GREEN'}
                       </span>
                     </div>
                     <div className="text-xs text-[var(--muted)]">
-                      You can choose to consult a clinician if you want clarification on this risk signal.
+                      You can choose to consult a clinician if you want clarification on this signal.
                     </div>
                     <div className="flex flex-wrap gap-2 pt-1">
                       <Link href="/patient/book-visit" className="btn-primary inline-block px-4 py-2 rounded-xl font-medium">
@@ -131,6 +132,64 @@ export default function EarlyWarningPage() {
                         Ask a Doctor (Remote)
                       </Link>
                     </div>
+                  </div>
+                </Card>
+
+                {/* BP check prompt — AH-45.5a. prompt_bp_check can only be
+                    true once BP_CHECK_PROMPT_SIGNED_OFF is set server-side
+                    (docs/CLINICAL_SIGNOFF_CHECKLIST.md row 10), so this
+                    card is inert today by design, not because it's
+                    unfinished. Deliberately checks prompt_bp_check, not
+                    signed_off, as the render condition — signed_off alone
+                    without real signals present should show nothing. */}
+                {data.bp_risk?.prompt_bp_check && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Blood Pressure Check Recommended</CardTitle>
+                    </CardHeader>
+                    <div className="p-4 space-y-3">
+                      <div className="p-3 rounded-lg bg-amber-50 border border-amber-200">
+                        <p className="text-sm text-amber-900">
+                          {data.bp_risk.disclaimer ?? 'Not a blood pressure measurement or a hypertension risk score. A measured blood pressure reading is recommended to follow up.'}
+                        </p>
+                      </div>
+                      {data.bp_risk.contributing_signals && data.bp_risk.contributing_signals.length > 0 && (
+                        <div className="text-xs text-[var(--muted)]">
+                          Based on: {data.bp_risk.contributing_signals.map((s) => s.replaceAll('_', ' ').toLowerCase()).join(', ')}
+                        </div>
+                      )}
+                      <Link href="/patient/book-visit" className="btn-primary inline-block px-4 py-2 rounded-xl font-medium text-sm">
+                        Book a Cuff Reading
+                      </Link>
+                    </div>
+                  </Card>
+                )}
+
+                {/* CVD risk category — WHO_2019_CHART_SIGNED_OFF gated
+                    (CLINICAL_SIGNOFF_CHECKLIST.md row 7). Shows the "why
+                    not available" state explicitly rather than hiding the
+                    card, since a silent absence reads as "nothing to see"
+                    rather than "awaiting review". */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>10-Year Cardiovascular Risk</CardTitle>
+                  </CardHeader>
+                  <div className="p-4 space-y-2">
+                    {data.cvd_risk?.computable ? (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-[var(--muted)]">WHO 2019 non-laboratory risk category</span>
+                        <span className="font-bold px-3 py-1 rounded-full text-white bg-slate-700">
+                          {data.cvd_risk.risk_category}
+                        </span>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-[var(--muted)]">
+                        Not yet available for your profile
+                        {data.cvd_risk?.reasons_not_computable?.length
+                          ? ` (${data.cvd_risk.reasons_not_computable.join(', ').toLowerCase().replaceAll('_', ' ')})`
+                          : ''}.
+                      </p>
+                    )}
                   </div>
                 </Card>
 
@@ -154,63 +213,59 @@ export default function EarlyWarningPage() {
                 )}
 
                 {/* Trend Analysis */}
-                {data.trendAnalysis && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Trend Analysis</CardTitle>
-                    </CardHeader>
-                    <div className="p-4">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                        <div className="p-3 rounded-lg bg-slate-50">
-                          <div className="text-xs text-[var(--muted)] mb-1">Heart Rate</div>
-                          <div className="font-semibold text-[var(--foreground)]">
-                            {data.trendAnalysis.heartRate || 'Stable'}
-                          </div>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Trend Analysis</CardTitle>
+                  </CardHeader>
+                  <div className="p-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      <div className="p-3 rounded-lg bg-slate-50">
+                        <div className="text-xs text-[var(--muted)] mb-1">Resting Heart Rate</div>
+                        <div className="font-semibold text-[var(--foreground)] capitalize">
+                          {data.hr_trend_2w || 'Stable'}
                         </div>
-                        <div className="p-3 rounded-lg bg-slate-50">
-                          <div className="text-xs text-[var(--muted)] mb-1">Blood Oxygen</div>
-                          <div className="font-semibold text-[var(--foreground)]">
-                            {data.trendAnalysis.oxygenSaturation || 'Normal'}
-                          </div>
+                      </div>
+                      <div className="p-3 rounded-lg bg-slate-50">
+                        <div className="text-xs text-[var(--muted)] mb-1">HRV vs. Baseline</div>
+                        <div className="font-semibold text-[var(--foreground)] capitalize">
+                          {data.hrv_vs_baseline || 'At baseline'}
                         </div>
-                        <div className="p-3 rounded-lg bg-slate-50">
-                          <div className="text-xs text-[var(--muted)] mb-1">Sleep Quality</div>
-                          <div className="font-semibold text-[var(--foreground)]">
-                            {data.trendAnalysis.sleepQuality || 'Calibrating'}
-                          </div>
+                      </div>
+                      <div className="p-3 rounded-lg bg-slate-50">
+                        <div className="text-xs text-[var(--muted)] mb-1">Sleep Pattern</div>
+                        <div className="font-semibold text-[var(--foreground)] capitalize">
+                          {data.sleep_pattern || 'Calibrating'}
                         </div>
                       </div>
                     </div>
-                  </Card>
-                )}
+                  </div>
+                </Card>
 
                 {/* Current Metrics */}
-                {data.baselineMetrics && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Current Biometrics</CardTitle>
-                    </CardHeader>
-                    <div className="p-4">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                        <div>
-                          <MetricRow label="Heart Rate (resting)" value={Math.round(data.baselineMetrics.heart_rate_resting || 0)} unit="bpm" />
-                          <MetricRow label="HRV (RMSSD)" value={Math.round(data.baselineMetrics.hrv_rmssd || 0)} unit="ms" />
-                          <MetricRow label="Blood Oxygen" value={Math.round(data.baselineMetrics.spo2 || 0)} unit="%" />
-                        </div>
-                        <div>
-                          <MetricRow label="Respiratory Rate" value={Math.round(data.baselineMetrics.respiratory_rate || 0)} unit="/min" />
-                          <MetricRow label="Sleep" value={data.baselineMetrics.sleep_duration_hours ? `${data.baselineMetrics.sleep_duration_hours.toFixed(1)}h` : "—"} />
-                          <MetricRow label="Steps" value={data.baselineMetrics.step_count || 0} />
-                        </div>
-                        <div>
-                          <MetricRow label="Active Calories" value={Math.round(data.baselineMetrics.active_calories || 0)} />
-                          <MetricRow label="Skin Temp Offset" value={data.baselineMetrics.skin_temp_offset?.toFixed(1)} unit="°C" />
-                          <MetricRow label="ECG Rhythm" value={data.baselineMetrics.ecg_rhythm || 'Unknown'} />
-                        </div>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Current Biometrics</CardTitle>
+                  </CardHeader>
+                  <div className="p-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      <div>
+                        <MetricRow label="Heart Rate (resting)" value={data.heart_rate_resting != null ? Math.round(data.heart_rate_resting) : null} unit="bpm" />
+                        <MetricRow label="HRV (RMSSD)" value={data.hrv_rmssd != null ? Math.round(data.hrv_rmssd) : null} unit="ms" />
+                        <MetricRow label="Blood Oxygen" value={data.spo2 != null ? Math.round(data.spo2) : null} unit="%" />
+                      </div>
+                      <div>
+                        <MetricRow label="Sleep" value={data.sleep_duration_hours ? `${data.sleep_duration_hours.toFixed(1)}h` : null} />
+                        <MetricRow label="Steps" value={data.step_count ?? null} />
+                        <MetricRow label="ECG Rhythm" value={data.ecg_rhythm ?? null} />
+                      </div>
+                      <div>
+                        <MetricRow label="HR Baseline" value={data.hr_baseline != null ? Math.round(data.hr_baseline) : null} unit="bpm" />
+                        <MetricRow label="HRV Baseline" value={data.hrv_baseline != null ? Math.round(data.hrv_baseline) : null} unit="ms" />
+                        <MetricRow label="Temperature Trend" value={data.temperature_trend ?? null} />
                       </div>
                     </div>
-                  </Card>
-                )}
+                  </div>
+                </Card>
 
                 {/* Disclaimer */}
                 <div className="p-4 rounded-lg bg-blue-50 border border-blue-200">
