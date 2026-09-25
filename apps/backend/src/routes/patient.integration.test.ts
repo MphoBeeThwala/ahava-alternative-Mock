@@ -169,3 +169,75 @@ describe("patient: alerts and monitoring summary require authentication", () => 
     expect(res.status).toBe(401);
   });
 });
+
+/**
+ * docs/ENGINEERING_PLAN.md #29/#32: GET /early-warning had zero coverage
+ * before this. With the ML service not running in this environment (same
+ * as every other test in this file), this exercises the exact fallback
+ * shape §29 rewrote to match the real ml-service response one-for-one —
+ * the bug that section found was a frontend page reading fields the real
+ * payload never had, because the fallback used a different, older shape.
+ * These tests pin the fallback's actual JSON contract for real, against a
+ * real database, not just by reading the route source.
+ */
+describe("patient: early-warning summary and its retrospective-snapshot persistence", () => {
+  it("404s with no biometric data yet", async () => {
+    const { agent } = await registerPatient("ew-no-data");
+    const res = await agent.get("/api/v1/patient/early-warning");
+    expect(res.status).toBe(404);
+  });
+
+  it("requires authentication", async () => {
+    const res = await request(app).get("/api/v1/patient/early-warning");
+    expect(res.status).toBe(401);
+  });
+
+  it("returns the fallback shape matching the real ml-service contract, and persists the inert snapshot fields", async () => {
+    const { agent, userId } = await registerPatient("ew-fallback-shape");
+    await agent.post("/api/v1/patient/biometrics").send({
+      heartRate: 70,
+      bloodPressure: { systolic: 118, diastolic: 76 },
+      oxygenSaturation: 98,
+      temperature: 36.8,
+      source: "manual",
+    });
+
+    const res = await agent.get("/api/v1/patient/early-warning");
+    expect(res.status).toBe(200);
+    const data = res.body.data;
+
+    // cvd_risk / bp_risk / framingham_lab_risk must all be present with
+    // the same field names the real ml-service EarlyWarningSummary uses
+    // (apps/ml-service/models.py) — this is exactly the shape mismatch
+    // §29 found and fixed; a regression here would silently reintroduce it.
+    expect(data.cvd_risk).toMatchObject({
+      instrument: "WHO_2019_NON_LAB_SOUTHERN_SUB_SAHARAN_AFRICA",
+      computable: false,
+      risk_category: null,
+    });
+    expect(data.framingham_lab_risk).toMatchObject({
+      instrument: "FRAMINGHAM_LAB_2008_SA_NDOH_APPENDIX_VII",
+      computable: false,
+      ten_year_risk_pct: null,
+      risk_bound: null,
+    });
+    expect(data.bp_risk).toMatchObject({
+      prompt_bp_check: false,
+      signed_off: false,
+    });
+    expect(typeof data.bp_risk.disclaimer).toBe("string");
+    expect(data.bp_risk.disclaimer.length).toBeGreaterThan(0);
+
+    // Retrospective-validation snapshot (#29/#32) actually persisted onto
+    // the reading the analysis was computed from, not just returned.
+    const persisted = await prisma.biometricReading.findFirst({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(persisted).not.toBeNull();
+    expect(persisted!.bpPromptCheck).toBe(false);
+    expect(persisted!.cvdRiskCategory).toBeNull();
+    expect(persisted!.framinghamRiskPct).toBeNull();
+    expect(persisted!.framinghamRiskBound).toBeNull();
+  });
+});

@@ -190,3 +190,94 @@ describe("nurse: profile, availability, own visits", () => {
     expect(otherRes.body.visits.map((v: any) => v.id)).not.toContain(visit.id);
   });
 });
+
+/**
+ * docs/ENGINEERING_PLAN.md #32: POST /:id/biometrics, the nurse
+ * calibration workflow. BiometricReading.visitId existed since #26
+ * specifically for this; nothing wrote to it until #32, and it had no
+ * test coverage until now.
+ */
+describe("visits: nurse BP-calibration recording", () => {
+  it("records a calibration reading on an in-progress visit, linked to the visit", async () => {
+    const patient = await registerRole("PATIENT", "calib-patient");
+    const nurse = await registerRole("NURSE", "calib-nurse");
+    const { visit } = await seedBookingAndVisit(patient.userId, nurse.userId);
+    await prisma.visit.update({ where: { id: visit.id }, data: { status: "IN_PROGRESS" } });
+
+    const res = await nurse.agent.post(`/api/v1/visits/${visit.id}/biometrics`).send({
+      bloodPressureSystolic: 142,
+      bloodPressureDiastolic: 91,
+      heartRate: 78,
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(res.body.reading.deviceType).toBe("nurse_calibration");
+
+    const persisted = await prisma.biometricReading.findUnique({ where: { id: res.body.reading.id } });
+    expect(persisted).not.toBeNull();
+    expect(persisted!.userId).toBe(patient.userId);
+    expect(persisted!.visitId).toBe(visit.id);
+    expect(persisted!.source).toBe("manual");
+    expect(persisted!.bloodPressureSystolic).toBe(142);
+    expect(persisted!.bloodPressureDiastolic).toBe(91);
+  });
+
+  it("refuses to record on a visit that is not in progress", async () => {
+    const patient = await registerRole("PATIENT", "calib-notinprogress-patient");
+    const nurse = await registerRole("NURSE", "calib-notinprogress-nurse");
+    const { visit } = await seedBookingAndVisit(patient.userId, nurse.userId); // status: SCHEDULED
+
+    const res = await nurse.agent.post(`/api/v1/visits/${visit.id}/biometrics`).send({
+      bloodPressureSystolic: 120,
+      bloodPressureDiastolic: 80,
+    });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("denies a nurse who is not assigned to the visit", async () => {
+    const patient = await registerRole("PATIENT", "calib-wrongnurse-patient");
+    const assignedNurse = await registerRole("NURSE", "calib-wrongnurse-assigned");
+    const otherNurse = await registerRole("NURSE", "calib-wrongnurse-other");
+    const { visit } = await seedBookingAndVisit(patient.userId, assignedNurse.userId);
+    await prisma.visit.update({ where: { id: visit.id }, data: { status: "IN_PROGRESS" } });
+
+    const res = await otherNurse.agent.post(`/api/v1/visits/${visit.id}/biometrics`).send({
+      bloodPressureSystolic: 120,
+      bloodPressureDiastolic: 80,
+    });
+
+    expect(res.status).toBe(403);
+  });
+
+  it("rejects an out-of-range systolic reading instead of silently clamping it", async () => {
+    const patient = await registerRole("PATIENT", "calib-badvalue-patient");
+    const nurse = await registerRole("NURSE", "calib-badvalue-nurse");
+    const { visit } = await seedBookingAndVisit(patient.userId, nurse.userId);
+    await prisma.visit.update({ where: { id: visit.id }, data: { status: "IN_PROGRESS" } });
+
+    const res = await nurse.agent.post(`/api/v1/visits/${visit.id}/biometrics`).send({
+      bloodPressureSystolic: 500,
+      bloodPressureDiastolic: 80,
+    });
+
+    expect(res.status).toBe(400);
+    const persisted = await prisma.biometricReading.findFirst({ where: { visitId: visit.id } });
+    expect(persisted).toBeNull();
+  });
+
+  it("rejects a patient calling the nurse-only route", async () => {
+    const patient = await registerRole("PATIENT", "calib-patient-role-patient");
+    const nurse = await registerRole("NURSE", "calib-patient-role-nurse");
+    const { visit } = await seedBookingAndVisit(patient.userId, nurse.userId);
+    await prisma.visit.update({ where: { id: visit.id }, data: { status: "IN_PROGRESS" } });
+
+    const res = await patient.agent.post(`/api/v1/visits/${visit.id}/biometrics`).send({
+      bloodPressureSystolic: 120,
+      bloodPressureDiastolic: 80,
+    });
+
+    expect(res.status).toBe(403);
+  });
+});

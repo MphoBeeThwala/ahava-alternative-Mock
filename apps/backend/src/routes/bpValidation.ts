@@ -55,10 +55,18 @@ router.get('/bp-flag-validation', requireAdmin, async (req: AuthenticatedRequest
     }
 
     const userIds = Array.from(new Set(calibrationReadings.map((r) => r.userId)));
+    // Real integration-test bug, caught 2026-09-25 (docs/ENGINEERING_PLAN.md
+    // #34): a `NOT: { deviceType: 'nurse_calibration' }` clause here hit
+    // SQL's three-valued NULL logic (`deviceType <> 'x'` evaluates to NULL,
+    // not TRUE, for rows where deviceType IS NULL) and silently excluded
+    // almost every real biometric reading, since deviceType is unset for
+    // most of them. Removed rather than patched — it was also redundant:
+    // bpPromptCheck is never populated on a calibration reading (only BP
+    // values are), so `bpPromptCheck: { not: null }` alone already
+    // excludes them, without the NULL-handling trap.
     const candidateReadings = await prisma.biometricReading.findMany({
       where: {
         userId: { in: userIds },
-        NOT: { deviceType: 'nurse_calibration' },
         bpPromptCheck: { not: null },
       },
       select: { id: true, userId: true, createdAt: true, bpPromptCheck: true },

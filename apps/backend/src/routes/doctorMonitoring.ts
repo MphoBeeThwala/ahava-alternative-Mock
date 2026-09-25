@@ -9,7 +9,7 @@ import prisma from "../lib/prisma";
 // EarlyWarningSummary, cvd_risk, or bp_risk (docs/ENGINEERING_PLAN.md #29).
 // A separate concern from triage-review (TriageCase, AI-triage-driven) —
 // this is continuous biometric monitoring, not a single symptom report.
-const router = Router();
+const router: Router = Router();
 
 // Severity ranking used only for sort order within this worklist — NOT a
 // clinical score, and not derived from or feeding into cvd_risk.risk_category
