@@ -2612,3 +2612,23 @@ Postgres here), same disclosed limitation as §29/§30.
 **Not verified**: the calibration endpoint and validation-report query
 logic against real data — no Postgres instance in this environment, same
 limitation disclosed at §29/§30, not resolved by this section either.
+
+## 33. Second clinician sign-off — row 11, 2026-09-25
+
+Dr. Neo Monareng (HPCSA MP1325247) reviewed and signed row 11
+(Framingham lab-based chart: instrument choice, the transcription in
+`apps/ml-service/framingham_lab_data.py`, and the ≥2-band discordance
+threshold in `_framingham_discordance_band`) — a separate session, one
+day after the §31 sign-off, since row 11 didn't exist on 2026-09-24.
+Recorded in `docs/CLINICAL_SIGNOFF_CHECKLIST.md` per the same process as
+§31: name, HPCSA number, date, directly in the row.
+
+Every gated row on the checklist now has a named signature — rows 6, 7,
+10 (§31) and 11 (this section). `FRAMINGHAM_LAB_CHART_SIGNED_OFF` is not
+yet set anywhere (no local `.env`, no Railway) — same separation §31
+established between the clinical attestation and the deployment action
+that actually changes runtime behavior. Unlike §31, this section does not
+itself flip the Railway variable or re-verify production — that would
+need the same explicit "verify in real production" instruction §31's
+sibling exchange required before touching the live ML service, not
+assumed from a sign-off record alone.
