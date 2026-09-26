@@ -217,3 +217,34 @@ jobs:
       # instead — one real database, same as production, not a mock.
       - name: Integration tests
         run: pnpm --filter @ahava-healthcare/api test:integration
+
+  dependency-audit:
+    name: Dependency audit (production deps)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      # Production dependencies only: dev tooling (eslint, jest, vitest,
+      # puppeteer) never ships in either Docker image. High/critical fails
+      # the build so a repeat of the 2026-09 audit (110 findings, including
+      # two Next.js RCEs) can't accumulate silently again. Transitive fixes
+      # live in the root package.json `pnpm.overrides`.
+      - name: pnpm audit (workspace + frontend)
+        run: pnpm audit --prod --audit-level=high
+
+      # The backend Docker image installs from apps/backend/package-lock.json
+      # with `npm ci`, not from pnpm-lock.yaml — so the pnpm audit above does
+      # not cover what actually ships for the API. Its transitive fixes live
+      # in apps/backend/package.json `overrides` (npm's equivalent).
+      - name: npm audit (backend image lockfile)
+        working-directory: apps/backend
+        run: npm audit --omit=dev --audit-level=high --workspaces=false
