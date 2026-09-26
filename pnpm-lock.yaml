@@ -27,6 +27,9 @@ importers:
 
   .:
     devDependencies:
+      '@playwright/test':
+        specifier: ^1.59.1
+        version: 1.63.0
       '@types/node':
         specifier: ^20.10.0
         version: 20.19.31
@@ -222,7 +225,7 @@ importers:
         version: 7.3.7(@emotion/react@11.14.0(@types/react@19.2.11)(react@19.1.0))(@emotion/styled@11.14.1(@emotion/react@11.14.0(@types/react@19.2.11)(react@19.1.0))(@types/react@19.2.11)(react@19.1.0))(@types/react@19.2.11)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
       '@sentry/nextjs':
         specifier: ^11.0.0
-        version: 11.0.0(next@15.5.26(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@20.19.31)(react-dom@19.1.0(react@19.1.0))(react@19.1.0))(react@19.1.0)
+        version: 11.0.0(next@15.5.26(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@20.19.31)(react-dom@19.1.0(react@19.1.0))(react@19.1.0))(react@19.1.0)
       axios:
         specifier: ^1.20.0
         version: 1.20.0
@@ -231,7 +234,7 @@ importers:
         version: 8.2.0(@capacitor/core@8.5.1)
       next:
         specifier: ^15.5.26
-        version: 15.5.26(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@20.19.31)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+        version: 15.5.26(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@20.19.31)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
       react:
         specifier: 19.1.0
         version: 19.1.0
@@ -1855,6 +1858,11 @@ packages:
 
   '@paralleldrive/cuid2@2.3.1':
     resolution: {integrity: sha512-XO7cAxhnTZl0Yggq6jOgjiOHhbgcO4NqFqwSmQpjK3b6TEE6Uj/jfSk6wzYyemh3+I0sHirKSetjQwn5cZktFw==}
+
+  '@playwright/test@1.63.0':
+    resolution: {integrity: sha512-oxMK4vllB9RK5NQ2l1pq1IfOf2AvnEuj/vYGDj0H2nMtmtZpKtCwt/l00GEO6xjGfpBNAvjovvYdCm50dRQkpQ==}
+    engines: {node: '>=20'}
+    hasBin: true
 
   '@popperjs/core@2.11.8':
     resolution: {integrity: sha512-P1st0aksCrn9sGZhp8GMYwBnQsbvAWsZAX44oXNNvLHGqAOcoVxmjZiohstwQ7SqKnbR47akdNi+uleWD8+g6A==}
@@ -5123,6 +5131,16 @@ packages:
   pkg-types@2.3.0:
     resolution: {integrity: sha512-SIqCzDRg0s9npO5XQ3tNZioRY1uK06lA41ynBC1YmFTmnY6FjUjVt6s4LoADmwoig1qqD0oK8h1p/8mlMx8Oig==}
 
+  playwright-core@1.63.0:
+    resolution: {integrity: sha512-rYCsBF/M5HjUch52bbtVONEFjv6Xu8sm8h72dNlR5bzIE1fvC/bxgspzkjSfU+MweEMmPM8KJebG6nnyxo5mCg==}
+    engines: {node: '>=20'}
+    hasBin: true
+
+  playwright@1.63.0:
+    resolution: {integrity: sha512-+7ziBLidS4NaNCdt57SUDT+wYmmd5fmiQejUic/kb+YsYSCPyOOE9sebzMjNmQrsnNpDJqd4WHvV/8lfKfUDUg==}
+    engines: {node: '>=20'}
+    hasBin: true
+
   plimit-lit@1.6.1:
     resolution: {integrity: sha512-B7+VDyb8Tl6oMJT9oSO2CW8XC/T4UcJGrwOVoNGwOQsQYhlpfajmrMj5xeejqaASq3V/EqThyOeATEOMuSEXiA==}
     engines: {node: '>=12'}
@@ -7762,6 +7780,10 @@ snapshots:
     dependencies:
       '@noble/hashes': 1.8.0
 
+  '@playwright/test@1.63.0':
+    dependencies:
+      playwright: 1.63.0
+
   '@popperjs/core@2.11.8': {}
 
   '@prisma/client@6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)':
@@ -7992,7 +8014,7 @@ snapshots:
     dependencies:
       '@sentry/core': 11.0.0
 
-  '@sentry/nextjs@11.0.0(next@15.5.26(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@20.19.31)(react-dom@19.1.0(react@19.1.0))(react@19.1.0))(react@19.1.0)':
+  '@sentry/nextjs@11.0.0(next@15.5.26(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@20.19.31)(react-dom@19.1.0(react@19.1.0))(react@19.1.0))(react@19.1.0)':
     dependencies:
       '@opentelemetry/api': 1.9.1
       '@rollup/plugin-commonjs': 28.0.1(rollup@4.63.3)
@@ -8006,7 +8028,7 @@ snapshots:
       '@sentry/server-runtime-injection': 11.0.0
       '@sentry/server-utils': 11.0.0
       '@sentry/vercel-edge': 11.0.0
-      next: 15.5.26(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@20.19.31)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+      next: 15.5.26(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@20.19.31)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
       rollup: 4.63.3
       stacktrace-parser: 0.1.11
     transitivePeerDependencies:
@@ -11382,7 +11404,7 @@ snapshots:
 
   netmask@2.0.2: {}
 
-  next@15.5.26(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@20.19.31)(react-dom@19.1.0(react@19.1.0))(react@19.1.0):
+  next@15.5.26(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@20.19.31)(react-dom@19.1.0(react@19.1.0))(react@19.1.0):
     dependencies:
       '@next/env': 15.5.26
       '@swc/helpers': 0.5.15
@@ -11401,6 +11423,7 @@ snapshots:
       '@next/swc-win32-arm64-msvc': 15.5.26
       '@next/swc-win32-x64-msvc': 15.5.26
       '@opentelemetry/api': 1.9.1
+      '@playwright/test': 1.63.0
       sharp: 0.35.4(@types/node@20.19.31)
     transitivePeerDependencies:
       - '@babel/core'
@@ -11713,6 +11736,12 @@ snapshots:
       confbox: 0.2.2
       exsolve: 1.0.8
       pathe: 2.0.3
+
+  playwright-core@1.63.0: {}
+
+  playwright@1.63.0:
+    dependencies:
+      playwright-core: 1.63.0
 
   plimit-lit@1.6.1:
     dependencies:

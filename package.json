@@ -20,6 +20,7 @@
     "test": "pnpm -r run test",
     "test:backend": "pnpm --filter @ahava-healthcare/api test",
     "test:integration": "pnpm --filter @ahava-healthcare/api test:integration",
+    "test:e2e": "node e2e/run.mjs",
     "lint": "pnpm -r run lint",
     "lint:fix": "pnpm -r run lint:fix",
     "type-check": "pnpm -r run type-check",
@@ -35,8 +36,8 @@
     "test:services": "node scripts/test-services.js",
     "db:reset": "pnpm --filter @ahava-healthcare/api db:reset"
   },
-  "dependencies": {},
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@types/node": "^20.10.0",
     "prettier": "^3.1.0",
     "puppeteer": "^24.37.4",

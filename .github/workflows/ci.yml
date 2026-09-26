@@ -248,3 +248,59 @@ jobs:
       - name: npm audit (backend image lockfile)
         working-directory: apps/backend
         run: npm audit --omit=dev --audit-level=high --workspaces=false
+
+  e2e:
+    name: End-to-end (browser → API → Postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ahava_e2e
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # e2e/run.mjs uses this instead of starting its own embedded Postgres.
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ahava_e2e
+      POOLED_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ahava_e2e
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @ahava-healthcare/api prisma:generate
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      # Migrates, starts the API and a production Next.js build, then drives
+      # a real browser (desktop + mobile viewport) through signup → login →
+      # symptom check → consent → doctor's queue.
+      - name: End-to-end tests
+        run: pnpm test:e2e
+
+      - name: Upload traces, screenshots and server logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: e2e/test-results/
+          retention-days: 7
