@@ -24,7 +24,8 @@
     "seed:from-synthea": "tsx src/scripts/seed-from-synthea.ts",
     "reset:triage-cases": "tsx src/scripts/reset-triage-cases.ts",
     "db:reset": "prisma migrate reset --force",
-    "validate:env": "node scripts/validate-env.js"
+    "validate:env": "node scripts/validate-env.js",
+    "clinical-review:packet": "tsx src/scripts/clinicalReviewPacket.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1127.0",

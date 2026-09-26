@@ -47,6 +47,20 @@ set anywhere.
 | 10 | AH-45.5a — BP-check change-detection flag | `apps/ml-service/models.py` (`BpRiskAssessment`), `engine.py` (`_bp_risk_trend`); decision recorded `ENGINEERING_PLAN.md` §25 | ~~Three narrower conditions (not a threshold): (a) AH-50 deviation flags are a reasonable trigger for recommending a cuff reading, (b) flags display as non-diagnostic and cannot alter `cvd_risk.risk_category`, (c) flags cannot suppress/downgrade an AH-43/44 absolute-floor escalation.~~ **Done.** | **SIGNED** — Dr. Neo Monareng, HPCSA MP1325247, 2026-09-24. `BP_CHECK_PROMPT_SIGNED_OFF` still defaults unset/false in every environment as of this record — signing is the clinical attestation, flipping the env var in a real environment is a separate deployment action, not yet done — see `ENGINEERING_PLAN.md` §31. |
 | 11 | Framingham lab-based (cholesterol) 10-year CVD score — instrument choice, transcription, and the discordance-vs-WHO-chart band-gap threshold | `apps/ml-service/framingham_lab_data.py`, `framingham_lab_lookup.py`, used by `_framingham_lab_risk` in `engine.py`; decision recorded `ENGINEERING_PLAN.md` §32 | ~~Three things: (a) confirm this is the correct second instrument to run alongside the WHO 2019 chart, (b) review the transcription (plain numeric points table, SA NDoH Appendix VII pages 3-5 — not a colour image like row 7) against `framingham_lab_data.py`, (c) confirm the >=2-band gap used to set `cvd_risk.discordance_flag` (`engine.py`, `_framingham_discordance_band`) is a reasonable threshold.~~ **Done.** | **SIGNED** — Dr. Neo Monareng, HPCSA MP1325247, 2026-09-25. `FRAMINGHAM_LAB_CHART_SIGNED_OFF` still defaults unset/false in every environment as of this record — signing is the clinical attestation, flipping the env var in a real environment is a separate deployment action, not yet done — see `ENGINEERING_PLAN.md` §33. |
 
+## Review packet for the unreviewed rows (1, 2, 3, 5, 8, 9)
+
+`docs/clinical-review/TRIAGE_SAFETY_REVIEW_PACKET.md` (added 2026-09-26)
+is the thing to hand a reviewer for these rows. It is generated from the
+running code (`pnpm --filter @ahava-healthcare/api clinical-review:packet`)
+and a unit test fails CI when it drifts, so a signature on it is a signature
+on what is deployed. Its section 0 lists six findings from reading the code
+against itself that the reviewer should rule on first — most importantly,
+the adult TEWS chart uses signed −3…+3 scores where the published SATS TEWS
+scores each parameter 0–3, with the result that recording a patient as
+"alert" and "walking" lowers their urgency and "confused" scores lower than
+"alert". Nothing collects AVPU/mobility today, so that part is latent; the
+systolic BP ordering (normal BP scoring the same as hypotension) is live.
+
 ## What actually needs a named clinician
 
 Per `ENGINEERING_PLAN.md` §12's own framing for item #1/#4: a named
