@@ -10,6 +10,11 @@ import { WebSocketServer } from "ws";
 // Load environment variables
 dotenv.config();
 
+// Error tracking first, so anything thrown while the rest of the app loads is
+// captured. No-op unless SENTRY_DSN is set.
+import { initMonitoring, captureError, flushMonitoring } from "./lib/monitoring";
+initMonitoring("api");
+
 const DEBUG = process.env.DEBUG === "true";
 
 // Import routes
@@ -393,6 +398,8 @@ async function shutdown(signal: string) {
       }
     }
 
+    await flushMonitoring();
+
     clearTimeout(forceExit);
     console.log("[shutdown] complete");
     process.exit(0);
@@ -409,11 +416,13 @@ process.on("SIGINT", () => void shutdown("SIGINT"));
 // exit — nothing in the logs to say what happened.
 process.on("unhandledRejection", (reason) => {
   console.error("[fatal] unhandled promise rejection:", reason);
+  captureError(reason, { area: "process.unhandledRejection" });
   void shutdown("unhandledRejection");
 });
 
 process.on("uncaughtException", (error) => {
   console.error("[fatal] uncaught exception:", error);
+  captureError(error, { area: "process.uncaughtException" });
   void shutdown("uncaughtException");
 });
 
@@ -425,7 +434,8 @@ process.on("uncaughtException", (error) => {
 if (process.env.NODE_ENV !== "test") {
   startServer().catch((error) => {
     console.error("[fatal] server failed to start:", (error as Error).message);
-    process.exit(1);
+    captureError(error, { area: "startup" });
+    void flushMonitoring().finally(() => process.exit(1));
   });
 }
 

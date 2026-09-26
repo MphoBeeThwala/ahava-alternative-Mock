@@ -21,6 +21,11 @@ class EarlyWarningAnalyzeRequest(BaseModel):
 
 load_dotenv()
 
+# Before the app exists, so the SDK's FastAPI/Starlette integrations attach.
+# No-op unless SENTRY_DSN is set.
+from monitoring import init_monitoring
+init_monitoring()
+
 ML_SERVICE_SHARED_SECRET = os.getenv("ML_SERVICE_SHARED_SECRET", "").strip()
 ML_SERVICE_REQUIRE_AUTH = os.getenv("ML_SERVICE_REQUIRE_AUTH", "true").strip().lower() == "true"
 ML_SERVICE_AUTH_HEADER = "x-ahava-service-key"

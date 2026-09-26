@@ -15,6 +15,13 @@ FROM base AS builder
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/workspace/node_modules ./workspace/node_modules
 COPY . .
+# NEXT_PUBLIC_* values are inlined into the bundle at build time, so they must
+# be present here, not just at runtime. Railway passes a service variable of
+# the same name as a build arg only when it is declared with ARG.
+ARG NEXT_PUBLIC_SENTRY_DSN
+ARG NEXT_PUBLIC_SENTRY_ENVIRONMENT
+ENV NEXT_PUBLIC_SENTRY_DSN=$NEXT_PUBLIC_SENTRY_DSN \
+    NEXT_PUBLIC_SENTRY_ENVIRONMENT=$NEXT_PUBLIC_SENTRY_ENVIRONMENT
 RUN mkdir -p /app/workspace/public && pnpm --filter workspace build
 
 # Production image — standalone server

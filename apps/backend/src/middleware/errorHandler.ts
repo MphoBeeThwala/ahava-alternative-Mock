@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { Prisma } from '@prisma/client';
+import { captureError } from '../lib/monitoring';
 
 export interface AppError extends Error {
   statusCode?: number;
@@ -76,6 +77,20 @@ export const errorHandler = (
   // Default to 500 server error
   const statusCode = error.statusCode || 500;
   const message = error.message || 'Internal server error';
+
+  // Only server faults go to error tracking; 4xx are the client's problem
+  // and would drown real failures in noise.
+  if (statusCode >= 500) {
+    const user = (req as any).user;
+    captureError(err, {
+      requestId: (req as any).requestId,
+      route: req.baseUrl + (req.route?.path ?? ''),
+      method: req.method,
+      statusCode,
+      userId: user?.id,
+      userRole: user?.role,
+    });
+  }
 
   res.status(statusCode).json({
     success: false,
