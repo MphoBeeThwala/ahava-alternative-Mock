@@ -35,7 +35,7 @@ set anywhere.
 
 | # | Item | Location | What needs signing | Enforcement today |
 |---|------|----------|---------------------|--------------------|
-| 1 | Adult TEWS chart (SATS-aligned vitals scoring) | `apps/backend/src/services/triageThresholds/tews.ts` | The transcribed threshold table itself | None — live |
+| 1 | Adult TEWS chart (SATS-aligned vitals scoring) | `apps/backend/src/services/triageThresholds/paediatricTews.json` (`bands.adult`), scored in `tews.ts` | The transcribed threshold table itself | **CORRECTED 2026-09-28 at Dr. Neo Monareng's direction (HPCSA MP1325247)** — adult chart changed from a signed −3…+3 transcription to the published SATS 0–3 unsigned scoring. Direction was verbal, relayed in the engineering session; recorded in the JSON's `adultReview` block. **Written signature pending** on the regenerated review packet section 1, including cell-by-cell confirmation against the SATS manual. Live, no gate. |
 | 2 | "No discriminator" green-score split (total ≤ 0 → level 5, else 4) | `tews.ts:185-206` | The specific cut point; the spec gives no number for this split | None — live |
 | 3 | Age/height band selection rule (worst-of when both apply) | `tews.ts:180-190` | Whether "worst of the two bands" is the correct rule | None — live |
 | 4 | Paediatric TEWS charts (younger-child, older-child bands) | `apps/backend/src/services/triageThresholds/paediatricTews.json`, gated in `triageSafety.ts:13` | The transcribed paediatric threshold tables | **`PAEDIATRIC_TEWS_SIGNED_OFF` env var** — defaults unset/false, fails safe to a capped conservative floor (`ENGINEERING_PLAN.md` §12, "Correction accepted and acted on immediately") |
@@ -60,6 +60,13 @@ scores each parameter 0–3, with the result that recording a patient as
 "alert" and "walking" lowers their urgency and "confused" scores lower than
 "alert". Nothing collects AVPU/mobility today, so that part is latent; the
 systolic BP ordering (normal BP scoring the same as hypotension) is live.
+
+### 2026-09-28 update
+
+Adult chart (row 1) corrected as above. The paediatric charts (row 4)
+have the same signed −3…+3 transcription and need the same correction
+before their sign-off; they remain gated off. Section 0 findings 4–6 and
+sections 2–6 of the packet are still open.
 
 ## What actually needs a named clinician
 

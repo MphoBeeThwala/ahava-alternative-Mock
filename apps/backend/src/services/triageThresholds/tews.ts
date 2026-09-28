@@ -113,29 +113,18 @@ export interface TewsScoreResult {
     missingParameters: string[];
 }
 
-// INTERPRETATION FLAG — needs explicit clinician confirmation against the
-// primary SATS manual, not just this transcription (the spec artifact itself
-// says as much: "re-read the SATS manual directly rather than trusting this
-// transcription").
+// Published SATS TEWS scores every parameter 0-3, unsigned (the chart's
+// column header reads 3 2 1 0 1 2 3, symmetric around normal). The adult
+// band was corrected to that on 2026-09-28 at Dr. Neo Monareng's direction
+// (see paediatricTews.json `adultReview`); it had been transcribed as
+// -3..+3, which made "alert"/"walking" subtract from the total and scored
+// "confused" below "alert".
 //
-// The source table's columns run -3..+3, and the spec says the parameter
-// scores "sum" to a total. Taken completely literally, a bidirectional
-// physiological parameter (heart rate, respiratory rate, temperature,
-// systolic BP) contributes its SIGNED score — but that can't be the real
-// algorithm: severe bradycardia (-3) and severe tachycardia (+3) are both
-// dangerous, and a literal signed sum lets one abnormal-low reading cancel
-// an abnormal-high one elsewhere instead of adding to the total, the exact
-// opposite of an early-warning score's purpose. Every comparable composite
-// (NEWS2, MEWS) scores distance-from-normal as an unsigned magnitude
-// regardless of direction. So: numeric physiological parameters contribute
-// abs(score) to the total.
-//
-// AVPU/mobility/trauma are different in kind — genuinely ordinal, with one
-// best state and one worst state, not "too much of a good thing" in either
-// direction. There, the signed score is used as-is (e.g. "alert" scoring
-// negative on purpose, reducing the total for a well-looking patient) —
-// taking its absolute value would score a fully alert patient as severely
-// as an unresponsive one, which cannot be right either.
+// The two child bands still carry the old signed transcription and are
+// gated off (PAEDIATRIC_TEWS_SIGNED_OFF) until reviewed. For them this
+// function keeps the previous interpretation: numeric parameters add
+// |score|, categorical ones add the signed score. For the corrected adult
+// band every score is >= 0, so both branches add the score as-is.
 function contributionOf(rule: ParamRule, score: number): number {
     return isCategoricalRule(rule) ? score : Math.abs(score);
 }
@@ -190,14 +179,11 @@ export function scoreTews(
     return scoreOneBand((ageBand ?? heightBand) as TewsBandName, vitals);
 }
 
-// TEWS colour → SATS level. Level 5 is reserved for a green score "carrying
-// no discriminator" per the spec, but the spec doesn't give a number for
-// that split. Because AVPU/mobility contribute a *negative* signed score
-// when normal (see contributionOf above), a fully well, alert, ambulatory
-// patient's total sits below zero, not at exactly zero — so "no
-// discriminator" is read here as total <= 0, with any positive-but-still-
-// green total (a real, if mild, abnormal parameter) landing at 4 instead.
-// Another judgment call flagged for clinician sign-off, not a sourced number.
+// TEWS colour → SATS level. The spec reserves level 5 for a green score
+// "carrying no discriminator" but gives no number for the split; here a
+// green total of 0 (every scored parameter normal) is level 5 and a green
+// total of 1-2 is level 4. A judgment call pending clinician sign-off
+// (review packet section 2), not a sourced number.
 export function tewsColorToSatsLevel(color: TewsColor, total: number): 1 | 2 | 3 | 4 | 5 {
     if (color === 'RED') return 1;
     if (color === 'ORANGE') return 2;

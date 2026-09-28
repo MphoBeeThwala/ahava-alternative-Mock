@@ -9,7 +9,7 @@ has never been reviewed by a clinician. It covers
 `docs/CLINICAL_SIGNOFF_CHECKLIST.md` rows **1, 2, 3, 5, 8, 9** — the
 logic that decides whether a patient's vitals and symptoms get escalated.
 
-TEWS table version in code: `1.0.0-unsigned`.
+TEWS table version in code: `1.1.0-adult-corrected`.
 
 ## How this packet works
 
@@ -30,21 +30,16 @@ These come from reading the code against itself — each is visible in the
 tables and worked examples below. They do not depend on anyone's memory of
 the SATS manual; whether each is *wrong* is the reviewer's call.
 
-1. **Negative scores in the TEWS chart.** Published descriptions of the SATS
-   TEWS score each parameter **0 to 3** (e.g. Rominski et al., Afr J Emerg
-   Med 2014, doi:10.1016/j.afjem.2013.11.001). This table uses −3…+3. The
-   code takes the absolute value for HR/RR/temp/SBP, but keeps the sign for
-   AVPU/mobility/trauma — so "alert" (−2) and "walking" (−1) **subtract** from
-   the total. See worked examples 4 vs 5: recording that a tachycardic,
-   tachypnoeic patient is alert and walking lowers their floor.
-2. **"Confused" scores lower than "alert"** in the adult band (−3 vs −2), so
-   confusion *reduces* urgency. Worked example 6. AVPU, mobility and trauma
-   are not collected anywhere in the product today, so this is latent — it
-   becomes live the day any UI starts sending AVPU.
-3. **Systolic BP ordering.** Adult SBP 101–199 scores 1, SBP 81–100 scores 0,
-   SBP 71–80 scores −1 (adds 1). A normal BP adds the same as hypotension,
-   and a lower BP adds less than a normal one. Worked examples 1–3. This also
-   means a well adult almost never reaches level 5.
+1–3. **Resolved for the adult chart, 2026-09-28** — pending written
+   signature on section 1. The adult table had been transcribed with signed
+   −3…+3 scores (the SATS column header 3 2 1 0 1 2 3 read as signed, with
+   some rows shifted one column), so "alert"/"walking" subtracted from the
+   total, "confused" scored below "alert", and a normal BP scored the same as
+   hypotension. At Dr. Neo Monareng's direction the adult chart now matches
+   the published SATS TEWS: 0–3 per parameter, unsigned (Rominski et al.,
+   Afr J Emerg Med 2014, doi:10.1016/j.afjem.2013.11.001). The two child
+   charts still carry the old signed transcription; they stay gated off
+   (checklist row 4) and need the same correction before sign-off.
 4. **Missing parameters add 0**, and are only flagged as cautions. Typical
    wearable data (HR/SpO2 only) is scored as though BP, RR and temperature
    were normal. Worked example 9.
@@ -63,40 +58,47 @@ the SATS manual; whether each is *wrong* is the reviewer's call.
 
 Source cited in code: Emergency Medicine Society of South Africa. The South African Triage Scale — Training Manual 2012. Twomey M, et al. Vital signs for children at triage: a multicentre validation of the revised South African Triage Scale (SATS) for children. S Afr Med J 2013.
 
-Numeric parameters add |score| to the total; AVPU/mobility/trauma add the
-signed score (see finding 1).
+**Status:** Adult chart to match the published SATS TEWS: every parameter scored 0-3, unsigned, 0 = normal (Rominski et al., Afr J Emerg Med 2014, doi:10.1016/j.afjem.2013.11.001). Replaces a -3..+3 transcription in which the symmetric 3 2 1 0 1 2 3 column header was read as signed and several rows were shifted one column. Directed by
+Dr. Neo Monareng, HPCSA MP1325247, 2026-09-28
+(Verbal direction during review, relayed in the engineering session; no per-cell entries were made on the review page, which stated that unmarked rows accept the SATS column as shown.) **Pending:**
+Written signature on the regenerated docs/clinical-review/TRIAGE_SAFETY_REVIEW_PACKET.md section 1, including confirmation of each cell against the SATS manual (PubMed confirms the 0-3 structure and some cells, not every cell).
+
+Two consequences of the corrected chart for the reviewer to confirm:
+an isolated heart rate below 41 scores 2 (a green total, floor level 4), and
+a respiratory rate of 15–20 scores 1, so a patient is only "all normal"
+(total 0, level 5) with RR 9–14.
 
 | Parameter | Value | Score in table | Adds to total | Reviewer: correct score |
 |---|---|---|---|---|
-| Respiratory rate (/min) | < 9 | -3 | +3 | |
-| Respiratory rate (/min) | 9 – 14 | -1 | +1 | |
-| Respiratory rate (/min) | 15 – 20 | 0 | 0 | |
-| Respiratory rate (/min) | 21 – 29 | 1 | +1 | |
-| Respiratory rate (/min) | > 29 | 2 | +2 | |
-| Heart rate (/min) | < 41 | -3 | +3 | |
-| Heart rate (/min) | 41 – 50 | -1 | +1 | |
+| Respiratory rate (/min) | < 9 | 2 | +2 | |
+| Respiratory rate (/min) | 9 – 14 | 0 | 0 | |
+| Respiratory rate (/min) | 15 – 20 | 1 | +1 | |
+| Respiratory rate (/min) | 21 – 29 | 2 | +2 | |
+| Respiratory rate (/min) | > 29 | 3 | +3 | |
+| Heart rate (/min) | < 41 | 2 | +2 | |
+| Heart rate (/min) | 41 – 50 | 1 | +1 | |
 | Heart rate (/min) | 51 – 100 | 0 | 0 | |
 | Heart rate (/min) | 101 – 110 | 1 | +1 | |
 | Heart rate (/min) | 111 – 129 | 2 | +2 | |
 | Heart rate (/min) | > 129 | 3 | +3 | |
-| Systolic BP (mmHg) | < 71 | -3 | +3 | |
-| Systolic BP (mmHg) | 71 – 80 | -1 | +1 | |
-| Systolic BP (mmHg) | 81 – 100 | 0 | 0 | |
-| Systolic BP (mmHg) | 101 – 199 | 1 | +1 | |
-| Systolic BP (mmHg) | > 199 | 3 | +3 | |
-| Temperature (°C) | < 35 | -3 | +3 | |
+| Systolic BP (mmHg) | < 71 | 3 | +3 | |
+| Systolic BP (mmHg) | 71 – 80 | 2 | +2 | |
+| Systolic BP (mmHg) | 81 – 100 | 1 | +1 | |
+| Systolic BP (mmHg) | 101 – 199 | 0 | 0 | |
+| Systolic BP (mmHg) | > 199 | 2 | +2 | |
+| Temperature (°C) | < 35 | 2 | +2 | |
 | Temperature (°C) | 35 – 38.4 | 0 | 0 | |
 | Temperature (°C) | > 38.4 | 2 | +2 | |
-| Mobility | normal | -1 | -1 | |
+| Mobility | normal | 0 | 0 | |
 | Mobility | withHelp | 1 | +1 | |
 | Mobility | immobile | 2 | +2 | |
-| AVPU | confused | -3 | -3 | |
-| AVPU | alert | -2 | -2 | |
-| AVPU | voice | 0 | 0 | |
+| AVPU | confused | 1 | +1 | |
+| AVPU | alert | 0 | 0 | |
+| AVPU | voice | 1 | +1 | |
 | AVPU | pain | 2 | +2 | |
 | AVPU | unresponsive | 3 | +3 | |
 | Trauma | false | 0 | 0 | |
-| Trauma | true | 2 | +2 | |
+| Trauma | true | 1 | +1 | |
 
 ### Colour bands (TEWS total → colour)
 
@@ -111,9 +113,8 @@ Colour → floor level: RED → 1, ORANGE → 2, YELLOW → 3, GREEN → 4 or 5.
 
 ## 2. Green split: level 4 vs 5 (row 2)
 
-GREEN with total ≤ 0 → level 5; GREEN with total > 0 → level 4. The source
-gives no number for this split; ≤ 0 was chosen because normal AVPU/mobility
-make a well patient's total negative (finding 1).
+GREEN with total 0 (every scored parameter normal) → level 5; GREEN with
+total 1–2 → level 4. The source gives no number for this split.
 
 Reviewer: ☐ correct ☐ change to: ________
 
@@ -272,18 +273,18 @@ the floor comes from vitals alone.
 
 | # | Scenario | Inputs | TEWS per-parameter (table score) | TEWS total → colour | Floor level set by code | Flags | Reviewer: correct level |
 |---|---|---|---|---|---|---|---|
-| 1 | **Well adult** — Baseline: every value in the table's 0 band except SBP. | age=40, heartRateResting=75, respiratoryRate=16, temperature=36.8, bloodPressureSystolic=120 | respiratoryRate 0, heartRate 0, systolicBp 1, temperature 0 | 1 → GREEN (adult) | **4** | TEWS_SYSTOLIC_BP_SCORE_+1, TEWS_MISSING_MOBILITY, TEWS_MISSING_AVPU, TEWS_MISSING_TRAUMA | |
-| 2 | **Same, SBP 90** — Lower BP than the well adult — compare the SBP score. | age=40, heartRateResting=75, respiratoryRate=16, temperature=36.8, bloodPressureSystolic=90 | respiratoryRate 0, heartRate 0, systolicBp 0, temperature 0 | 0 → GREEN (adult) | **5** | TEWS_MISSING_MOBILITY, TEWS_MISSING_AVPU, TEWS_MISSING_TRAUMA | |
-| 3 | **Hypotension** — SBP 78 — compare its SBP score with the well adult's SBP 120. | age=40, heartRateResting=105, respiratoryRate=22, temperature=37, bloodPressureSystolic=78 | respiratoryRate 1, heartRate 1, systolicBp -1, temperature 0 | 3 → YELLOW (adult) | **3** | TEWS_YELLOW_ADULT, TEWS_RESPIRATORY_RATE_SCORE_+1, TEWS_HEART_RATE_SCORE_+1, TEWS_SYSTOLIC_BP_SCORE_-1, TEWS_MISSING_MOBILITY, TEWS_MISSING_AVPU, TEWS_MISSING_TRAUMA | |
-| 4 | **Tachycardia + tachypnoea** — HR 125, RR 26. | age=40, heartRateResting=125, respiratoryRate=26, temperature=37, bloodPressureSystolic=120 | respiratoryRate 1, heartRate 2, systolicBp 1, temperature 0 | 4 → YELLOW (adult) | **3** | TEWS_YELLOW_ADULT, TEWS_RESPIRATORY_RATE_SCORE_+1, TEWS_HEART_RATE_SCORE_+2, TEWS_SYSTOLIC_BP_SCORE_+1, TEWS_MISSING_MOBILITY, TEWS_MISSING_AVPU, TEWS_MISSING_TRAUMA | |
-| 5 | **Same + recorded alert & walking** — Identical vitals; only adds that the patient is alert and ambulant. | age=40, heartRateResting=125, respiratoryRate=26, temperature=37, bloodPressureSystolic=120, avpu=alert, mobility=normal, trauma=false | respiratoryRate 1, heartRate 2, systolicBp 1, temperature 0, mobility -1, avpu -2, trauma 0 | 1 → GREEN (adult) | **4** | TEWS_RESPIRATORY_RATE_SCORE_+1, TEWS_HEART_RATE_SCORE_+2, TEWS_SYSTOLIC_BP_SCORE_+1 | |
-| 6 | **Same + recorded confused & walking** — Identical vitals; patient is confused. | age=40, heartRateResting=125, respiratoryRate=26, temperature=37, bloodPressureSystolic=120, avpu=confused, mobility=normal, trauma=false | respiratoryRate 1, heartRate 2, systolicBp 1, temperature 0, mobility -1, avpu -3, trauma 0 | 0 → GREEN (adult) | **5** | TEWS_AVPU_SCORE_-3, TEWS_RESPIRATORY_RATE_SCORE_+1, TEWS_HEART_RATE_SCORE_+2, TEWS_SYSTOLIC_BP_SCORE_+1 | |
-| 7 | **Febrile, tachycardic, tachypnoeic** — HR 118, RR 28, T 39.2, SBP 95. | age=40, heartRateResting=118, respiratoryRate=28, temperature=39.2, bloodPressureSystolic=95 | respiratoryRate 1, heartRate 2, systolicBp 0, temperature 2 | 5 → ORANGE (adult) | **2** | TEWS_ORANGE_ADULT, TEWS_RESPIRATORY_RATE_SCORE_+1, TEWS_HEART_RATE_SCORE_+2, TEWS_TEMPERATURE_SCORE_+2, TEWS_MISSING_MOBILITY, TEWS_MISSING_AVPU, TEWS_MISSING_TRAUMA | |
-| 8 | **RR 32 alone** — Isolated severe tachypnoea. | age=40, heartRateResting=90, respiratoryRate=32, temperature=37, bloodPressureSystolic=120 | respiratoryRate 2, heartRate 0, systolicBp 1, temperature 0 | 3 → YELLOW (adult) | **3** | TEWS_YELLOW_ADULT, TEWS_RESPIRATORY_RATE_SCORE_+2, TEWS_SYSTOLIC_BP_SCORE_+1, TEWS_MISSING_MOBILITY, TEWS_MISSING_AVPU, TEWS_MISSING_TRAUMA | |
+| 1 | **Well adult** — HR 75, RR 16, T 36.8, SBP 120. RR 15–20 scores 1 on the SATS chart. | age=40, heartRateResting=75, respiratoryRate=16, temperature=36.8, bloodPressureSystolic=120 | respiratoryRate 1, heartRate 0, systolicBp 0, temperature 0 | 1 → GREEN (adult) | **4** | TEWS_RESPIRATORY_RATE_SCORE_+1, TEWS_MISSING_MOBILITY, TEWS_MISSING_AVPU, TEWS_MISSING_TRAUMA | |
+| 2 | **Same, SBP 90** — Lower BP than the well adult: SBP 81–100 scores 1. | age=40, heartRateResting=75, respiratoryRate=16, temperature=36.8, bloodPressureSystolic=90 | respiratoryRate 1, heartRate 0, systolicBp 1, temperature 0 | 2 → GREEN (adult) | **4** | TEWS_RESPIRATORY_RATE_SCORE_+1, TEWS_SYSTOLIC_BP_SCORE_+1, TEWS_MISSING_MOBILITY, TEWS_MISSING_AVPU, TEWS_MISSING_TRAUMA | |
+| 3 | **Hypotension** — SBP 78 scores 2. | age=40, heartRateResting=105, respiratoryRate=22, temperature=37, bloodPressureSystolic=78 | respiratoryRate 2, heartRate 1, systolicBp 2, temperature 0 | 5 → ORANGE (adult) | **2** | TEWS_ORANGE_ADULT, TEWS_RESPIRATORY_RATE_SCORE_+2, TEWS_HEART_RATE_SCORE_+1, TEWS_SYSTOLIC_BP_SCORE_+2, TEWS_MISSING_MOBILITY, TEWS_MISSING_AVPU, TEWS_MISSING_TRAUMA | |
+| 4 | **Tachycardia + tachypnoea** — HR 125, RR 26. | age=40, heartRateResting=125, respiratoryRate=26, temperature=37, bloodPressureSystolic=120 | respiratoryRate 2, heartRate 2, systolicBp 0, temperature 0 | 4 → YELLOW (adult) | **3** | TEWS_YELLOW_ADULT, TEWS_RESPIRATORY_RATE_SCORE_+2, TEWS_HEART_RATE_SCORE_+2, TEWS_MISSING_MOBILITY, TEWS_MISSING_AVPU, TEWS_MISSING_TRAUMA | |
+| 5 | **Same + recorded alert & walking** — Identical vitals plus alert and walking: both score 0, so the level must not change. | age=40, heartRateResting=125, respiratoryRate=26, temperature=37, bloodPressureSystolic=120, avpu=alert, mobility=normal, trauma=false | respiratoryRate 2, heartRate 2, systolicBp 0, temperature 0, mobility 0, avpu 0, trauma 0 | 4 → YELLOW (adult) | **3** | TEWS_YELLOW_ADULT, TEWS_RESPIRATORY_RATE_SCORE_+2, TEWS_HEART_RATE_SCORE_+2 | |
+| 6 | **Same + recorded confused & walking** — Identical vitals; confused scores 1, so the level must not drop. | age=40, heartRateResting=125, respiratoryRate=26, temperature=37, bloodPressureSystolic=120, avpu=confused, mobility=normal, trauma=false | respiratoryRate 2, heartRate 2, systolicBp 0, temperature 0, mobility 0, avpu 1, trauma 0 | 5 → ORANGE (adult) | **2** | TEWS_ORANGE_ADULT, TEWS_RESPIRATORY_RATE_SCORE_+2, TEWS_HEART_RATE_SCORE_+2, TEWS_AVPU_SCORE_+1 | |
+| 7 | **Febrile, tachycardic, tachypnoeic** — HR 118, RR 28, T 39.2, SBP 95. | age=40, heartRateResting=118, respiratoryRate=28, temperature=39.2, bloodPressureSystolic=95 | respiratoryRate 2, heartRate 2, systolicBp 1, temperature 2 | 7 → RED (adult) | **1** | TEWS_RED_ADULT, TEWS_RESPIRATORY_RATE_SCORE_+2, TEWS_HEART_RATE_SCORE_+2, TEWS_SYSTOLIC_BP_SCORE_+1, TEWS_TEMPERATURE_SCORE_+2, TEWS_MISSING_MOBILITY, TEWS_MISSING_AVPU, TEWS_MISSING_TRAUMA | |
+| 8 | **RR 32 alone** — Isolated severe tachypnoea. | age=40, heartRateResting=90, respiratoryRate=32, temperature=37, bloodPressureSystolic=120 | respiratoryRate 3, heartRate 0, systolicBp 0, temperature 0 | 3 → YELLOW (adult) | **3** | TEWS_RESPIRATORY_RATE_SCORE_+3, TEWS_YELLOW_ADULT, TEWS_MISSING_MOBILITY, TEWS_MISSING_AVPU, TEWS_MISSING_TRAUMA | |
 | 9 | **Wearable only** — HR 125, SpO2 97 — no BP/RR/temp (typical watch data). | age=40, heartRateResting=125, oxygenSaturation=97 | heartRate 2 | 2 → GREEN (adult) | **4** | TEWS_HEART_RATE_SCORE_+2, TEWS_MISSING_RESPIRATORY_RATE, TEWS_MISSING_SYSTOLIC_BP, TEWS_MISSING_TEMPERATURE, TEWS_MISSING_MOBILITY, TEWS_MISSING_AVPU, TEWS_MISSING_TRAUMA | |
-| 10 | **SpO2 95 + RR 22** — Indeterminate SpO2 band with a respiratory-rate deviation. | age=40, heartRateResting=80, respiratoryRate=22, temperature=37, bloodPressureSystolic=120, oxygenSaturation=95 | respiratoryRate 1, heartRate 0, systolicBp 1, temperature 0 | 2 → GREEN (adult) | **2** | TEWS_RESPIRATORY_RATE_SCORE_+1, TEWS_SYSTOLIC_BP_SCORE_+1, TEWS_MISSING_MOBILITY, TEWS_MISSING_AVPU, TEWS_MISSING_TRAUMA, SPO2_INDETERMINATE_CONSUMER_DEVICE | |
+| 10 | **SpO2 95 + RR 22** — Indeterminate SpO2 band with a respiratory-rate deviation. | age=40, heartRateResting=80, respiratoryRate=22, temperature=37, bloodPressureSystolic=120, oxygenSaturation=95 | respiratoryRate 2, heartRate 0, systolicBp 0, temperature 0 | 2 → GREEN (adult) | **2** | TEWS_RESPIRATORY_RATE_SCORE_+2, TEWS_MISSING_MOBILITY, TEWS_MISSING_AVPU, TEWS_MISSING_TRAUMA, SPO2_INDETERMINATE_CONSUMER_DEVICE | |
 | 11 | **SpO2 91** — At the critical SpO2 floor. | age=40, oxygenSaturation=91 |  | 0 → GREEN (adult) | **1** | NEWS2_SPO2_CRITICAL, TEWS_MISSING_RESPIRATORY_RATE, TEWS_MISSING_HEART_RATE, TEWS_MISSING_SYSTOLIC_BP, TEWS_MISSING_TEMPERATURE, TEWS_MISSING_MOBILITY, TEWS_MISSING_AVPU, TEWS_MISSING_TRAUMA | |
-| 12 | **Age 70, HR 125 (height 145 cm)** — Adult by age, "older child" by height — band rule picks worse. | age=70, heightCm=145, heartRateResting=125, respiratoryRate=18, temperature=37, bloodPressureSystolic=130 | respiratoryRate 0, heartRate 2, systolicBp 1, temperature 0 | 3 → YELLOW (adult) | **3** | TEWS_YELLOW_ADULT, TEWS_HEART_RATE_SCORE_+2, TEWS_SYSTOLIC_BP_SCORE_+1, TEWS_MISSING_MOBILITY, TEWS_MISSING_AVPU, TEWS_MISSING_TRAUMA | |
+| 12 | **Age 70, HR 125 (height 145 cm)** — Adult by age, "older child" by height — band rule picks worse. | age=70, heightCm=145, heartRateResting=125, respiratoryRate=18, temperature=37, bloodPressureSystolic=130 | respiratoryRate 1, heartRate 2, systolicBp 0, temperature 0 | 3 → YELLOW (adult) | **3** | TEWS_YELLOW_ADULT, TEWS_RESPIRATORY_RATE_SCORE_+1, TEWS_HEART_RATE_SCORE_+2, TEWS_MISSING_MOBILITY, TEWS_MISSING_AVPU, TEWS_MISSING_TRAUMA | |
 
 ## Sign-off
 

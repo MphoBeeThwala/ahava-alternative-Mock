@@ -97,17 +97,17 @@ interface Scenario {
 // code's own table implies, never a claim about what SATS says — that is
 // the reviewer's call.
 const SCENARIOS: Scenario[] = [
-  { label: 'Well adult', why: 'Baseline: every value in the table\'s 0 band except SBP.', age: 40,
+  { label: 'Well adult', why: 'HR 75, RR 16, T 36.8, SBP 120. RR 15–20 scores 1 on the SATS chart.', age: 40,
     vitals: { heartRateResting: 75, respiratoryRate: 16, temperature: 36.8, bloodPressureSystolic: 120 } },
-  { label: 'Same, SBP 90', why: 'Lower BP than the well adult — compare the SBP score.', age: 40,
+  { label: 'Same, SBP 90', why: 'Lower BP than the well adult: SBP 81–100 scores 1.', age: 40,
     vitals: { heartRateResting: 75, respiratoryRate: 16, temperature: 36.8, bloodPressureSystolic: 90 } },
-  { label: 'Hypotension', why: 'SBP 78 — compare its SBP score with the well adult\'s SBP 120.', age: 40,
+  { label: 'Hypotension', why: 'SBP 78 scores 2.', age: 40,
     vitals: { heartRateResting: 105, respiratoryRate: 22, temperature: 37, bloodPressureSystolic: 78 } },
   { label: 'Tachycardia + tachypnoea', why: 'HR 125, RR 26.', age: 40,
     vitals: { heartRateResting: 125, respiratoryRate: 26, temperature: 37, bloodPressureSystolic: 120 } },
-  { label: 'Same + recorded alert & walking', why: 'Identical vitals; only adds that the patient is alert and ambulant.', age: 40,
+  { label: 'Same + recorded alert & walking', why: 'Identical vitals plus alert and walking: both score 0, so the level must not change.', age: 40,
     vitals: { heartRateResting: 125, respiratoryRate: 26, temperature: 37, bloodPressureSystolic: 120, avpu: 'alert', mobility: 'normal', trauma: false } },
-  { label: 'Same + recorded confused & walking', why: 'Identical vitals; patient is confused.', age: 40,
+  { label: 'Same + recorded confused & walking', why: 'Identical vitals; confused scores 1, so the level must not drop.', age: 40,
     vitals: { heartRateResting: 125, respiratoryRate: 26, temperature: 37, bloodPressureSystolic: 120, avpu: 'confused', mobility: 'normal', trauma: false } },
   { label: 'Febrile, tachycardic, tachypnoeic', why: 'HR 118, RR 28, T 39.2, SBP 95.', age: 40,
     vitals: { heartRateResting: 118, respiratoryRate: 28, temperature: 39.2, bloodPressureSystolic: 95 } },
@@ -191,21 +191,16 @@ These come from reading the code against itself — each is visible in the
 tables and worked examples below. They do not depend on anyone's memory of
 the SATS manual; whether each is *wrong* is the reviewer's call.
 
-1. **Negative scores in the TEWS chart.** Published descriptions of the SATS
-   TEWS score each parameter **0 to 3** (e.g. Rominski et al., Afr J Emerg
-   Med 2014, doi:10.1016/j.afjem.2013.11.001). This table uses −3…+3. The
-   code takes the absolute value for HR/RR/temp/SBP, but keeps the sign for
-   AVPU/mobility/trauma — so "alert" (−2) and "walking" (−1) **subtract** from
-   the total. See worked examples 4 vs 5: recording that a tachycardic,
-   tachypnoeic patient is alert and walking lowers their floor.
-2. **"Confused" scores lower than "alert"** in the adult band (−3 vs −2), so
-   confusion *reduces* urgency. Worked example 6. AVPU, mobility and trauma
-   are not collected anywhere in the product today, so this is latent — it
-   becomes live the day any UI starts sending AVPU.
-3. **Systolic BP ordering.** Adult SBP 101–199 scores 1, SBP 81–100 scores 0,
-   SBP 71–80 scores −1 (adds 1). A normal BP adds the same as hypotension,
-   and a lower BP adds less than a normal one. Worked examples 1–3. This also
-   means a well adult almost never reaches level 5.
+1–3. **Resolved for the adult chart, 2026-09-28** — pending written
+   signature on section 1. The adult table had been transcribed with signed
+   −3…+3 scores (the SATS column header 3 2 1 0 1 2 3 read as signed, with
+   some rows shifted one column), so "alert"/"walking" subtracted from the
+   total, "confused" scored below "alert", and a normal BP scored the same as
+   hypotension. At Dr. Neo Monareng's direction the adult chart now matches
+   the published SATS TEWS: 0–3 per parameter, unsigned (Rominski et al.,
+   Afr J Emerg Med 2014, doi:10.1016/j.afjem.2013.11.001). The two child
+   charts still carry the old signed transcription; they stay gated off
+   (checklist row 4) and need the same correction before sign-off.
 4. **Missing parameters add 0**, and are only flagged as cautions. Typical
    wearable data (HR/SpO2 only) is scored as though BP, RR and temperature
    were normal. Worked example 9.
@@ -224,8 +219,15 @@ the SATS manual; whether each is *wrong* is the reviewer's call.
 
 Source cited in code: ${(tewsData as any).sourceCitation}
 
-Numeric parameters add |score| to the total; AVPU/mobility/trauma add the
-signed score (see finding 1).
+**Status:** ${(tewsData as any).adultReview.decision} Directed by
+${(tewsData as any).adultReview.directedBy}, ${(tewsData as any).adultReview.directedOn}
+(${(tewsData as any).adultReview.howRecorded}) **Pending:**
+${(tewsData as any).adultReview.pending}
+
+Two consequences of the corrected chart for the reviewer to confirm:
+an isolated heart rate below 41 scores 2 (a green total, floor level 4), and
+a respiratory rate of 15–20 scores 1, so a patient is only "all normal"
+(total 0, level 5) with RR 9–14.
 
 ${tewsTable('adult')}
 
@@ -239,9 +241,8 @@ Colour → floor level: RED → 1, ORANGE → 2, YELLOW → 3, GREEN → 4 or 5.
 
 ## 2. Green split: level 4 vs 5 (row 2)
 
-GREEN with total ≤ 0 → level 5; GREEN with total > 0 → level 4. The source
-gives no number for this split; ≤ 0 was chosen because normal AVPU/mobility
-make a well patient's total negative (finding 1).
+GREEN with total 0 (every scored parameter normal) → level 5; GREEN with
+total 1–2 → level 4. The source gives no number for this split.
 
 Reviewer: ☐ correct ☐ change to: ________
 

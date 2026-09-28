@@ -1,7 +1,16 @@
 {
-  "version": "1.0.0-unsigned",
+  "version": "1.1.0-adult-corrected",
   "reviewedBy": null,
   "reviewedOn": null,
+  "adultReview": {
+    "scope": "adult band only; youngerChild/olderChild remain unsigned and gated by PAEDIATRIC_TEWS_SIGNED_OFF",
+    "decision": "Adult chart to match the published SATS TEWS: every parameter scored 0-3, unsigned, 0 = normal (Rominski et al., Afr J Emerg Med 2014, doi:10.1016/j.afjem.2013.11.001). Replaces a -3..+3 transcription in which the symmetric 3 2 1 0 1 2 3 column header was read as signed and several rows were shifted one column.",
+    "directedBy": "Dr. Neo Monareng, HPCSA MP1325247",
+    "directedOn": "2026-09-28",
+    "howRecorded": "Verbal direction during review, relayed in the engineering session; no per-cell entries were made on the review page, which stated that unmarked rows accept the SATS column as shown.",
+    "writtenSignOff": null,
+    "pending": "Written signature on the regenerated docs/clinical-review/TRIAGE_SAFETY_REVIEW_PACKET.md section 1, including confirmation of each cell against the SATS manual (PubMed confirms the 0-3 structure and some cells, not every cell)."
+  },
   "sourceCitation": "Emergency Medicine Society of South Africa. The South African Triage Scale — Training Manual 2012. Twomey M, et al. Vital signs for children at triage: a multicentre validation of the revised South African Triage Scale (SATS) for children. S Afr Med J 2013.",
   "notes": "AH-47 gap report. Transcribed from a clinician-facing specification artifact (see docs/ENGINEERING_PLAN.md §11 follow-up), not yet reviewed against the primary SATS manual by a named, registered clinician. Do not treat as clinically authorized until reviewedBy/reviewedOn/version are filled in by that review. Numeric ranges use gte/lte/gt/lt (inclusive/exclusive) matching the source table's own symbols. Categorical parameters (avpu, mobility, trauma) score 0 when the value is unknown/not supplied — treated as 'not scored', not assumed normal. IMPORTANT INTERPRETATION FLAG for the reviewing clinician: the total score sums the ABSOLUTE VALUE of each numeric physiological parameter's matched score (heartRate/respiratoryRate/temperature/systolicBp), not the signed value — a literal signed sum would let severe bradycardia and severe tachycardia cancel each other out, which cannot be the real algorithm. AVPU/mobility/trauma keep their signed score as-is (ordinal, one best state and one worst, not bidirectional). Please confirm both of these against the primary manual — see tews.ts's contributionOf() for the exact logic.",
   "colorBands": [
@@ -92,47 +101,47 @@
       "label": "Adult — over 12 years, or over 150 cm",
       "parameters": {
         "respiratoryRate": [
-          { "score": -3, "lt": 9 },
-          { "score": -1, "gte": 9, "lte": 14 },
-          { "score": 0, "gte": 15, "lte": 20 },
-          { "score": 1, "gte": 21, "lte": 29 },
-          { "score": 2, "gt": 29 }
+          { "score": 2, "lt": 9 },
+          { "score": 0, "gte": 9, "lte": 14 },
+          { "score": 1, "gte": 15, "lte": 20 },
+          { "score": 2, "gte": 21, "lte": 29 },
+          { "score": 3, "gt": 29 }
         ],
         "heartRate": [
-          { "score": -3, "lt": 41 },
-          { "score": -1, "gte": 41, "lte": 50 },
+          { "score": 2, "lt": 41 },
+          { "score": 1, "gte": 41, "lte": 50 },
           { "score": 0, "gte": 51, "lte": 100 },
           { "score": 1, "gte": 101, "lte": 110 },
           { "score": 2, "gte": 111, "lte": 129 },
           { "score": 3, "gt": 129 }
         ],
         "systolicBp": [
-          { "score": -3, "lt": 71 },
-          { "score": -1, "gte": 71, "lte": 80 },
-          { "score": 0, "gte": 81, "lte": 100 },
-          { "score": 1, "gte": 101, "lte": 199 },
-          { "score": 3, "gt": 199 }
+          { "score": 3, "lt": 71 },
+          { "score": 2, "gte": 71, "lte": 80 },
+          { "score": 1, "gte": 81, "lte": 100 },
+          { "score": 0, "gte": 101, "lte": 199 },
+          { "score": 2, "gt": 199 }
         ],
         "temperature": [
-          { "score": -3, "lt": 35 },
+          { "score": 2, "lt": 35 },
           { "score": 0, "gte": 35, "lte": 38.4 },
           { "score": 2, "gt": 38.4 }
         ],
         "mobility": [
-          { "score": -1, "values": ["normal"] },
+          { "score": 0, "values": ["normal"] },
           { "score": 1, "values": ["withHelp"] },
           { "score": 2, "values": ["immobile"] }
         ],
         "avpu": [
-          { "score": -3, "values": ["confused"] },
-          { "score": -2, "values": ["alert"] },
-          { "score": 0, "values": ["voice"] },
+          { "score": 1, "values": ["confused"] },
+          { "score": 0, "values": ["alert"] },
+          { "score": 1, "values": ["voice"] },
           { "score": 2, "values": ["pain"] },
           { "score": 3, "values": ["unresponsive"] }
         ],
         "trauma": [
           { "score": 0, "values": [false] },
-          { "score": 2, "values": [true] }
+          { "score": 1, "values": [true] }
         ]
       }
     }

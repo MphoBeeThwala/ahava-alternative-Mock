@@ -163,9 +163,10 @@ describe("assessDeterministicRisk", () => {
       // RR threshold, is what SATS relies on to catch a truly critical
       // single presentation. This is an intentional, sourced behavior
       // change from the old ad-hoc "RR>=30 is automatic critical" heuristic.
+      // 2026-09-28 adult chart correction (SATS 0-3): RR > 29 scores 3.
       const result = assessDeterministicRisk("feeling tired", { respiratoryRate: 30 }, ADULT);
 
-      expect(result.cautionFlags).toContain("TEWS_RESPIRATORY_RATE_SCORE_+2");
+      expect(result.hardFlags).toContain("TEWS_RESPIRATORY_RATE_SCORE_+3");
       expect(result.minTriageLevel).toBeGreaterThan(2);
     });
 
@@ -175,16 +176,19 @@ describe("assessDeterministicRisk", () => {
       expect(result.hardFlags).toContain("TEWS_HEART_RATE_SCORE_+3");
     });
 
-    it("scores severe bradycardia (<41) with the same magnitude as tachycardia, not a cancelling negative", () => {
-      // Interpretation flag (see tews.ts's contributionOf): the total sums
-      // the magnitude of a physiological parameter's deviation regardless
-      // of direction, matching every comparable early-warning score (NEWS2,
-      // MEWS) — a literal signed sum would let bradycardia and tachycardia
-      // cancel each other out, which cannot be the real algorithm.
+    it("scores severe bradycardia (<41) as a positive deviation that adds to the total", () => {
+      // 2026-09-28 adult chart correction: SATS scores every parameter 0-3,
+      // unsigned, so a low reading adds to the total like a high one (the
+      // old -3..+3 transcription needed abs() to get this). HR < 41 is a 2
+      // on the SATS adult chart; on its own that is a green total. Noted for
+      // the reviewing clinician: an isolated HR of 34 floors at level 4.
       const result = assessDeterministicRisk("feeling tired", { heartRateResting: 34 }, ADULT);
 
-      expect(result.hardFlags).toContain("TEWS_HEART_RATE_SCORE_-3");
-      expect(result.minTriageLevel).toBeLessThanOrEqual(3);
+      expect(result.cautionFlags).toContain("TEWS_HEART_RATE_SCORE_+2");
+      expect(result.minTriageLevel).toBe(4);
+      // Adds to, never cancels, another abnormal parameter:
+      const withFever = assessDeterministicRisk("feeling tired", { heartRateResting: 34, temperature: 39 }, ADULT);
+      expect(withFever.minTriageLevel).toBe(3); // HR 2 + temp 2 = 4 -> yellow
     });
 
     it("does not flag a fully normal, alert, ambulatory adult", () => {
@@ -192,7 +196,9 @@ describe("assessDeterministicRisk", () => {
         "feeling fine",
         {
           heartRateResting: 72,
-          respiratoryRate: 16,
+          // SATS adult chart scores RR 9-14 as 0 and 15-20 as 1, so a fully
+          // normal TEWS needs RR in 9-14 (2026-09-28 correction).
+          respiratoryRate: 12,
           temperature: 36.8,
           avpu: "alert",
           mobility: "normal",
