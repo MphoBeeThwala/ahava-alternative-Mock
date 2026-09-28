@@ -1,9 +1,10 @@
-import { Router } from 'express';
+import { NextFunction, Response, Router } from 'express';
 import { UserRole } from '@prisma/client';
 import { AuthenticatedRequest, authMiddleware, requireNurse } from '../middleware/auth';
 import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 import { safeDecrypt } from '../utils/encryption';
 import prisma from '../lib/prisma';
+import { isValidCoordinate, markNurseOffline } from '../services/websocket';
 
 const router: Router = Router();
 
@@ -20,19 +21,44 @@ router.get('/profile', requireNurse, async (req: AuthenticatedRequest, res, next
   } catch (error) { return next(error); }
 });
 
-// Update availability
-router.patch('/availability', requireNurse, async (req: AuthenticatedRequest, res, next) => {
+// Update availability.
+//
+// The web client has been sending POST here while only PATCH was mounted,
+// so "Go online" always fell through to the 404 handler ("Route not found").
+// Both verbs are accepted: PATCH is the correct one, POST keeps any already
+// shipped mobile (Capacitor) build working until it is updated.
+const updateAvailability = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
-    const { isAvailable, lat, lng } = req.body;
+    const { isAvailable, lat, lng } = req.body ?? {};
+    if (typeof isAvailable !== 'boolean') {
+      return res.status(400).json({ error: 'isAvailable must be a boolean' });
+    }
+    const hasLocation = lat !== undefined || lng !== undefined;
+    if (hasLocation && !isValidCoordinate(lat, lng)) {
+      return res.status(400).json({ error: 'lat/lng must be valid coordinates' });
+    }
+    if (isAvailable && !hasLocation) {
+      return res.status(400).json({ error: 'A location (lat, lng) is required to go online' });
+    }
+
+    const before = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { isAvailable: true } });
     const nurse = await prisma.user.update({
       where: { id: req.user!.id },
-      data: { isAvailable, lastKnownLat: lat, lastKnownLng: lng, lastLocationUpdate: new Date() },
+      // Going offline without a location leaves the last known position
+      // alone — the client used to send 0,0 here, which overwrote it with a
+      // point in the Atlantic.
+      data: hasLocation
+        ? { isAvailable, lastKnownLat: lat, lastKnownLng: lng, lastLocationUpdate: new Date() }
+        : { isAvailable },
       select: { id: true, isAvailable: true, lastKnownLat: true, lastKnownLng: true }
     });
-    await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'UPDATE', resource: 'Nurse', resourceId: nurse.id, metadata: { oldAvailability: !isAvailable, newAvailability: isAvailable, lat, lng }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
-    res.json({ success: true, nurse });
-  } catch (error) { next(error); }
-});
+    if (!isAvailable) markNurseOffline(nurse.id);
+    await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'UPDATE', resource: 'Nurse', resourceId: nurse.id, metadata: { oldAvailability: before?.isAvailable ?? null, newAvailability: isAvailable, lat, lng }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
+    return res.json({ success: true, nurse });
+  } catch (error) { return next(error); }
+};
+router.patch('/availability', requireNurse, updateAvailability);
+router.post('/availability', requireNurse, updateAvailability);
 
 // Get nurse visits
 router.get('/visits', requireNurse, async (req: AuthenticatedRequest, res, next) => {

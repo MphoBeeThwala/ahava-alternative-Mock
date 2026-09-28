@@ -1,14 +1,15 @@
 import { apiClient } from './client';
 
-export interface NurseAvailability {
-  lat: number;
-  lng: number;
-  isAvailable: boolean;
-}
+// lat/lng are required to go online; going offline may omit them so the
+// last known location isn't overwritten.
+export type NurseAvailability =
+  | { isAvailable: true; lat: number; lng: number }
+  | { isAvailable: false; lat?: number; lng?: number };
 
 export const nurseApi = {
   updateAvailability: async (data: NurseAvailability) => {
-    const res = await apiClient.post('/nurse/availability', data);
+    // The backend route is PATCH; this used to POST, which 404'd ("Route not found").
+    const res = await apiClient.patch('/nurse/availability', data);
     return res.data;
   },
   getMyVisits: async () => {

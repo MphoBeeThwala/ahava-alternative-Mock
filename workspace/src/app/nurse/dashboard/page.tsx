@@ -151,7 +151,11 @@ export default function NurseDashboard() {
     const [statusFilter, setStatusFilter] = useState<VisitStatusFilter>('ALL');
     const [incomingBooking, setIncomingBooking] = useState<IncomingBooking | null>(null);
     const [countdown, setCountdown] = useState(ACCEPT_WINDOW_SEC);
+    const [accepting, setAccepting] = useState(false);
     const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    // Where to register on the dispatch radar. Kept so the socket can
+    // re-register after a page reload or reconnect without asking for GPS again.
+    const lastCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
 
     const { send, lastMessage, connected } = useVisitWebSocket(token);
 
@@ -159,10 +163,11 @@ export default function NurseDashboard() {
         try {
             const data = await nurseApi.getProfile();
             const profileUser = data.user || data;
-            setIsAvailable(profileUser.isAvailable || false);
-            if (profileUser.lastKnownLat && profileUser.lastKnownLng) {
+            if (profileUser.lastKnownLat != null && profileUser.lastKnownLng != null) {
+                lastCoordsRef.current = { lat: profileUser.lastKnownLat, lng: profileUser.lastKnownLng };
                 setLocationStatus(`Active at ${profileUser.lastKnownLat.toFixed(4)}, ${profileUser.lastKnownLng.toFixed(4)}`);
             }
+            setIsAvailable(profileUser.isAvailable || false);
         } catch (error) {
             console.error('Failed to load profile:', error);
         }
@@ -183,9 +188,16 @@ export default function NurseDashboard() {
         loadVisits();
     }, [user, loadProfile, loadVisits]);
 
-    const goOnlineViaWs = useCallback((lat: number, lng: number) => {
-        send({ type: 'NURSE_GO_ONLINE', data: { lat, lng } });
-    }, [send]);
+    // The server's list of dispatchable nurses lives in memory and is tied to
+    // the socket, so it is lost on every reload, reconnect or backend
+    // restart. Previously NURSE_GO_ONLINE was only sent from the toggle
+    // (and dropped silently if the socket wasn't connected yet), so a nurse
+    // whose profile still said "online" saw "Live radar active" but never
+    // received a single request. Re-register whenever the socket (re)connects.
+    useEffect(() => {
+        if (!connected || !isAvailable || !lastCoordsRef.current) return;
+        send({ type: 'NURSE_GO_ONLINE', data: lastCoordsRef.current });
+    }, [connected, isAvailable, send]);
 
     const toggleAvailability = async () => {
         setLoading(true);
@@ -202,9 +214,9 @@ export default function NurseDashboard() {
                     const lat = position.coords.latitude;
                     const lng = position.coords.longitude;
                     await nurseApi.updateAvailability({ lat, lng, isAvailable: true });
-                    setIsAvailable(true);
+                    lastCoordsRef.current = { lat, lng };
+                    setIsAvailable(true); // registers on the socket via the effect above
                     setLocationStatus(`Active at ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
-                    goOnlineViaWs(lat, lng);
                     loadVisits();
                 } catch (error: unknown) {
                     const e = error as { response?: { data?: { error?: string } } };
@@ -215,14 +227,15 @@ export default function NurseDashboard() {
             }, () => {
                 toast.error("Location access denied. Cannot go online.");
                 setLoading(false);
-            });
+            }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
         } else {
             try {
-                await nurseApi.updateAvailability({ lat: 0, lng: 0, isAvailable: false });
+                await nurseApi.updateAvailability({ isAvailable: false });
                 send({ type: 'NURSE_GO_OFFLINE' });
                 setIsAvailable(false);
                 setLocationStatus("Offline");
                 setIncomingBooking(null);
+                setAccepting(false);
             } catch (error: unknown) {
                 const e = error as { response?: { data?: { error?: string } } };
                 toast.error(e.response?.data?.error || "Failed to go offline.");
@@ -245,56 +258,81 @@ export default function NurseDashboard() {
     useEffect(() => {
         if (!lastMessage) return;
         if (lastMessage.type === 'NEW_BOOKING_AVAILABLE') {
+            if (accepting) return; // don't swap the card out from under an in-flight accept
             const d = lastMessage.data as unknown as IncomingBooking;
             setIncomingBooking(d);
             setCountdown(ACCEPT_WINDOW_SEC);
             toast.info(`New visit request — ${d.patientName} (${d.distanceKm} km away)`);
         }
         if (lastMessage.type === 'BOOKING_TAKEN') {
-            setIncomingBooking(null);
-            if (countdownRef.current) clearInterval(countdownRef.current);
+            // Only dismiss the card if it's the booking that was taken.
+            const takenId = (lastMessage.data as { bookingId?: string } | undefined)?.bookingId;
+            setIncomingBooking((current) => (current && current.bookingId === takenId ? null : current));
         }
         if (lastMessage.type === 'ACCEPT_BOOKING_SUCCESS') {
+            setAccepting(false);
             setIncomingBooking(null);
             if (countdownRef.current) clearInterval(countdownRef.current);
             toast.success('Visit accepted! Check your visits list.');
             loadVisits();
         }
         if (lastMessage.type === 'ACCEPT_BOOKING_FAILED') {
+            setAccepting(false);
             setIncomingBooking(null);
             toast.error(lastMessage.error || 'Could not accept — booking already taken.');
         }
         if (lastMessage.type === 'NURSE_ONLINE_SUCCESS') {
             toast.success('You are now online. Listening for nearby requests.');
         }
+        if (lastMessage.type === 'NURSE_ONLINE_FAILED') {
+            toast.error(lastMessage.error || 'Could not register for nearby requests.');
+        }
+        // lastMessage is the only trigger; `accepting` is read, not reacted to.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [lastMessage, toast, loadVisits]);
 
+    // Accept window: tick down once per second while a request is showing.
+    // The expiry side effects live in their own effect below rather than
+    // inside the setState updater (React may run updaters twice, which sent
+    // DECLINE_BOOKING twice in dev).
+    const incomingId = incomingBooking?.bookingId;
     useEffect(() => {
-        if (incomingBooking) {
-            if (countdownRef.current) clearInterval(countdownRef.current);
-            countdownRef.current = setInterval(() => {
-                setCountdown((c) => {
-                    if (c <= 1) {
-                        clearInterval(countdownRef.current!);
-                        setIncomingBooking(null);
-                        send({ type: 'DECLINE_BOOKING', data: { bookingId: incomingBooking.bookingId } });
-                        return ACCEPT_WINDOW_SEC;
-                    }
-                    return c - 1;
-                });
-            }, 1000);
-        }
+        if (!incomingId || accepting) return;
+        countdownRef.current = setInterval(() => {
+            setCountdown((c) => Math.max(0, c - 1));
+        }, 1000);
         return () => { if (countdownRef.current) clearInterval(countdownRef.current); };
-    }, [incomingBooking, send]);
+    }, [incomingId, accepting]);
+
+    useEffect(() => {
+        if (!incomingId || accepting || countdown > 0) return;
+        send({ type: 'DECLINE_BOOKING', data: { bookingId: incomingId } });
+        setIncomingBooking(null);
+    }, [countdown, incomingId, accepting, send]);
+
+    // If the socket drops mid-accept the result will never arrive; don't leave
+    // the card spinning forever. The visits list is the source of truth.
+    useEffect(() => {
+        if (connected || !accepting) return;
+        setAccepting(false);
+        setIncomingBooking(null);
+        toast.error('Connection lost while accepting — check My visits to see if it went through.');
+        loadVisits();
+    }, [connected, accepting, toast, loadVisits]);
 
     const handleAccept = () => {
-        if (!incomingBooking) return;
-        send({ type: 'ACCEPT_BOOKING', data: { bookingId: incomingBooking.bookingId } });
+        if (!incomingBooking || accepting) return;
+        const sent = send({ type: 'ACCEPT_BOOKING', data: { bookingId: incomingBooking.bookingId } });
+        if (!sent) {
+            toast.error('Not connected — could not accept. Check your connection.');
+            return;
+        }
+        setAccepting(true);
         if (countdownRef.current) clearInterval(countdownRef.current);
     };
 
     const handlePass = () => {
-        if (!incomingBooking) return;
+        if (!incomingBooking || accepting) return;
         send({ type: 'DECLINE_BOOKING', data: { bookingId: incomingBooking.bookingId } });
         setIncomingBooking(null);
         if (countdownRef.current) clearInterval(countdownRef.current);
@@ -358,10 +396,10 @@ export default function NurseDashboard() {
                                 <div><p className="text-[var(--text-eyebrow)] font-bold uppercase text-[var(--ink-3)]">Duration</p><p className="num font-bold text-[var(--foreground)]">{incomingBooking.estimatedDuration} min</p></div>
                             </div>
                             <div className="flex gap-2">
-                                <button onClick={handleAccept} className="btn-primary flex-[2] rounded-xl font-bold" style={{ minHeight: 'var(--tap-primary)' }}>
-                                    Accept
+                                <button onClick={handleAccept} disabled={accepting} className="btn-primary flex-[2] rounded-xl font-bold disabled:opacity-60" style={{ minHeight: 'var(--tap-primary)' }}>
+                                    {accepting ? 'Accepting…' : 'Accept'}
                                 </button>
-                                <button onClick={handlePass} className="flex-1 rounded-xl border font-semibold" style={{ borderColor: 'var(--border)', minHeight: 'var(--tap-primary)' }}>
+                                <button onClick={handlePass} disabled={accepting} className="flex-1 rounded-xl border font-semibold disabled:opacity-60" style={{ borderColor: 'var(--border)', minHeight: 'var(--tap-primary)' }}>
                                     Pass
                                 </button>
                             </div>

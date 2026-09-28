@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { UserRole } from '@prisma/client';
 import { AuthenticatedRequest, authMiddleware, requirePatient } from '../middleware/auth';
 import { idempotencyMiddleware } from '../middleware/idempotency';
-import { notifyNearbyNurses } from '../services/websocket';
+import { notifyNearbyNurses, withdrawBookingOffer } from '../services/websocket';
 import { encryptData, isEncryptedPayload, safeDecrypt } from '../utils/encryption';
 import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 import Joi from 'joi';
@@ -240,6 +240,9 @@ router.patch('/:id/cancel', requirePatient, async (req: AuthenticatedRequest, re
         await tx.visit.update({ where: { id: booking.visit.id }, data: { status: 'CANCELLED' } });
       }
     });
+
+    // Nothing accepted it yet, so nurses may still be looking at the offer.
+    if (!booking.nurseId) withdrawBookingOffer(id);
 
     // AuditLog: Log booking cancellation
     await createAuditLog({

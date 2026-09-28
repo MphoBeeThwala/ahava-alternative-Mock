@@ -143,6 +143,57 @@ describe("visits: status updates (nurse only, assigned nurse only)", () => {
   });
 });
 
+describe("visits: status transitions", () => {
+  it("rejects an unknown status with 400 rather than a 500", async () => {
+    const patient = await registerRole("PATIENT", "transition-patient1");
+    const nurse = await registerRole("NURSE", "transition-nurse1");
+    const { visit } = await seedBookingAndVisit(patient.userId, nurse.userId);
+
+    const res = await nurse.agent.patch(`/api/v1/visits/${visit.id}/status`).send({ status: "TELEPORTED" });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("refuses to skip steps or reopen a completed visit", async () => {
+    const patient = await registerRole("PATIENT", "transition-patient2");
+    const nurse = await registerRole("NURSE", "transition-nurse2");
+    const { visit } = await seedBookingAndVisit(patient.userId, nurse.userId);
+
+    const skip = await nurse.agent.patch(`/api/v1/visits/${visit.id}/status`).send({ status: "COMPLETED" });
+    expect(skip.status).toBe(409);
+
+    await prisma.visit.update({ where: { id: visit.id }, data: { status: "COMPLETED" } });
+    const reopen = await nurse.agent.patch(`/api/v1/visits/${visit.id}/status`).send({ status: "IN_PROGRESS" });
+    expect(reopen.status).toBe(409);
+  });
+
+  it("walks the full flow and records actualStart / actualEnd", async () => {
+    const patient = await registerRole("PATIENT", "transition-patient3");
+    const nurse = await registerRole("NURSE", "transition-nurse3");
+    const { visit } = await seedBookingAndVisit(patient.userId, nurse.userId);
+
+    for (const status of ["EN_ROUTE", "ARRIVED", "IN_PROGRESS", "COMPLETED"]) {
+      const res = await nurse.agent.patch(`/api/v1/visits/${visit.id}/status`).send({ status });
+      expect(res.status).toBe(200);
+      expect(res.body.visit.status).toBe(status);
+    }
+
+    const persisted = await prisma.visit.findUnique({ where: { id: visit.id } });
+    expect(persisted!.actualStart).not.toBeNull();
+    expect(persisted!.actualEnd).not.toBeNull();
+  });
+
+  it("lets the nurse cancel a visit that hasn't ended", async () => {
+    const patient = await registerRole("PATIENT", "transition-patient4");
+    const nurse = await registerRole("NURSE", "transition-nurse4");
+    const { visit } = await seedBookingAndVisit(patient.userId, nurse.userId);
+
+    const res = await nurse.agent.patch(`/api/v1/visits/${visit.id}/status`).send({ status: "CANCELLED" });
+
+    expect(res.status).toBe(200);
+  });
+});
+
 describe("nurse: profile, availability, own visits", () => {
   it("returns the nurse's own profile with SANC fields, not another user's", async () => {
     const nurse = await registerRole("NURSE", "nurse-profile");
@@ -172,6 +223,41 @@ describe("nurse: profile, availability, own visits", () => {
     expect(res.status).toBe(200);
     expect(res.body.nurse.isAvailable).toBe(true);
     expect(res.body.nurse.lastKnownLat).toBeCloseTo(-33.9);
+  });
+
+  it("accepts POST as well as PATCH for availability (the web client sent POST and got a 404)", async () => {
+    const nurse = await registerRole("NURSE", "nurse-availability-post");
+
+    const res = await nurse.agent
+      .post("/api/v1/nurse/availability")
+      .send({ isAvailable: true, lat: -26.2, lng: 28.04 });
+
+    expect(res.status).toBe(200);
+    expect(res.body.nurse.isAvailable).toBe(true);
+  });
+
+  it("keeps the last known location when going offline without one", async () => {
+    const nurse = await registerRole("NURSE", "nurse-offline-keeps-location");
+    await nurse.agent.patch("/api/v1/nurse/availability").send({ isAvailable: true, lat: -33.9, lng: 18.4 });
+
+    const res = await nurse.agent.patch("/api/v1/nurse/availability").send({ isAvailable: false });
+
+    expect(res.status).toBe(200);
+    expect(res.body.nurse.isAvailable).toBe(false);
+    expect(res.body.nurse.lastKnownLat).toBeCloseTo(-33.9);
+    expect(res.body.nurse.lastKnownLng).toBeCloseTo(18.4);
+  });
+
+  it("rejects going online without a valid location, or a non-boolean isAvailable", async () => {
+    const nurse = await registerRole("NURSE", "nurse-availability-invalid");
+
+    const noLocation = await nurse.agent.patch("/api/v1/nurse/availability").send({ isAvailable: true });
+    const badLat = await nurse.agent.patch("/api/v1/nurse/availability").send({ isAvailable: true, lat: 200, lng: 18.4 });
+    const badFlag = await nurse.agent.patch("/api/v1/nurse/availability").send({ isAvailable: "yes", lat: -33.9, lng: 18.4 });
+
+    expect(noLocation.status).toBe(400);
+    expect(badLat.status).toBe(400);
+    expect(badFlag.status).toBe(400);
   });
 
   it("lists only the requesting nurse's own visits, with decrypted address", async () => {

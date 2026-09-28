@@ -3,6 +3,8 @@ import { UserRole, VisitStatus } from '@prisma/client';
 import { AuthenticatedRequest, authMiddleware, requireNurse } from '../middleware/auth';
 import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 import { safeDecrypt } from '../utils/encryption';
+import { broadcastToUsers } from '../services/websocket';
+import { isVisitStatus, visitTimingFor, visitTransitionError } from '../services/visitStatus';
 import prisma from '../lib/prisma';
 
 // Found via a real user report, 2026-09-14: these queries never selected
@@ -54,12 +56,25 @@ router.get('/:id', authMiddleware, async (req: AuthenticatedRequest, res, next) 
 router.patch('/:id/status', requireNurse, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
-    const visit = await prisma.visit.findUnique({ where: { id } });
+    const { status } = req.body ?? {};
+    if (!isVisitStatus(status)) return res.status(400).json({ error: 'Invalid visit status' });
+    const visit = await prisma.visit.findUnique({ where: { id }, include: { booking: { select: { patientId: true } } } });
     if (!visit) return res.status(404).json({ error: 'Visit not found' });
-    if (visit.nurseId !== req.user!.id) return res.status(403).json({ error: 'Access denied' });
-    const updated = await prisma.visit.update({ where: { id }, data: { status } });
+    const isAdmin = req.user!.role === UserRole.ADMIN;
+    if (!isAdmin && visit.nurseId !== req.user!.id) return res.status(403).json({ error: 'Access denied' });
+    const transitionError = visitTransitionError(visit.status, status, isAdmin);
+    if (transitionError) return res.status(409).json({ error: transitionError });
+    // Conditional on the status we just read, so a double-tapped button (or
+    // two devices) can't advance the same visit twice.
+    const { count } = await prisma.visit.updateMany({ where: { id, status: visit.status }, data: { status, ...visitTimingFor(status) } });
+    if (count === 0) return res.status(409).json({ error: 'Visit status changed in the meantime; refresh and try again' });
+    const updated = await prisma.visit.findUnique({ where: { id } });
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'UPDATE', resource: 'Visit', resourceId: id, metadata: { oldStatus: visit.status, newStatus: status }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
+    // The nurse dashboard changes status over REST, not the WebSocket, so
+    // without this the patient's live visit tracker never heard about it.
+    const recipients = [visit.booking.patientId];
+    if (visit.doctorId) recipients.push(visit.doctorId);
+    broadcastToUsers(recipients, { type: 'VISIT_STATUS_CHANGED', data: { visitId: id, status, timestamp: new Date().toISOString() } });
     return res.json({ success: true, visit: updated });
   } catch (error) { return next(error); }
 });
