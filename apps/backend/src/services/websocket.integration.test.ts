@@ -99,6 +99,8 @@ async function createBooking(patientId: string, overrides: Record<string, unknow
   return prisma.booking.create({
     data: {
       patientId,
+      patientLat: CAPE_TOWN.lat,
+      patientLng: CAPE_TOWN.lng,
       encryptedAddress: encryptData("12 Test Road"),
       scheduledDate: new Date(Date.now() + 2 * 3600_000),
       paymentMethod: "CARD",
@@ -197,5 +199,67 @@ describe("nurse dispatch over WebSocket", () => {
 
     await intruder.next((m) => typeof m.error === "string");
     expect((await prisma.visit.findUnique({ where: { id: visit.id } }))!.status).toBe("SCHEDULED");
+  });
+
+  it("offers open bookings to a nurse who comes online after they were created, skipping ones they passed on", async () => {
+    const patientId = await register("PATIENT", "ws-reoffer-patient");
+    const nurseId = await register("NURSE", "ws-reoffer-nurse");
+    // A spot of its own, so open bookings left by other tests (or earlier
+    // runs against the same database) can't crowd these out of the re-offer cap.
+    const here = { lat: -20 - Math.random() * 10, lng: 20 + Math.random() * 10 };
+    const at = { patientLat: here.lat, patientLng: here.lng };
+    const waiting = await createBooking(patientId, at);
+    const passed = await createBooking(patientId, at);
+    const farAway = await createBooking(patientId, { patientLat: here.lat + 1, patientLng: here.lng });
+    const cancelled = await createBooking(patientId, { ...at, paymentStatus: "REFUNDED" });
+
+    const first = await goOnline(nurseId, here.lat, here.lng);
+    await first.next((m) => m.type === "NEW_BOOKING_AVAILABLE" && m.data.bookingId === waiting.id);
+    await first.next((m) => m.type === "NEW_BOOKING_AVAILABLE" && m.data.bookingId === passed.id);
+    first.send({ type: "DECLINE_BOOKING", data: { bookingId: passed.id } });
+    await first.nextType("DECLINE_BOOKING_SUCCESS");
+    const offeredFirst = first.inbox.map((m) => m.data?.bookingId);
+    expect(offeredFirst).not.toContain(farAway.id);
+    expect(offeredFirst).not.toContain(cancelled.id);
+
+    // Reconnect (e.g. page reload): the booking still waiting comes back, the passed one doesn't.
+    first.ws.close();
+    const again = await goOnline(nurseId, here.lat, here.lng);
+    await again.next((m) => m.type === "NEW_BOOKING_AVAILABLE" && m.data.bookingId === waiting.id);
+    await new Promise((r) => setTimeout(r, 150));
+    expect(again.inbox.some((m) => m.data?.bookingId === passed.id)).toBe(false);
+  });
+
+  describe("availability after a dropped connection", () => {
+    const original = process.env.NURSE_OFFLINE_GRACE_MS;
+    afterEach(() => {
+      if (original === undefined) delete process.env.NURSE_OFFLINE_GRACE_MS;
+      else process.env.NURSE_OFFLINE_GRACE_MS = original;
+    });
+
+    it("marks the nurse unavailable once the grace period passes without a reconnect", async () => {
+      process.env.NURSE_OFFLINE_GRACE_MS = "100";
+      const nurseId = await register("NURSE", "ws-stale-nurse");
+      const nurse = await goOnline(nurseId, CAPE_TOWN.lat, CAPE_TOWN.lng);
+      expect((await prisma.user.findUnique({ where: { id: nurseId } }))!.isAvailable).toBe(true);
+
+      nurse.ws.close();
+      await new Promise((r) => setTimeout(r, 500));
+
+      expect((await prisma.user.findUnique({ where: { id: nurseId } }))!.isAvailable).toBe(false);
+    });
+
+    it("leaves the nurse available when they reconnect within the grace period", async () => {
+      process.env.NURSE_OFFLINE_GRACE_MS = "400";
+      const nurseId = await register("NURSE", "ws-reconnect-nurse");
+      const first = await goOnline(nurseId, CAPE_TOWN.lat, CAPE_TOWN.lng);
+
+      await new Promise<void>((resolve) => { first.ws.once("close", () => resolve()); first.ws.close(); });
+      await new Promise((r) => setTimeout(r, 50));
+      await goOnline(nurseId, CAPE_TOWN.lat, CAPE_TOWN.lng);
+      await new Promise((r) => setTimeout(r, 700));
+
+      expect((await prisma.user.findUnique({ where: { id: nurseId } }))!.isAvailable).toBe(true);
+    });
   });
 });

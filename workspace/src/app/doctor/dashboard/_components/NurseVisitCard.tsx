@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Card } from '../../../../components/ui/Card';
 import { StatusBadge } from '../../../../components/ui/StatusBadge';
 import type { Visit } from '../../../../lib/api';
@@ -5,12 +6,22 @@ import type { Visit } from '../../../../lib/api';
 export function NurseVisitCard({
   visit,
   onApprove,
-  onStatusUpdate,
 }: {
   visit: Visit;
-  onApprove: (visitId: string) => void;
-  onStatusUpdate: (visitId: string, status: string) => void;
+  onApprove: (visitId: string, review?: string) => Promise<void> | void;
 }) {
+  const [review, setReview] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const approve = async () => {
+    setSubmitting(true);
+    try {
+      await onApprove(visit.id, review.trim() || undefined);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <Card>
       <div className="flex justify-between items-start mb-4">
@@ -77,27 +88,28 @@ export function NurseVisitCard({
         </div>
       )}
 
-      <div className="flex gap-4 border-t pt-4" style={{ borderColor: 'var(--border)' }}>
+      {/* "Request More Info" and "Escalate to ER" used to live here. They sent
+          PENDING_REVIEW (not a visit status) and CANCELLED (meaningless on a
+          visit the nurse already completed) to a nurse-only endpoint, so
+          both always failed. Approval with an optional note is the review
+          action the backend actually supports. */}
+      <div className="border-t pt-4 space-y-3" style={{ borderColor: 'var(--border)' }}>
+        <textarea
+          value={review}
+          onChange={(e) => setReview(e.target.value)}
+          placeholder="Review note for the patient (optional)"
+          rows={2}
+          maxLength={5000}
+          className="w-full rounded-lg border px-3 py-2 text-sm"
+          style={{ borderColor: 'var(--border)' }}
+        />
         <button
-          onClick={() => onApprove(visit.id)}
-          className="px-6 py-2 rounded-lg font-medium text-white transition"
+          onClick={approve}
+          disabled={submitting}
+          className="px-6 py-2 rounded-lg font-medium text-white transition disabled:opacity-60"
           style={{ backgroundColor: 'var(--success)' }}
         >
-          Approve & Complete
-        </button>
-        <button
-          onClick={() => onStatusUpdate(visit.id, 'PENDING_REVIEW')}
-          className="px-6 py-2 rounded-lg border font-semibold transition bg-[var(--card)] hover:bg-slate-50"
-          style={{ borderColor: 'var(--border)', color: 'var(--foreground)' }}
-        >
-          Request More Info
-        </button>
-        <button
-          onClick={() => onStatusUpdate(visit.id, 'CANCELLED')}
-          className="px-6 py-2 rounded-lg border font-medium transition ml-auto hover:bg-red-50"
-          style={{ borderColor: 'var(--danger)', color: 'var(--danger)' }}
-        >
-          Escalate to ER
+          {submitting ? 'Approving…' : 'Approve & Complete'}
         </button>
       </div>
     </Card>

@@ -367,3 +367,85 @@ describe("visits: nurse BP-calibration recording", () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe("doctor: nurse-visit review queue and approval", () => {
+  async function completedVisit(label: string) {
+    const patient = await registerRole("PATIENT", `${label}-patient`);
+    const nurse = await registerRole("NURSE", `${label}-nurse`);
+    const { visit } = await seedBookingAndVisit(patient.userId, nurse.userId);
+    await prisma.visit.update({ where: { id: visit.id }, data: { status: "COMPLETED" } });
+    return { patient, nurse, visit };
+  }
+
+  it("lists completed, unreviewed visits in the doctor's pending queue", async () => {
+    const doctor = await registerRole("DOCTOR", "review-queue-doctor");
+    const { visit } = await completedVisit("review-queue");
+    const patient2 = await registerRole("PATIENT", "review-queue-p2");
+    const nurse2 = await registerRole("NURSE", "review-queue-n2");
+    const { visit: active } = await seedBookingAndVisit(patient2.userId, nurse2.userId);
+
+    const res = await doctor.agent.get("/api/v1/visits?status=PENDING_REVIEW");
+
+    expect(res.status).toBe(200);
+    const ids = res.body.visits.map((v: any) => v.id);
+    expect(ids).toContain(visit.id);
+    expect(ids).not.toContain(active.id);
+  });
+
+  it("approves a completed visit, assigns it to the doctor, and takes it out of the queue", async () => {
+    const doctor = await registerRole("DOCTOR", "review-approve-doctor");
+    const { visit } = await completedVisit("review-approve");
+
+    const res = await doctor.agent.post(`/api/v1/visits/${visit.id}/approve`).send({ review: "Vitals reviewed, no concerns." });
+
+    expect(res.status).toBe(200);
+    const persisted = await prisma.visit.findUnique({ where: { id: visit.id } });
+    expect(persisted!.doctorId).toBe(doctor.userId);
+    expect(persisted!.doctorReview).toBe("Vitals reviewed, no concerns.");
+    const queue = await doctor.agent.get("/api/v1/visits?status=PENDING_REVIEW");
+    expect(queue.body.visits.map((v: any) => v.id)).not.toContain(visit.id);
+  });
+
+  it("refuses a second doctor approving an already-reviewed visit", async () => {
+    const first = await registerRole("DOCTOR", "review-twice-doctor1");
+    const second = await registerRole("DOCTOR", "review-twice-doctor2");
+    const { visit } = await completedVisit("review-twice");
+    await first.agent.post(`/api/v1/visits/${visit.id}/approve`).send({});
+
+    const res = await second.agent.post(`/api/v1/visits/${visit.id}/approve`).send({});
+
+    expect(res.status).toBe(409);
+    expect((await prisma.visit.findUnique({ where: { id: visit.id } }))!.doctorId).toBe(first.userId);
+  });
+
+  it("refuses to approve a visit the nurse hasn't completed, and refuses nurses", async () => {
+    const doctor = await registerRole("DOCTOR", "review-early-doctor");
+    const patient = await registerRole("PATIENT", "review-early-patient");
+    const nurse = await registerRole("NURSE", "review-early-nurse");
+    const { visit } = await seedBookingAndVisit(patient.userId, nurse.userId);
+
+    expect((await doctor.agent.post(`/api/v1/visits/${visit.id}/approve`).send({})).status).toBe(409);
+    expect((await nurse.agent.post(`/api/v1/visits/${visit.id}/approve`).send({})).status).toBe(403);
+  });
+
+  it("lets the assigned doctor update status, but not an unassigned doctor", async () => {
+    const assigned = await registerRole("DOCTOR", "status-doctor-assigned");
+    const other = await registerRole("DOCTOR", "status-doctor-other");
+    const patient = await registerRole("PATIENT", "status-doctor-patient");
+    const nurse = await registerRole("NURSE", "status-doctor-nurse");
+    const { visit } = await seedBookingAndVisit(patient.userId, nurse.userId);
+    await prisma.visit.update({ where: { id: visit.id }, data: { doctorId: assigned.userId } });
+
+    const denied = await other.agent.patch(`/api/v1/visits/${visit.id}/status`).send({ status: "CANCELLED" });
+    const allowed = await assigned.agent.patch(`/api/v1/visits/${visit.id}/status`).send({ status: "CANCELLED" });
+
+    expect(denied.status).toBe(403);
+    expect(allowed.status).toBe(200);
+  });
+
+  it("rejects an unknown status filter instead of ignoring it", async () => {
+    const nurse = await registerRole("NURSE", "status-filter-nurse");
+    const res = await nurse.agent.get("/api/v1/visits?status=NOPE");
+    expect(res.status).toBe(400);
+  });
+});

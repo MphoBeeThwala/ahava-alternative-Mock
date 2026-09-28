@@ -30,13 +30,79 @@ export const isValidCoordinate = (lat: unknown, lng: unknown): lat is number =>
 const dropSocket = (ws: AuthenticatedWebSocket) => {
   if (!ws.userId || clients.get(ws.userId) !== ws) return;
   clients.delete(ws.userId);
-  onlineNurses.delete(ws.userId);
+  if (onlineNurses.delete(ws.userId)) scheduleStaleOffline(ws.userId);
 };
 
 /** REST "go offline" (routes/nurse.ts) — stop dispatching to this nurse from this replica. */
 export const markNurseOffline = (userId: string) => {
   onlineNurses.delete(userId);
+  cancelStaleOffline(userId);
 };
+
+/** Radius, in km, within which a nurse is offered a booking. */
+export const DISPATCH_RADIUS_KM = 10;
+
+// ===== STALE AVAILABILITY =====
+//
+// User.isAvailable used to stay true forever once a nurse's socket dropped
+// without an explicit "go offline" (app killed, phone out of signal), so
+// anything reading it overstated who could actually be dispatched. Clearing
+// it immediately would flip a nurse offline on every page reload, so it's
+// cleared only after a grace period, and only if the nurse hasn't
+// re-registered anywhere since: NURSE_GO_ONLINE and LOCATION_UPDATE both
+// bump lastLocationUpdate, on whichever replica the nurse reconnected to,
+// so the conditional write below is safe across replicas.
+const staleOfflineTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+const offlineGraceMs = () => {
+  const n = Number(process.env.NURSE_OFFLINE_GRACE_MS);
+  return Number.isFinite(n) && n >= 0 ? n : 120_000;
+};
+
+const cancelStaleOffline = (userId: string) => {
+  const t = staleOfflineTimers.get(userId);
+  if (t) clearTimeout(t);
+  staleOfflineTimers.delete(userId);
+};
+
+const scheduleStaleOffline = (userId: string) => {
+  cancelStaleOffline(userId);
+  const droppedAt = new Date();
+  const timer = setTimeout(() => {
+    staleOfflineTimers.delete(userId);
+    if (onlineNurses.has(userId)) return;
+    prisma.user
+      .updateMany({
+        where: { id: userId, isAvailable: true, lastLocationUpdate: { lte: droppedAt } },
+        data: { isAvailable: false },
+      })
+      .then(({ count }) => {
+        if (count) console.log(`🔴 Nurse ${userId} marked unavailable after disconnect grace period`);
+      })
+      .catch((err) => console.warn('[ws] stale-offline update failed:', (err as Error)?.message ?? err));
+  }, offlineGraceMs());
+  timer.unref?.();
+  staleOfflineTimers.set(userId, timer);
+};
+
+// ===== DECLINES =====
+//
+// Which nurses passed on (or let expire) which booking, so a booking
+// re-offered when a nurse comes online isn't shown again to someone who
+// already said no. In memory and per replica, like onlineNurses; pruned in
+// the heartbeat.
+const declinedBy = new Map<string, { nurses: Set<string>; at: number }>();
+const DECLINE_TTL_MS = 24 * 3600_000;
+
+const recordDecline = (bookingId: string, nurseId: string) => {
+  const entry = declinedBy.get(bookingId) ?? { nurses: new Set<string>(), at: Date.now() };
+  entry.nurses.add(nurseId);
+  entry.at = Date.now();
+  declinedBy.set(bookingId, entry);
+};
+
+const hasDeclined = (bookingId: string, nurseId: string) =>
+  declinedBy.get(bookingId)?.nurses.has(nurseId) ?? false;
 
 const INSTANCE_ID = process.env.INSTANCE_ID ?? crypto.randomUUID();
 const WS_CHANNEL = process.env.WS_REDIS_CHANNEL ?? 'ws:events';
@@ -269,11 +335,17 @@ export const initializeWebSocket = (wss: WebSocketServer) => {
       ws.isAlive = false;
       ws.ping();
     });
+    const cutoff = Date.now() - DECLINE_TTL_MS;
+    declinedBy.forEach((entry, bookingId) => {
+      if (entry.at < cutoff) declinedBy.delete(bookingId);
+    });
   }, 30000); // 30 seconds
 
   // Cleanup on server shutdown
   wss.on('close', () => {
     clearInterval(heartbeat);
+    staleOfflineTimers.forEach((t) => clearTimeout(t));
+    staleOfflineTimers.clear();
     const pub = redisPub;
     const sub = redisSub;
     redisPub = null;
@@ -341,9 +413,12 @@ const handleNurseGoOnline = async (ws: AuthenticatedWebSocket, data: { lat: numb
 
     // Track in memory for fast lookup
     onlineNurses.set(ws.userId, { lat: data.lat, lng: data.lng });
+    cancelStaleOffline(ws.userId);
 
     console.log(`🟢 Nurse ${ws.userId} is now ONLINE at (${data.lat}, ${data.lng})`);
     ws.send(JSON.stringify({ type: 'NURSE_ONLINE_SUCCESS' }));
+
+    await offerOpenBookings(ws.userId, data.lat, data.lng);
   } catch (error) {
     console.error('❌ Nurse go online error:', error);
     ws.send(JSON.stringify({ error: 'Failed to go online' }));
@@ -364,7 +439,7 @@ const handleNurseGoOffline = async (ws: AuthenticatedWebSocket) => {
     });
 
     // Remove from tracking
-    onlineNurses.delete(ws.userId);
+    markNurseOffline(ws.userId);
 
     console.log(`🔴 Nurse ${ws.userId} is now OFFLINE`);
     ws.send(JSON.stringify({ type: 'NURSE_OFFLINE_SUCCESS' }));
@@ -478,7 +553,7 @@ const handleDeclineBooking = async (ws: AuthenticatedWebSocket, data: { bookingI
     return;
   }
 
-  // Just acknowledge - we don't need to do anything in the database
+  if (typeof data?.bookingId === 'string') recordDecline(data.bookingId, ws.userId);
   console.log(`⏭️ Nurse ${ws.userId} declined booking ${data.bookingId}`);
   ws.send(JSON.stringify({ type: 'DECLINE_BOOKING_SUCCESS' }));
 };
@@ -509,6 +584,7 @@ const handleLocationUpdate = async (ws: AuthenticatedWebSocket, data: any) => {
 
     // Update in-memory tracking if online
     if (onlineNurses.has(ws.userId)) {
+      cancelStaleOffline(ws.userId);
       onlineNurses.set(ws.userId, { lat: data.lat, lng: data.lng });
     }
 
@@ -672,6 +748,7 @@ export const broadcastToUsers = (userIds: string[], message: any) => {
 
 // Broadcast that a booking has been taken
 const broadcastBookingTakenLocal = (bookingId: string, acceptedByNurseId: string) => {
+  declinedBy.delete(bookingId);
   onlineNurses.forEach((_, nurseId) => {
     if (nurseId !== acceptedByNurseId) {
       const nurseWs = clients.get(nurseId);
@@ -747,6 +824,58 @@ const notifyNearbyNursesLocal = (
 
   console.log(`📢 Notified ${notifiedCount} nurses about new booking ${booking.id}`);
   return notifiedCount;
+};
+
+const MAX_REOFFERS = 10;
+
+/**
+ * A booking used to be offered exactly once, at creation, to whoever was
+ * online at that instant. If nobody was, or everyone passed, it was never
+ * offered again, and a nurse coming online later never saw it. Now, when a
+ * nurse goes online, they're sent every open booking within range that they
+ * haven't already declined (soonest first).
+ */
+const offerOpenBookings = async (nurseId: string, lat: number, lng: number) => {
+  try {
+    const open = await prisma.booking.findMany({
+      where: {
+        nurseId: null,
+        paymentStatus: { not: 'REFUNDED' },
+        scheduledDate: { gt: new Date() },
+        patientLat: { not: null },
+        patientLng: { not: null },
+      },
+      select: {
+        id: true, scheduledDate: true, estimatedDuration: true, amountInCents: true,
+        patientLat: true, patientLng: true,
+        patient: { select: { firstName: true, lastName: true } },
+      },
+      orderBy: { scheduledDate: 'asc' },
+      take: 200,
+    });
+    let offered = 0;
+    for (const b of open) {
+      if (offered >= MAX_REOFFERS) break;
+      if (hasDeclined(b.id, nurseId)) continue;
+      const distance = getDistanceFromLatLonInKm(b.patientLat!, b.patientLng!, lat, lng);
+      if (distance > DISPATCH_RADIUS_KM) continue;
+      const delivered = deliverToUserLocal(nurseId, {
+        type: 'NEW_BOOKING_AVAILABLE',
+        data: {
+          bookingId: b.id,
+          patientName: `${b.patient.firstName} ${b.patient.lastName}`,
+          scheduledDate: b.scheduledDate.toISOString(),
+          estimatedDuration: b.estimatedDuration,
+          amountInCents: b.amountInCents,
+          distanceKm: Math.round(distance * 10) / 10,
+        },
+      });
+      if (delivered) offered += 1;
+    }
+    if (offered) console.log(`📢 Re-offered ${offered} open booking(s) to nurse ${nurseId}`);
+  } catch (err) {
+    console.warn('[ws] offering open bookings failed:', (err as Error)?.message ?? err);
+  }
 };
 
 // Notify nearby online nurses about a new booking

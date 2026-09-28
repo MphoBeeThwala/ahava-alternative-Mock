@@ -181,6 +181,12 @@ model Booking {
   // Scheduling
   scheduledDate   DateTime
   estimatedDuration Int         @default(60) // minutes
+
+  // Where the visit is, for nurse dispatch. Plaintext coordinates (the
+  // street address stays encrypted); needed so an unaccepted booking can be
+  // offered again to a nurse who comes online after it was created.
+  patientLat      Float?
+  patientLng      Float?
   
   // Payment
   paymentMethod   PaymentMethod
@@ -209,6 +215,7 @@ model Booking {
   @@index([scheduledDate])
   @@index([paymentStatus])
   @@index([payfastReference])
+  @@index([nurseId, scheduledDate])
   @@map("bookings")
 }
 

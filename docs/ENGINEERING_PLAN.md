@@ -2675,7 +2675,34 @@ Reported symptom: the nurse dashboard's **Go online** failed ("Failed to go onli
 
 **Tests:** `services/websocket.integration.test.ts` is new. It runs a real WebSocket server against the real test DB and covers radius dispatch, location validation, the two-nurse race, cancelled bookings, offline nurses, the second-tab close, and cross-nurse status changes. Six of the seven tests fail against the pre-fix `websocket.ts`. `visits.integration.test.ts` adds `POST` availability, offline-keeps-location, availability validation, and status-transition cases. Integration: 14 suites, 149 tests. Unit: 21 suites, 188 tests. `tsc` is clean on backend and workspace.
 
-**Still open (not in this change):**
-- A booking is offered only once, at creation. If no nurse is online then, or every nurse passes, it is never offered again, and a nurse who comes online later doesn't see it. Fixing this means storing the patient's coordinates on `Booking`, which is a schema change.
-- The doctor dashboard calls `PATCH /visits/:id/status`, which is `requireNurse`, so a doctor's status change always gets 403.
-- `isAvailable` in the DB stays `true` after a socket drops without going offline, so admin views can overstate who is dispatchable.
+**Still open after §35:** see §36. All three items were fixed there.
+
+## 36. Nurse dispatch follow-ups from §35: re-offering, the doctor review workflow, stale availability, 2026-09-28
+
+**1. Bookings are offered again, not just once.** A booking used to be offered only at creation, to whoever was online at that moment. `Booking` now stores `patientLat`/`patientLng` (migration `20260928120000_add_booking_dispatch_location`, nullable, so older bookings are unaffected). When a nurse goes online, including the re-registration on every reconnect from §35, they are sent every open booking within `DISPATCH_RADIUS_KM` (10 km) that they haven't declined, soonest first, capped at 10. Declines and expired offers are remembered per replica for 24 hours, so a reload doesn't bring back requests the nurse already passed on. The nurse dashboard now queues offers ("+N more") instead of each new one replacing the last.
+
+**2. The doctor review workflow didn't exist; it's now built minimally.** Behind the 403 from §35, three more things were broken:
+- The doctor dashboard fetched `GET /visits?status=PENDING_REVIEW`, but `PENDING_REVIEW` isn't a visit status and the filter was ignored.
+- It posted to `POST /visits/:id/approve`, a route that never existed.
+- Nothing ever set `Visit.doctorId`.
+
+So the review queue was always empty and "Approve & Complete" always failed. Now:
+- The pending queue is **completed visits with no `doctorReview`**. It's a shared pool, like the triage queue: unclaimed visits, or ones this doctor has claimed.
+- `POST /visits/:id/approve` claims and approves in one conditional write (so two doctors can't both approve), stores the review note, and emails the patient via the existing `notifyVisitApproved` template (best effort).
+- `PATCH /visits/:id/status` is open to the visit's assigned doctor as well as its nurse.
+- An unknown `?status=` filter now returns 400 instead of being silently ignored.
+- On the card, **"Request More Info" and "Escalate to ER" were removed**. They sent `PENDING_REVIEW` (not a status) and `CANCELLED` (meaningless on a visit the nurse already completed) to an endpoint doctors couldn't call, so they never worked. They were replaced with an optional review note sent with the approval. A real "request more info" or ER escalation needs its own clinical workflow design (who is notified, what state the visit enters).
+
+**3. Stale `isAvailable`.** When a nurse's socket drops, a timer runs for `NURSE_OFFLINE_GRACE_MS` (default 2 minutes). If they haven't re-registered on any replica by then, it sets `isAvailable = false`. "Re-registered" is judged by `lastLocationUpdate` being newer than the drop, so this is safe across replicas. A nurse who reloads the page stays online.
+
+**Also:** the nurse dashboard now sends `LOCATION_UPDATE` while online (at most every 20 seconds). Nothing sent it before, so the patient visit tracker's `NURSE_LOCATION_UPDATE` handler never fired, and the dispatch radius used the position from when the nurse first went online.
+
+**Tests:** new integration cases cover:
+- re-offering: in range and not declined gets offered; declined, far away and cancelled bookings don't; reconnect re-offers only what's still open
+- the grace timer: fires after the grace period, doesn't fire on a quick reconnect
+- the doctor queue, approval, double approval, approving a non-completed visit, assigned and unassigned doctor status changes, and invalid status filters
+- booking coordinates being stored
+
+Totals: integration 14 suites, 159 tests; unit 188; frontend 12. The WebSocket suite ran 5 times in a row with no failures.
+
+**Residual:** if a replica crashes (rather than shutting down gracefully), its pending grace timers are lost, so a nurse connected to it who never reconnects stays `isAvailable` until they next go online or offline. Fixing that needs a periodic presence heartbeat with its own column, which wasn't worth a second schema change here.

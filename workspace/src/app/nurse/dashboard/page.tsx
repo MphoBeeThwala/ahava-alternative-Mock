@@ -149,9 +149,18 @@ export default function NurseDashboard() {
     const [loading, setLoading] = useState(false);
     const [visits, setVisits] = useState<Visit[]>([]);
     const [statusFilter, setStatusFilter] = useState<VisitStatusFilter>('ALL');
-    const [incomingBooking, setIncomingBooking] = useState<IncomingBooking | null>(null);
-    const [countdown, setCountdown] = useState(ACCEPT_WINDOW_SEC);
-    const [accepting, setAccepting] = useState(false);
+    // Requests waiting for this nurse, shown one at a time (head of the
+    // queue). Going online can now deliver several open requests at once;
+    // a single slot meant each one overwrote the last.
+    const [offers, setOffers] = useState<IncomingBooking[]>([]);
+    const incomingBooking = offers[0] ?? null;
+    const removeOffer = useCallback((bookingId: string) => {
+        setOffers((q) => q.filter((o) => o.bookingId !== bookingId));
+    }, []);
+    // Tied to a booking id so a new head never inherits the previous one's 0.
+    const [countdown, setCountdown] = useState<{ id: string | null; left: number }>({ id: null, left: ACCEPT_WINDOW_SEC });
+    const [acceptingId, setAcceptingId] = useState<string | null>(null);
+    const accepting = acceptingId !== null;
     const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
     // Where to register on the dispatch radar. Kept so the socket can
     // re-register after a page reload or reconnect without asking for GPS again.
@@ -234,8 +243,8 @@ export default function NurseDashboard() {
                 send({ type: 'NURSE_GO_OFFLINE' });
                 setIsAvailable(false);
                 setLocationStatus("Offline");
-                setIncomingBooking(null);
-                setAccepting(false);
+                setOffers([]);
+                setAcceptingId(null);
             } catch (error: unknown) {
                 const e = error as { response?: { data?: { error?: string } } };
                 toast.error(e.response?.data?.error || "Failed to go offline.");
@@ -255,30 +264,44 @@ export default function NurseDashboard() {
         }
     };
 
+    // Stream position while online: keeps the dispatch radius accurate as the
+    // nurse moves, and feeds the patient's live tracker (NURSE_LOCATION_UPDATE),
+    // which nothing ever sent before. Throttled to one update per 20s.
+    useEffect(() => {
+        if (!isAvailable || !connected || typeof navigator === 'undefined' || !navigator.geolocation) return;
+        let lastSent = 0;
+        const watchId = navigator.geolocation.watchPosition((position) => {
+            const now = Date.now();
+            if (now - lastSent < 20_000) return;
+            lastSent = now;
+            const coords = { lat: position.coords.latitude, lng: position.coords.longitude };
+            lastCoordsRef.current = coords;
+            send({ type: 'LOCATION_UPDATE', data: coords });
+        }, () => { /* keep the last known position */ }, { enableHighAccuracy: true, maximumAge: 30_000 });
+        return () => navigator.geolocation.clearWatch(watchId);
+    }, [isAvailable, connected, send]);
+
     useEffect(() => {
         if (!lastMessage) return;
         if (lastMessage.type === 'NEW_BOOKING_AVAILABLE') {
-            if (accepting) return; // don't swap the card out from under an in-flight accept
             const d = lastMessage.data as unknown as IncomingBooking;
-            setIncomingBooking(d);
-            setCountdown(ACCEPT_WINDOW_SEC);
+            setOffers((q) => (q.some((o) => o.bookingId === d.bookingId) ? q : [...q, d]));
             toast.info(`New visit request — ${d.patientName} (${d.distanceKm} km away)`);
         }
         if (lastMessage.type === 'BOOKING_TAKEN') {
-            // Only dismiss the card if it's the booking that was taken.
             const takenId = (lastMessage.data as { bookingId?: string } | undefined)?.bookingId;
-            setIncomingBooking((current) => (current && current.bookingId === takenId ? null : current));
+            if (takenId) removeOffer(takenId);
         }
         if (lastMessage.type === 'ACCEPT_BOOKING_SUCCESS') {
-            setAccepting(false);
-            setIncomingBooking(null);
-            if (countdownRef.current) clearInterval(countdownRef.current);
+            const id = (lastMessage.data as { bookingId?: string } | undefined)?.bookingId ?? acceptingId;
+            if (id) removeOffer(id);
+            setAcceptingId(null);
             toast.success('Visit accepted! Check your visits list.');
             loadVisits();
         }
         if (lastMessage.type === 'ACCEPT_BOOKING_FAILED') {
-            setAccepting(false);
-            setIncomingBooking(null);
+            if (acceptingId) removeOffer(acceptingId);
+            setAcceptingId(null);
             toast.error(lastMessage.error || 'Could not accept — booking already taken.');
         }
         if (lastMessage.type === 'NURSE_ONLINE_SUCCESS') {
@@ -287,38 +310,40 @@ export default function NurseDashboard() {
         if (lastMessage.type === 'NURSE_ONLINE_FAILED') {
             toast.error(lastMessage.error || 'Could not register for nearby requests.');
         }
-        // lastMessage is the only trigger; `accepting` is read, not reacted to.
+        // lastMessage is the only trigger; acceptingId is read, not reacted to.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [lastMessage, toast, loadVisits]);
+    }, [lastMessage, toast, loadVisits, removeOffer]);
 
     // Accept window: tick down once per second while a request is showing.
     // The expiry side effects live in their own effect below rather than
     // inside the setState updater (React may run updaters twice, which sent
     // DECLINE_BOOKING twice in dev).
-    const incomingId = incomingBooking?.bookingId;
+    const incomingId = incomingBooking?.bookingId ?? null;
     useEffect(() => {
         if (!incomingId || accepting) return;
+        setCountdown((c) => (c.id === incomingId ? c : { id: incomingId, left: ACCEPT_WINDOW_SEC }));
         countdownRef.current = setInterval(() => {
-            setCountdown((c) => Math.max(0, c - 1));
+            setCountdown((c) => (c.id === incomingId ? { id: c.id, left: Math.max(0, c.left - 1) } : c));
         }, 1000);
         return () => { if (countdownRef.current) clearInterval(countdownRef.current); };
     }, [incomingId, accepting]);
 
     useEffect(() => {
-        if (!incomingId || accepting || countdown > 0) return;
+        if (!incomingId || accepting || countdown.id !== incomingId || countdown.left > 0) return;
         send({ type: 'DECLINE_BOOKING', data: { bookingId: incomingId } });
-        setIncomingBooking(null);
-    }, [countdown, incomingId, accepting, send]);
+        removeOffer(incomingId);
+    }, [countdown, incomingId, accepting, send, removeOffer]);
+    const secondsLeft = countdown.id === incomingId ? countdown.left : ACCEPT_WINDOW_SEC;
 
     // If the socket drops mid-accept the result will never arrive; don't leave
     // the card spinning forever. The visits list is the source of truth.
     useEffect(() => {
-        if (connected || !accepting) return;
-        setAccepting(false);
-        setIncomingBooking(null);
+        if (connected || !acceptingId) return;
+        removeOffer(acceptingId);
+        setAcceptingId(null);
         toast.error('Connection lost while accepting — check My visits to see if it went through.');
         loadVisits();
-    }, [connected, accepting, toast, loadVisits]);
+    }, [connected, acceptingId, toast, loadVisits, removeOffer]);
 
     const handleAccept = () => {
         if (!incomingBooking || accepting) return;
@@ -327,14 +352,14 @@ export default function NurseDashboard() {
             toast.error('Not connected — could not accept. Check your connection.');
             return;
         }
-        setAccepting(true);
+        setAcceptingId(incomingBooking.bookingId);
         if (countdownRef.current) clearInterval(countdownRef.current);
     };
 
     const handlePass = () => {
         if (!incomingBooking || accepting) return;
         send({ type: 'DECLINE_BOOKING', data: { bookingId: incomingBooking.bookingId } });
-        setIncomingBooking(null);
+        removeOffer(incomingBooking.bookingId);
         if (countdownRef.current) clearInterval(countdownRef.current);
     };
 
@@ -375,6 +400,7 @@ export default function NurseDashboard() {
                             <div className="mb-3 flex items-center justify-between">
                                 <span className="flex items-center gap-2 text-sm font-extrabold text-[var(--primary)]">
                                     <Icon name="bell" size={16} /> New visit request
+                                    {offers.length > 1 && <span className="text-xs font-semibold text-[var(--muted)]">+{offers.length - 1} more</span>}
                                 </span>
                                 <div className="relative flex h-10 w-10 items-center justify-center">
                                     <svg width="40" height="40" viewBox="0 0 40 40" className="-rotate-90">
@@ -382,11 +408,11 @@ export default function NurseDashboard() {
                                         <circle
                                             cx="20" cy="20" r="16" fill="none" stroke="var(--primary)" strokeWidth={4}
                                             strokeDasharray={2 * Math.PI * 16}
-                                            strokeDashoffset={2 * Math.PI * 16 * (1 - countdown / ACCEPT_WINDOW_SEC)}
+                                            strokeDashoffset={2 * Math.PI * 16 * (1 - secondsLeft / ACCEPT_WINDOW_SEC)}
                                             style={{ transition: 'stroke-dashoffset 1s linear' }}
                                         />
                                     </svg>
-                                    <span className="num absolute text-xs font-bold text-[var(--foreground)]">{countdown}</span>
+                                    <span className="num absolute text-xs font-bold text-[var(--foreground)]">{secondsLeft}</span>
                                 </div>
                             </div>
                             <div className="mb-4 grid grid-cols-2 gap-3 text-sm">

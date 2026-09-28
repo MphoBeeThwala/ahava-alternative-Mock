@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { UserRole } from '@prisma/client';
 import { AuthenticatedRequest, authMiddleware, requirePatient } from '../middleware/auth';
 import { idempotencyMiddleware } from '../middleware/idempotency';
-import { notifyNearbyNurses, withdrawBookingOffer } from '../services/websocket';
+import { DISPATCH_RADIUS_KM, notifyNearbyNurses, withdrawBookingOffer } from '../services/websocket';
 import { encryptData, isEncryptedPayload, safeDecrypt } from '../utils/encryption';
 import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 import Joi from 'joi';
@@ -55,6 +55,8 @@ router.post('/', requirePatient, idempotencyMiddleware({ scope: 'booking-create'
         encryptedAddress,
         scheduledDate: new Date(bookingData.scheduledDate),
         estimatedDuration: bookingData.estimatedDuration,
+        patientLat: bookingData.patientLat,
+        patientLng: bookingData.patientLng,
         paymentMethod: bookingData.paymentMethod,
         paymentStatus: 'PENDING',
         amountInCents: bookingData.amountInCents,
@@ -95,7 +97,7 @@ router.post('/', requirePatient, idempotencyMiddleware({ scope: 'booking-create'
     const notifiedCount = await notifyNearbyNurses(
       bookingData.patientLat,
       bookingData.patientLng,
-      10,
+      DISPATCH_RADIUS_KM,
       {
         id: booking.id,
         patientId: booking.patientId,

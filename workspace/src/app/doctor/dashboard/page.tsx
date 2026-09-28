@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import RoleGuard, { UserRole } from '../../../components/RoleGuard';
-import { doctorApi, doctorProfileApi, visitsApi, Visit, TriageCase } from '../../../lib/api';
+import { doctorApi, doctorProfileApi, Visit, TriageCase } from '../../../lib/api';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useToast } from '../../../contexts/ToastContext';
 import DashboardLayout from '../../../components/DashboardLayout';
@@ -101,24 +101,14 @@ export default function DoctorDashboard() {
         if (reviewModal) saveReviewDraft(reviewModal);
     }, [reviewModal]);
 
-    const handleApprove = async (visitId: string) => {
+    const handleApprove = async (visitId: string, review?: string) => {
         try {
-            await doctorApi.approveVisit(visitId);
+            await doctorApi.approveVisit(visitId, review);
             toast.success('Visit approved. Notification sent to patient.');
             loadPendingVisits();
         } catch (error: unknown) {
             const err = error as { response?: { data?: { error?: string } } };
             toast.error(err.response?.data?.error || 'Failed to approve visit.');
-        }
-    };
-
-    const handleStatusUpdate = async (visitId: string, status: string) => {
-        try {
-            await visitsApi.updateStatus(visitId, status);
-            loadPendingVisits();
-        } catch (error: unknown) {
-            const err = error as { response?: { data?: { error?: string } } };
-            toast.error(err.response?.data?.error || 'Failed to update visit status.');
         }
     };
 
@@ -373,7 +363,6 @@ export default function DoctorDashboard() {
                                 key={visit.id}
                                 visit={visit}
                                 onApprove={handleApprove}
-                                onStatusUpdate={handleStatusUpdate}
                             />
                         ))}
                     </div>
