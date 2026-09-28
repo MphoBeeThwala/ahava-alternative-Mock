@@ -219,7 +219,7 @@ jobs:
         run: pnpm --filter @ahava-healthcare/api test:integration
 
   dependency-audit:
-    name: Dependency audit (production deps)
+    name: Dependency audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -233,13 +233,14 @@ jobs:
           node-version: 20
           cache: pnpm
 
-      # Production dependencies only: dev tooling (eslint, jest, vitest,
-      # puppeteer) never ships in either Docker image. High/critical fails
-      # the build so a repeat of the 2026-09 audit (110 findings, including
-      # two Next.js RCEs) can't accumulate silently again. Transitive fixes
-      # live in the root package.json `pnpm.overrides`.
+      # All dependencies, dev tooling included: eslint, jest, vitest and
+      # Playwright run on developer machines and CI runners, not only in
+      # the shipped images. High/critical fails the build so a repeat of the
+      # 2026-09 audit (110 production + 46 dev findings, including two
+      # Next.js RCEs) can't accumulate silently again. Transitive fixes live
+      # in the root package.json `pnpm.overrides`.
       - name: pnpm audit (workspace + frontend)
-        run: pnpm audit --prod --audit-level=high
+        run: pnpm audit --audit-level=high
 
       # The backend Docker image installs from apps/backend/package-lock.json
       # with `npm ci`, not from pnpm-lock.yaml — so the pnpm audit above does
@@ -247,7 +248,7 @@ jobs:
       # in apps/backend/package.json `overrides` (npm's equivalent).
       - name: npm audit (backend image lockfile)
         working-directory: apps/backend
-        run: npm audit --omit=dev --audit-level=high --workspaces=false
+        run: npm audit --audit-level=high --workspaces=false
 
   e2e:
     name: End-to-end (browser → API → Postgres)
