@@ -10,6 +10,7 @@ import Joi from 'joi';
 import { AccessGrantReason, UserRole } from '@prisma/client';
 import { AuthenticatedRequest, requireAdmin, requireRole } from '../middleware/auth';
 import { writeRequestAudit } from '../services/clinicalAudit';
+import { notifyEmergencyAccess } from '../services/notifications';
 import {
   ACCESS_WINDOWS, checkVerifiedClinician, displayName, grantAccess, hoursFromNow, requireVerifiedClinician,
 } from '../services/careAccess';
@@ -78,6 +79,25 @@ router.get('/mine', requireVerifiedClinician(), async (req: AuthenticatedRequest
   } catch (error) { return next(error); }
 });
 
+async function notifyPatientOfEmergencyAccess(clinicianId: string, patientId: string, grantedAt: Date, expiresAt: Date) {
+  const [patient, clinician] = await Promise.all([
+    prisma.user.findUnique({ where: { id: patientId }, select: { email: true, firstName: true, lastName: true } }),
+    prisma.user.findUnique({ where: { id: clinicianId }, select: clinicianSelect }),
+  ]);
+  if (!patient?.email || !clinician) return;
+  await notifyEmergencyAccess({
+    to: patient.email,
+    patientName: `${patient.firstName} ${patient.lastName}`,
+    clinicianName: `${clinician.firstName} ${clinician.lastName}`,
+    clinicianRole: clinician.role === UserRole.NURSE ? 'Nurse' : 'Doctor',
+    registration: clinician.role === UserRole.NURSE
+      ? (clinician.sancId ? `SANC ${clinician.sancId}` : null)
+      : (clinician.hcpsaNumber ? `HPCSA ${clinician.hcpsaNumber}` : null),
+    grantedAt,
+    expiresAt,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Clinician: break-glass (emergency access)
 // ---------------------------------------------------------------------------
@@ -101,6 +121,11 @@ router.post('/break-glass', requireVerifiedClinician(), async (req: Authenticate
       justification: encryptJustification(value.justification),
     });
     await audit(req, 'BREAK_GLASS', grant.id, { patientId: value.patientId, expiresAt: grant.expiresAt.toISOString() });
+    // Tell the patient, at their registered email. Best-effort: the access
+    // is already granted and logged, and appears in their access history
+    // whether or not the email goes out.
+    notifyPatientOfEmergencyAccess(req.user!.id, value.patientId, grant.startsAt, grant.expiresAt)
+      .catch((err) => console.warn('[access-grants] emergency-access email failed:', (err as Error)?.message ?? err));
     return res.status(201).json({
       success: true,
       grant: { id: grant.id, patientId: grant.patientId, reason: grant.reason, expiresAt: grant.expiresAt },

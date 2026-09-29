@@ -109,6 +109,23 @@ export default function AdminDashboard() {
         }
     };
 
+    // For a user who has lost their authenticator and backup codes. They're
+    // signed out everywhere and must set 2FA up again at next sign-in.
+    const resetTwoFactor = async (target: { id: string; firstName: string; lastName: string }) => {
+        const reason = window.prompt(`Reset two-factor authentication for ${target.firstName} ${target.lastName}? Confirm their identity first. Reason:`);
+        if (!reason || reason.trim().length < 10) {
+            if (reason !== null) toast.error('Give a reason of at least 10 characters.');
+            return;
+        }
+        try {
+            await adminApi.resetTwoFactor(target.id, reason.trim());
+            toast.success('Two-factor authentication reset. They will set it up again at next sign-in.');
+        } catch (error: unknown) {
+            const err = error as { response?: { data?: { error?: string } } };
+            toast.error(err.response?.data?.error || 'Failed to reset two-factor authentication.');
+        }
+    };
+
     const [verifyingHcpsa, setVerifyingHcpsa] = useState<string | null>(null);
 
     const handleVerifyHcpsa = async (userId: string) => {
@@ -334,6 +351,14 @@ export default function AdminDashboard() {
                                                 >
                                                     {u.isActive ? 'Suspend' : 'Activate'}
                                                 </button>
+                                                {u.id !== user?.id && (
+                                                    <button
+                                                        onClick={() => resetTwoFactor(u)}
+                                                        className="ml-3 text-sm font-medium text-[var(--muted)] transition hover:underline"
+                                                    >
+                                                        Reset 2FA
+                                                    </button>
+                                                )}
                                             </td>
                                         </tr>
                                     ))}

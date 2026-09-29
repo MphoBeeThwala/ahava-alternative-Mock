@@ -9,6 +9,7 @@ import { app } from "../index";
 import prisma from "../lib/prisma";
 import { encryptData, isEncryptedPayload } from "../utils/encryption";
 import { grantTestAccess, verifyClinician } from "../testSetup/clinicians";
+import * as notifications from "./notifications";
 
 const STRONG_PASSWORD = "Str0ng!Passw0rd";
 const ADMIN_SECRET = "test-admin-registration-secret-care-access";
@@ -289,6 +290,29 @@ describe("break-glass and the patient's access log", () => {
     expect(seen.reason).toBe("BREAK_GLASS");
     expect(seen.clinician.registration.body).toBe("HPCSA");
     expect(seen).not.toHaveProperty("justification");
+  });
+
+  it("emails the patient at their registered address when break-glass is used, without the justification", async () => {
+    const spy = jest.spyOn(notifications, "notifyEmergencyAccess").mockResolvedValue();
+    try {
+      const patient = await register("PATIENT", "bg-email-patient");
+      const doctor = await register("DOCTOR", "bg-email-doctor");
+      const patientRow = await prisma.user.findUniqueOrThrow({ where: { id: patient.userId } });
+      const doctorRow = await prisma.user.findUniqueOrThrow({ where: { id: doctor.userId } });
+
+      const res = await doctor.agent.post("/api/v1/access-grants/break-glass").send({ patientId: patient.userId, justification: "Unconscious patient brought in, history needed urgently" });
+      expect(res.status).toBe(201);
+      await new Promise((r) => setTimeout(r, 50)); // sent after the response, best-effort
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      const args = spy.mock.calls[0][0];
+      expect(args.to).toBe(patientRow.email);
+      expect(args.clinicianRole).toBe("Doctor");
+      expect(args.registration).toBe(`HPCSA ${doctorRow.hcpsaNumber}`);
+      expect(JSON.stringify(args)).not.toContain("Unconscious");
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("shows a patient only their own access log", async () => {

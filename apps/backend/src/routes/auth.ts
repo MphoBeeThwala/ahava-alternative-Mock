@@ -12,6 +12,7 @@ import Joi from "joi";
 import { verifySancRegistration } from "../services/sancVerification";
 import { seedBaselineForUser } from "../services/baselineSeed";
 import { addEmailJob } from "../services/queue";
+import { isMfaRequired } from "../services/mfaPolicy";
 import prisma, { TransactionClient } from "../lib/prisma";
 import { getRedis } from "../services/redis";
 import {
@@ -550,6 +551,9 @@ router.post("/login", authRateLimiter, async (req, res, next) => {
             isVerified: user.isVerified,
             preferredLanguage: user.preferredLanguage,
           },
+          // Staff must set up 2FA before this session can do anything else
+          // (services/mfaPolicy.ts); the client sends them to enrolment.
+          mfaEnrollmentRequired: isMfaRequired(user.role),
         },
         { accessToken, refreshToken },
       ),

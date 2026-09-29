@@ -2839,3 +2839,53 @@ Written notes, where most identifying and sensitive narrative lives, are field-e
 
 Totals: backend integration 16 suites / 181 tests, unit 188, frontend 12. `tsc` is clean on both. A full `next build` could not complete in the build container because `next/font` could not download Google Fonts there; typecheck and lint pass on every new page.
 
+## 39. Mandatory staff 2FA, the data key in AWS KMS, a least-privilege ML login, emergency-access emails, 2026-09-29
+
+**Decisions confirmed by the owner (2026-09-29):**
+- The legal officer agrees with the §38 standards.
+- Railway confirms production data is encrypted at rest with AES-256, including the Postgres volume, backups and PITR archives, on all plans. That settles §38's open question about vitals.
+- The owner asked for: mandatory 2FA; the encryption key in a key management service, with instructions for their side; the ML service on its own database login; and patients emailed when emergency access is used.
+
+Operational steps for the owner are in **`docs/SECURITY_RUNBOOK.md`**.
+
+1. **Mandatory 2FA for nurses, doctors and admins** (`services/mfaPolicy.ts`). Patients may opt in. That follows the §38 recommendation ("clinicians and admins"): staff can reach patient data or control who can.
+   - A staff account without 2FA can still sign in, but `middleware/auth.ts` refuses everything except `auth/me`, `logout` and the 2FA setup endpoints with `403 MFA_ENROLLMENT_REQUIRED`, including WebSocket tickets.
+   - The web client redirects that response to `/security/two-factor`.
+   - Staff can't disable 2FA. A lost authenticator is reset by a *different* admin (`POST /admin/users/:id/2fa/reset`, reason required and audited), which also ends the user's sessions.
+   - The auth cache key moved to `auth:user:v2:` so entries written before `totpEnabled` was cached aren't trusted.
+   - Other integration suites opt out through `MFA_ENFORCEMENT_DISABLED_FOR_TESTS`, which is honoured only under `NODE_ENV=test`. `mfaPolicy.integration.test.ts` (5 cases) turns enforcement back on.
+
+2. **The data key in AWS KMS** (`lib/keyManagement.ts`), using envelope encryption. With `ENCRYPTION_KEY_PROVIDER=aws-kms`:
+   - The API unwraps `ENCRYPTION_KEY_CIPHERTEXT` through KMS at startup and holds the key only in memory (`utils/encryption.ts` key store). It never writes the key to `process.env`.
+   - The unwrap is bound to an encryption context (`app=ahava-healthcare, purpose=patient-data-key`) and, optionally, pinned to one KMS key.
+   - The API refuses to start if a plaintext `ENCRYPTION_KEY` is still set alongside KMS.
+   - `scripts/wrap-encryption-key.ts` wraps the **existing** key, with a round-trip check, so nothing needs re-encrypting.
+   - The previous key for rotation is supported the same way.
+   - `env` stays the default for local development and warns in production.
+   - The BP-validation pseudonym key now derives from the data key (`getPseudonymKey`) instead of reading `ENCRYPTION_KEY` directly, which would have become an empty HMAC key under KMS.
+   - Tests: `keyManagement.test.ts`, 6 cases with a fake KMS that enforces the key ID and encryption context.
+   - Not built: a bulk re-encryption tool. It's only needed after a suspected compromise of the data key itself; master-key rotation is automatic in KMS and needs none.
+
+3. **Least-privilege ML database login** (`scripts/ml-db-role.ts`):
+   - The `ahava_ml` login gets SELECT and INSERT on `biometric_time_series`, SELECT on `users (id, "riskProfile")` and UPDATE on `users ("riskProfile")`, and nothing else.
+   - The script creates the table as the owner if needed, then connects as the new login and runs 11 checks: 4 allowed operations and 7 refusals (email and password hash, triage notes, messages, `biometric_readings`, audit log, deleting history, DDL).
+   - Idempotent. It supports `--verify-only` and `--drop`.
+   - `apps/ml-service/db.py` `ensure_schema` now skips DDL when the table exists, because a restricted role can't run `CREATE TABLE IF NOT EXISTS` at all. It was checked running as the restricted login against Postgres 16, and the ML service's 27 pytest tests still pass.
+   - Tests: `ml-db-role.integration.test.ts`, 3 cases.
+   - Limitation: `riskProfile` also holds the patient's medical passport (allergies, conditions), so the ML login can read that one JSON column in full. Column-level grants can't narrow inside a JSON value.
+
+4. **Emergency-access email** (`notifyEmergencyAccess`):
+   - Sent to the patient's registered address when break-glass is used, naming the clinician, their role and SANC/HPCSA number, the time, when access ends, and a link to the access log.
+   - It deliberately leaves out the written justification.
+   - Best-effort and sent after the grant: the grant, the audit entry and the in-app access log don't depend on it.
+   - Tested in `careAccess.integration.test.ts`.
+
+5. **Found along the way: hard-coded admin credentials.** `scripts/manage-admin.ts` fell back to a real-looking admin email and password committed to the repository.
+   - Removed. The script now needs both values supplied, and gained `--reset-2fa` for when the only admin loses their device.
+   - **The password stays in git history, so it must be treated as public and rotated** (runbook §0).
+   - The demo-patient seed scripts still have fallback passwords (`MockPatient1!`, `SyntheaPatient1!`). Those are for generated test data, but they should never be run against production.
+
+The sidebar and profile page wording for 2FA changed to match: "required for your role" and no "Turn off" button for staff.
+
+Totals after this change: backend integration 18 suites / 190 tests, unit 22 suites / 194, ML service pytest 27, frontend 12. `tsc` is clean on backend and web.
+

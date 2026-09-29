@@ -1,5 +1,6 @@
 /**
- * Opt-in TOTP two-factor auth (AH-29).
+ * TOTP two-factor auth (AH-29). Optional for patients; mandatory for
+ * nurses, doctors and admins (services/mfaPolicy.ts, ENGINEERING_PLAN §39).
  *
  * Setup flow: POST /setup generates and stores an (unverified) secret ->
  * POST /verify-setup proves possession of it and flips totpEnabled on,
@@ -17,6 +18,7 @@ import Joi from "joi";
 import { authMiddleware, AuthenticatedRequest, invalidateCachedUser } from "../middleware/auth";
 import { authRateLimiter } from "../middleware/rateLimiter";
 import prisma from "../lib/prisma";
+import { isMfaRequired } from "../services/mfaPolicy";
 import { getRedis } from "../services/redis";
 import { verifyToken, TokenTypeError } from "../services/tokens";
 import { setAuthCookies } from "../services/authSession";
@@ -169,6 +171,12 @@ router.post("/disable", authMiddleware, authRateLimiter, async (req: Authenticat
       code: Joi.alternatives().try(codeSchema, backupCodeSchema).required(),
     }).validate(req.body);
     if (error) return res.status(400).json({ error: error.details[0].message });
+
+    // Mandatory for staff: they can't switch it off. A lost authenticator
+    // is reset by another admin (POST /admin/users/:id/2fa/reset).
+    if (isMfaRequired(req.user!.role)) {
+      return res.status(403).json({ error: "Two-factor authentication is required for your role and can't be turned off. Ask an administrator if you've lost your authenticator.", code: "MFA_REQUIRED" });
+    }
 
     const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
     if (!user || !user.passwordHash || !user.totpEnabled || !user.totpSecret) {

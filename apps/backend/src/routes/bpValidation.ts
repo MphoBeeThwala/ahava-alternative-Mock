@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { AuthenticatedRequest, requireAdmin } from '../middleware/auth';
 import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 import crypto from 'crypto';
+import { getPseudonymKey } from '../utils/encryption';
 import prisma from '../lib/prisma';
 
 // Retrospective validation for AH-45.5a's bp_risk.prompt_bp_check flag —
@@ -13,8 +14,7 @@ import prisma from '../lib/prisma';
 // population-level research/QA data, not a single patient's clinical
 // record, and doesn't belong on the doctor monitoring worklist (#30).
 function pseudonymousRef(userId: string): string {
-  const key = process.env.PSEUDONYM_KEY || process.env.ENCRYPTION_KEY || '';
-  return crypto.createHmac('sha256', key).update(`bp-validation:${userId}`).digest('hex').slice(0, 16);
+  return crypto.createHmac('sha256', getPseudonymKey()).update(`bp-validation:${userId}`).digest('hex').slice(0, 16);
 }
 
 const router: Router = Router();

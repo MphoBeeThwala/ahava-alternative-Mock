@@ -137,6 +137,15 @@ def ensure_schema() -> None:
     conn = _get_conn()
     try:
         with conn.cursor() as cur:
+            # The service normally runs as a least-privilege role that cannot
+            # run DDL (apps/backend/src/scripts/ml-db-role.ts, which also
+            # creates this table as the database owner). If the table is
+            # already there, there is nothing to create — don't attempt DDL.
+            cur.execute("SELECT to_regclass('public.biometric_time_series') IS NOT NULL")
+            if bool(cur.fetchone()[0]):
+                logger.info("[db] biometric_time_series present; skipping schema setup")
+                return
+
             if _timescale_mode == "off":
                 cur.execute(PLAIN_TABLE_SQL)
                 conn.commit()

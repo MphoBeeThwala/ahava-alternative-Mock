@@ -729,7 +729,7 @@ export default function ProfilePage() {
               )}
             </form>
 
-            {user && <TwoFactorSettings initiallyEnabled={!!user.totpEnabled} />}
+            {user && <TwoFactorSettings initiallyEnabled={!!user.totpEnabled} required={['NURSE', 'DOCTOR', 'ADMIN'].includes(user.role)} />}
           </div>
         </div>
       </DashboardLayout>

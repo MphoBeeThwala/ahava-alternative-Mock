@@ -49,6 +49,7 @@ import { initializeQueue, closeQueues } from "./services/queue";
 import { getWebSocketRedisHealth, initializeWebSocket } from "./services/websocket";
 import prisma from "./lib/prisma";
 import { assertEncryptionKeyConfigured } from "./utils/encryption";
+import { loadEncryptionKeys } from "./lib/keyManagement";
 
 const app: Application = express();
 const server = createServer(app);
@@ -301,6 +302,12 @@ async function startServer() {
   if (process.env.NODE_ENV === "production" && jwtSecret.length < 32) {
     throw new Error("JWT_SECRET must be at least 32 characters in production");
   }
+
+  // Resolve the data key first: from AWS KMS when ENCRYPTION_KEY_PROVIDER=
+  // aws-kms (the plaintext key never exists outside this process's memory),
+  // otherwise from ENCRYPTION_KEY. Throws — so the service doesn't start —
+  // if KMS is configured but can't unwrap the key. lib/keyManagement.ts.
+  await loadEncryptionKeys();
 
   // Fail here rather than partway through a booking. ENCRYPTION_KEY was only
   // read the first time something was encrypted, so a bad key let the service

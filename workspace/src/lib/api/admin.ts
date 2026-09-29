@@ -48,6 +48,10 @@ export const adminApi = {
     const res = await apiClient.get('/admin/users');
     return res.data.users || [];
   },
+  resetTwoFactor: async (userId: string, reason: string) => {
+    const res = await apiClient.post(`/admin/users/${userId}/2fa/reset`, { reason });
+    return res.data;
+  },
   updateUserStatus: async (userId: string, isActive: boolean) => {
     const res = await apiClient.patch(`/admin/users/${userId}`, { isActive });
     return res.data;

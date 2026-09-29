@@ -5,7 +5,17 @@ import { authApi } from '../lib/api';
 
 // AH-29: opt-in TOTP two-factor auth. Any authenticated user can turn this
 // on for their own account; it is not mandatory for any role.
-export default function TwoFactorSettings({ initiallyEnabled }: { initiallyEnabled: boolean }) {
+export default function TwoFactorSettings({
+  initiallyEnabled,
+  required = false,
+  onEnabled,
+}: {
+  initiallyEnabled: boolean;
+  /** Mandatory for this account (staff): no "turn off", different wording. */
+  required?: boolean;
+  /** Called once the user has seen their backup codes and pressed Done. */
+  onEnabled?: () => void;
+}) {
   const [enabled, setEnabled] = useState(initiallyEnabled);
   const [step, setStep] = useState<'idle' | 'setup' | 'backup-codes' | 'disable'>('idle');
   const [secret, setSecret] = useState('');
@@ -91,7 +101,10 @@ export default function TwoFactorSettings({ initiallyEnabled }: { initiallyEnabl
         Two-factor authentication
       </h3>
       <p style={{ fontSize: 13, color: '#78716c', marginBottom: 16 }}>
-        Adds a second step at login using an authenticator app (Google Authenticator, Authy, etc.). Optional — you can turn it off any time.
+        Adds a second step at login using an authenticator app (Google Authenticator, Authy, etc.).
+        {required
+          ? ' Required for nurse, doctor and administrator accounts. If you lose your phone, an administrator can reset it.'
+          : ' Optional — you can turn it off any time.'}
       </p>
 
       {error && (
@@ -104,7 +117,7 @@ export default function TwoFactorSettings({ initiallyEnabled }: { initiallyEnabl
         enabled ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <span style={{ background: '#dcfce7', color: '#166534', fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 99 }}>Enabled</span>
-            <button type="button" style={secondaryBtn} onClick={() => setStep('disable')}>Turn off</button>
+            {!required && <button type="button" style={secondaryBtn} onClick={() => setStep('disable')}>Turn off</button>}
           </div>
         ) : (
           <button type="button" style={primaryBtn} disabled={busy} onClick={startSetup}>
@@ -150,7 +163,7 @@ export default function TwoFactorSettings({ initiallyEnabled }: { initiallyEnabl
               <div key={c} style={{ background: '#fafaf9', border: '1px solid #e7e5e4', borderRadius: 6, padding: '8px 10px', textAlign: 'center' }}>{c}</div>
             ))}
           </div>
-          <button type="button" style={primaryBtn} onClick={() => { setStep('idle'); setBackupCodes([]); }}>
+          <button type="button" style={primaryBtn} onClick={() => { setStep('idle'); setBackupCodes([]); onEnabled?.(); }}>
             Done
           </button>
         </div>

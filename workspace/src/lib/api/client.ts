@@ -16,6 +16,9 @@ function isRefreshExcludedRequest(url?: string): boolean {
   ].some((path) => url.includes(path));
 }
 
+export const MFA_ENROLLMENT_REQUIRED_CODE = 'MFA_ENROLLMENT_REQUIRED';
+export const TWO_FACTOR_SETUP_PATH = '/security/two-factor';
+
 export const COOKIE_AUTH_HEADERS = {
   'X-Ahava-Auth-Mode': 'cookie',
 } as const;
@@ -86,6 +89,19 @@ apiClient.interceptors.response.use(
     const isBootstrapMeRequest = requestUrl.includes('/auth/me');
     const hasCachedUser =
       typeof window !== 'undefined' && Boolean(localStorage.getItem('user'));
+
+    // Staff accounts must have two-factor authentication (backend
+    // services/mfaPolicy.ts). Until they do, every other call is refused with
+    // this code, so send them to set it up.
+    if (
+      error.response?.status === 403 &&
+      error.response?.data?.code === MFA_ENROLLMENT_REQUIRED_CODE &&
+      typeof window !== 'undefined' &&
+      window.location.pathname !== TWO_FACTOR_SETUP_PATH
+    ) {
+      window.location.assign(TWO_FACTOR_SETUP_PATH);
+      return Promise.reject(error);
+    }
 
     if (error.response?.status === 401 && originalRequest && !originalRequest._retry && typeof window !== 'undefined') {
       if (isRefreshExcludedRequest(requestUrl)) {

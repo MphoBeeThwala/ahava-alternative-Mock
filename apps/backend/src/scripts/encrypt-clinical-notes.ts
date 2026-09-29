@@ -14,6 +14,7 @@ import {
   ENCRYPTED_CLINICAL_FIELDS, encryptClinicalJson, encryptClinicalText,
 } from '../lib/clinicalFieldEncryption';
 import { assertEncryptionKeyConfigured, isEncryptedPayload } from '../utils/encryption';
+import { loadEncryptionKeys } from '../lib/keyManagement';
 
 // Fixed mapping (schema.prisma @@map) — never built from input.
 const TABLES: Record<string, string> = {
@@ -29,6 +30,7 @@ const isEncryptedJson = (v: unknown) =>
 
 async function main() {
   const apply = process.argv.includes('--apply');
+  await loadEncryptionKeys(); // same key source as the API (env or AWS KMS)
   assertEncryptionKeyConfigured();
   // The plain client, so we see what's really stored (the app's client
   // would hand back decrypted values).
