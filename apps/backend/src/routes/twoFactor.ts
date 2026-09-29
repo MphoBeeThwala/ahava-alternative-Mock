@@ -106,11 +106,27 @@ router.post("/setup", authMiddleware, authRateLimiter, async (req: Authenticated
       return res.status(409).json({ error: "Two-factor authentication is already enabled" });
     }
 
-    const secret = generateTotpSecret();
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { totpSecret: encryptTotpSecret(secret, user.id) },
-    });
+    // Keep the same pending key until setup is confirmed. This used to mint
+    // a new key on every call, so opening setup twice (or cancelling and
+    // retrying) left the authenticator app holding a key the server had
+    // already thrown away — and every code was then "Invalid". A fresh key
+    // only on explicit request (e.g. the key was exposed).
+    const regenerate = req.body?.regenerate === true;
+    let secret: string | null = null;
+    if (user.totpSecret && !regenerate) {
+      try {
+        secret = decryptTotpSecret(user.totpSecret, user.id);
+      } catch {
+        secret = null; // unreadable (e.g. key rotation) — issue a new one
+      }
+    }
+    if (!secret) {
+      secret = generateTotpSecret();
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { totpSecret: encryptTotpSecret(secret, user.id) },
+      });
+    }
 
     res.json({
       success: true,

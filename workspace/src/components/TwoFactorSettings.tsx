@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import QRCode from 'qrcode';
 import { authApi } from '../lib/api';
 
-// AH-29: opt-in TOTP two-factor auth. Any authenticated user can turn this
-// on for their own account; it is not mandatory for any role.
+// AH-29: TOTP two-factor auth. Optional for patients; mandatory for
+// nurses, doctors and admins (`required`), who can't turn it off.
 export default function TwoFactorSettings({
   initiallyEnabled,
   required = false,
@@ -45,11 +46,35 @@ export default function TwoFactorSettings({
     borderRadius: 8, padding: '10px 18px', fontSize: 14, fontWeight: 600, cursor: 'pointer',
   };
 
-  const startSetup = async () => {
+  // QR image made in the browser from the otpauth:// link — the key never
+  // goes to a third-party QR service.
+  const [qrDataUrl, setQrDataUrl] = useState('');
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!otpauthUrl) { setQrDataUrl(''); return; }
+    let cancelled = false;
+    QRCode.toDataURL(otpauthUrl, { margin: 1, width: 200, errorCorrectionLevel: 'M' })
+      .then((url) => { if (!cancelled) setQrDataUrl(url); })
+      .catch(() => { if (!cancelled) setQrDataUrl(''); });
+    return () => { cancelled = true; };
+  }, [otpauthUrl]);
+
+  const groupedSecret = secret.replace(/(.{4})/g, '$1 ').trim();
+
+  const copySecret = async () => {
+    try {
+      await navigator.clipboard.writeText(secret);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch { /* clipboard blocked — the key is still shown to type */ }
+  };
+
+  const startSetup = async (regenerate = false) => {
     setError('');
+    setCode('');
     setBusy(true);
     try {
-      const res = await authApi.setupTwoFactor();
+      const res = await authApi.setupTwoFactor(regenerate);
       setSecret(res.secret);
       setOtpauthUrl(res.otpauthUrl);
       setStep('setup');
@@ -65,14 +90,17 @@ export default function TwoFactorSettings({
     setError('');
     setBusy(true);
     try {
-      const res = await authApi.verifyTwoFactorSetup(code.trim());
+      const res = await authApi.verifyTwoFactorSetup(code.replace(/\s/g, ''));
       setBackupCodes(res.backupCodes);
       setEnabled(true);
       setStep('backup-codes');
       setCode('');
     } catch (err: unknown) {
       const e = err as { response?: { data?: { error?: string } } };
-      setError(e.response?.data?.error || 'Invalid code');
+      const msg = e.response?.data?.error || 'Invalid code';
+      setError(msg === 'Invalid code'
+        ? 'That code wasn\u2019t accepted. Check you\u2019re reading the code under \u201cAhava Healthcare\u201d for this account. If you added this account to your app more than once, use \u201cGet a new key\u201d below.'
+        : msg);
     } finally {
       setBusy(false);
     }
@@ -120,7 +148,7 @@ export default function TwoFactorSettings({
             {!required && <button type="button" style={secondaryBtn} onClick={() => setStep('disable')}>Turn off</button>}
           </div>
         ) : (
-          <button type="button" style={primaryBtn} disabled={busy} onClick={startSetup}>
+          <button type="button" style={primaryBtn} disabled={busy} onClick={() => startSetup()}>
             {busy ? 'Starting…' : 'Set up two-factor authentication'}
           </button>
         )
@@ -128,28 +156,53 @@ export default function TwoFactorSettings({
 
       {step === 'setup' && (
         <div>
-          <p style={{ fontSize: 13, color: '#44403c', marginBottom: 10 }}>
-            Scan this with your authenticator app, or enter the key manually, then confirm the 6-digit code it shows.
-          </p>
-          <div style={{ background: '#fafaf9', border: '1px solid #e7e5e4', borderRadius: 8, padding: 12, marginBottom: 12, fontFamily: 'monospace', fontSize: 13, wordBreak: 'break-all' }}>
-            {secret}
+          <ol style={{ fontSize: 13, color: '#44403c', margin: '0 0 12px', paddingLeft: 18, lineHeight: 1.6 }}>
+            <li>Open your authenticator app (e.g. Google Authenticator) and tap <strong>+</strong>.</li>
+            <li>Choose <strong>Scan a QR code</strong> and scan the code below — or choose <strong>Enter a setup key</strong>, type the key, and pick <strong>Time based</strong>.</li>
+            <li>Enter the 6-digit code the app shows for <strong>Ahava Healthcare</strong>.</li>
+          </ol>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center', marginBottom: 14 }}>
+            <div style={{ width: 200, height: 200, border: '1px solid #e7e5e4', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'white' }}>
+              {qrDataUrl
+                // A data: URL made in the browser; next/image adds nothing here.
+                // eslint-disable-next-line @next/next/no-img-element
+                ? <img src={qrDataUrl} alt="QR code to add Ahava Healthcare to your authenticator app" width={200} height={200} style={{ borderRadius: 8 }} />
+                : <span style={{ fontSize: 12, color: '#a8a29e' }}>Preparing QR code…</span>}
+            </div>
+            <div style={{ minWidth: 200 }}>
+              <p style={{ fontSize: 12, color: '#78716c', margin: '0 0 4px' }}>Setup key (if you can&apos;t scan)</p>
+              <div style={{ background: '#fafaf9', border: '1px solid #e7e5e4', borderRadius: 8, padding: '10px 12px', fontFamily: 'monospace', fontSize: 15, letterSpacing: 1, marginBottom: 6 }}>
+                {groupedSecret}
+              </div>
+              <button type="button" style={{ ...secondaryBtn, padding: '6px 12px', fontSize: 12 }} onClick={copySecret}>
+                {copied ? 'Copied' : 'Copy key'}
+              </button>
+              <p style={{ fontSize: 12, color: '#78716c', margin: '8px 0 0' }}>
+                On this phone? <a href={otpauthUrl} style={{ color: '#0d9488' }}>Open in authenticator app</a>
+              </p>
+            </div>
           </div>
-          <p style={{ fontSize: 11, color: '#a8a29e', marginBottom: 14 }}>
-            <a href={otpauthUrl} style={{ color: '#0d9488' }}>{otpauthUrl}</a>
-          </p>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14 }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
             <input
-              type="text" inputMode="numeric" placeholder="123456" value={code}
-              onChange={(e) => setCode(e.target.value)}
+              type="text" inputMode="numeric" autoComplete="one-time-code" placeholder="123456" value={code}
+              maxLength={7}
+              onChange={(e) => setCode(e.target.value.replace(/[^0-9 ]/g, ''))}
               style={{ ...inputStyle, maxWidth: 140, letterSpacing: 3, textAlign: 'center' }}
             />
-            <button type="button" style={primaryBtn} disabled={busy || code.trim().length === 0} onClick={confirmSetup}>
+            <button type="button" style={primaryBtn} disabled={busy || code.replace(/\s/g, '').length !== 6} onClick={confirmSetup}>
               {busy ? 'Verifying…' : 'Confirm'}
             </button>
             <button type="button" style={secondaryBtn} onClick={() => { setStep('idle'); setCode(''); setError(''); }}>
               Cancel
             </button>
           </div>
+          <p style={{ fontSize: 12, color: '#78716c', margin: 0 }}>
+            Codes not accepted? Delete any existing &ldquo;Ahava Healthcare&rdquo; entries from your app, then{' '}
+            <button type="button" onClick={() => startSetup(true)} disabled={busy}
+              style={{ background: 'none', border: 'none', padding: 0, color: '#0d9488', fontSize: 12, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}>
+              get a new key
+            </button>{' '}and add it once.
+          </p>
         </div>
       )}
 
