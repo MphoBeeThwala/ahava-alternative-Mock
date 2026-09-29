@@ -19,6 +19,7 @@ import { authMiddleware, AuthenticatedRequest, invalidateCachedUser } from "../m
 import { authRateLimiter } from "../middleware/rateLimiter";
 import prisma from "../lib/prisma";
 import { isMfaRequired } from "../services/mfaPolicy";
+import { auditSignIn } from "../services/signInAudit";
 import { getRedis } from "../services/redis";
 import { verifyToken, TokenTypeError } from "../services/tokens";
 import { setAuthCookies } from "../services/authSession";
@@ -252,6 +253,7 @@ router.post("/login-verify", authRateLimiter, async (req, res, next) => {
       const backupResult = await consumeBackupCode(value.code, user.totpBackupCodes);
       if (!backupResult.matched) {
         await recordLoginVerifyFailure(userId);
+        await auditSignIn(req, "LOGIN_2FA_FAILED", user);
         return res.status(401).json({ error: "Invalid code" });
       }
       remainingBackupCodes = backupResult.remaining;
@@ -266,6 +268,7 @@ router.post("/login-verify", authRateLimiter, async (req, res, next) => {
     }
 
     const { accessToken, refreshToken } = await generateTokens(user.id, user.role);
+    await auditSignIn(req, "LOGIN_SUCCESS", user, { method: remainingBackupCodes ? "password+backup_code" : "password+totp" });
     setAuthCookies(res, req, { accessToken, refreshToken });
 
     res.json({

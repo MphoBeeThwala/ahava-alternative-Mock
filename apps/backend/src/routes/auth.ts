@@ -13,6 +13,7 @@ import { verifySancRegistration } from "../services/sancVerification";
 import { seedBaselineForUser } from "../services/baselineSeed";
 import { addEmailJob } from "../services/queue";
 import { isMfaRequired } from "../services/mfaPolicy";
+import { auditSignIn } from "../services/signInAudit";
 import prisma, { TransactionClient } from "../lib/prisma";
 import { getRedis } from "../services/redis";
 import {
@@ -494,6 +495,7 @@ router.post("/login", authRateLimiter, async (req, res, next) => {
     if (!user || !user.passwordHash) {
       // Still record attempt to prevent email enumeration timing attacks
       await recordFailedAttempt(email);
+      await auditSignIn(req, "LOGIN_FAILED", null, { email, reason: "unknown_account" });
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
@@ -501,10 +503,12 @@ router.post("/login", authRateLimiter, async (req, res, next) => {
     const isValidPassword = await bcrypt.compare(password, user.passwordHash);
     if (!isValidPassword) {
       await recordFailedAttempt(email);
+      await auditSignIn(req, "LOGIN_FAILED", user, { reason: "bad_password" });
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
     if (!user.isActive) {
+      await auditSignIn(req, "LOGIN_FAILED", user, { reason: "deactivated" });
       return res.status(401).json({ error: "Account is deactivated" });
     }
 
@@ -517,6 +521,7 @@ router.post("/login", authRateLimiter, async (req, res, next) => {
     // POST /auth/2fa/login-verify with a TOTP or backup code before any
     // cookies are set.
     if (user.totpEnabled) {
+      await auditSignIn(req, "LOGIN_2FA_PENDING", user);
       const pendingToken = signToken(
         { userId: user.id, role: user.role, typ: "twofa_pending" },
         { expiresInSeconds: TWOFA_PENDING_TTL_SECONDS },
@@ -533,6 +538,7 @@ router.post("/login", authRateLimiter, async (req, res, next) => {
       user.id,
       user.role,
     );
+    await auditSignIn(req, "LOGIN_SUCCESS", user, { method: "password" });
 
     setAuthCookies(res, req, { accessToken, refreshToken });
 

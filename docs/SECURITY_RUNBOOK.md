@@ -36,18 +36,62 @@ Every command below passes it as both `DATABASE_URL` and `POOLED_DATABASE_URL`, 
 
 ## 0. Before anything else: the leaked admin password
 
-Until this change, `apps/backend/src/scripts/manage-admin.ts` contained a fallback admin email (`healthsysadmin@ahavaon88.co.za`) and password, committed to the repository. The fallback is gone now, but **it stays in git history forever**, so treat that password as public:
+**Status: a real production admin credential was exposed publicly.**
+- `apps/backend/src/scripts/manage-admin.ts` contained the password of the real admin account `healthsysadmin@ahavaon88.co.za` as a fallback value.
+- It was committed on **2026-09-08** (merge of PR #21), and the GitHub repository is **public**. Anyone on the internet could have read it from then until the password is changed.
+- Admins could read clinical records until the access-control change in `ENGINEERING_PLAN.md` §38. So if someone else used that login, patient data may have been viewed.
+- The fallback is removed from the current code, but it stays in git history and in any copies or forks already made. Treat the password as permanently public.
 
-1. If that password is, or ever was, used for any account, change it now: in the app, or with the recovery command below.
-2. If it's reused anywhere else (email, Railway, AWS, a password manager), change it there too.
-3. Check the audit log for admin sign-ins you don't recognise.
+Do these in order.
+
+**1. Change the password now**, and use it nowhere else. If it's reused on email, Railway, AWS, GitHub or a password manager, change it there too.
 
 ```bash
-# Recovery: set a new password for an admin account (signs out all their sessions)
-ADMIN_EMAIL='healthsysadmin@ahavaon88.co.za' ADMIN_PASSWORD='<new long password>' \
+ADMIN_EMAIL='healthsysadmin@ahavaon88.co.za' ADMIN_PASSWORD='<new long unique password>' \
   DATABASE_URL="$DB_PUBLIC" POOLED_DATABASE_URL="$DB_PUBLIC" \
   pnpm --filter backend exec tsx src/scripts/manage-admin.ts
 ```
+
+This also signs out every session on that account. Once the 2FA change is deployed, the account must also set up two-factor authentication at its next sign-in, which closes this route even if the new password ever leaks.
+
+**2. Check whether anyone else used the account.** Sign-ins themselves weren't audited before today (they are now), but every action a session took was, with its IP address and browser:
+
+```bash
+psql "$DB_PUBLIC"
+```
+```sql
+-- 1. Where admin accounts were used from since the password was published
+SELECT u.email,
+       a.metadata->>'ipAddress'           AS ip,
+       left(a.metadata->>'userAgent', 60) AS device,
+       min(a."createdAt") AS first_seen,
+       max(a."createdAt") AS last_seen,
+       count(*)           AS actions
+FROM audit_logs a
+JOIN users u ON u.id = a."userId"
+WHERE u.role = 'ADMIN' AND a."createdAt" >= '2026-09-08'
+GROUP BY 1, 2, 3
+ORDER BY first_seen;
+
+-- 2. Patient data admin accounts read or changed in that period
+SELECT a."createdAt", u.email, a.action, a.resource, a."resourceId",
+       a.metadata->>'patientId' AS patient_id,
+       a.metadata->>'ipAddress' AS ip
+FROM audit_logs a
+JOIN users u ON u.id = a."userId"
+WHERE u.role = 'ADMIN' AND a."createdAt" >= '2026-09-08'
+  AND a.resource IN ('Visit', 'Booking', 'TriageCase', 'TriageCaseReview', 'Message',
+                     'BiometricReading', 'Prescription', 'Referral', 'Nurse', 'Patient', 'PatientRecord')
+ORDER BY a."createdAt";
+```
+
+In query 1, look for IP addresses or devices you and your team don't recognise. Query 2 lists any patient data admin accounts touched in that period.
+
+**3. If you find use you can't account for,** hand it to your legal officer / Information Officer. Under POPIA section 22, a security compromise where there are reasonable grounds to believe personal information was accessed by an unauthorised person must be reported to the Information Regulator and to the affected patients, as soon as reasonably possible. Query 2 identifies which patients. Keep the query output as evidence.
+
+**4. Decide whether to purge it from git history.** Rewriting history (for example with `git filter-repo`, then force-pushing every branch) removes the string from the repository going forward. It does **not** un-publish it: clones, forks and caches may already hold it. Changing the password (step 1) is what actually protects you. A rewrite also disrupts everyone's local copies, so plan it rather than doing it in a hurry.
+
+**5. Consider making the repository private.** The code needn't be public for Railway to deploy it. Settings → General → Danger Zone → Change visibility.
 
 ---
 
@@ -159,14 +203,40 @@ The API refuses to start while a plaintext key is still set alongside `aws-kms`.
 
 If it fails, the API doesn't start. Put `ENCRYPTION_KEY` back and set `ENCRYPTION_KEY_PROVIDER=env` to roll back, then fix and retry.
 
-### Step 6: decide about a sealed backup of the data key
+### Step 6: split-custody escrow copy of the data key (decided 2026-09-29)
 
-If the KMS key is ever deleted, every encrypted record is gone for good. AWS makes you wait 7–30 days before deletion; set it to 30. You can also keep one **offline, sealed copy** of the plaintext data key: for example in a password-manager vault that needs two people to open, or printed and kept in a safe.
+If the KMS key or the AWS account were ever lost, every encrypted record would be gone for good. AWS makes you wait 7–30 days before deleting a key; set that to 30. As a further safeguard you've chosen to keep a vault copy of the data key.
 
-- **With a sealed copy:** you can recover from a lost AWS account, but the copy has to be protected like the data itself.
-- **Without one:** you rely entirely on AWS KMS durability and your AWS account's security.
+Keep it under **split custody**:
+- The key is split into two shares. Each share alone is indistinguishable from random noise and reveals nothing about the key.
+- Two different named people (custodians) each keep one share in their own password-manager vault.
+- Rebuilding the key always needs both of them, so no single person, and no single compromised vault, holds the key.
 
-This is a business decision. Record whichever you choose, and who holds it.
+**Create the shares** at the same sitting as step 4, from the same current key, on the same trusted machine:
+
+```bash
+export ENCRYPTION_KEY='<current key>'
+pnpm --filter backend key-escrow split
+unset ENCRYPTION_KEY; clear; history -c
+```
+
+It prints a **fingerprint** and two lines starting `ahava-key-share-v1:1:` and `ahava-key-share-v1:2:`.
+- Custodian 1 saves share 1 in their own vault; custodian 2 saves share 2 in theirs. Never put both shares in the same vault, email or chat.
+- Both custodians record the fingerprint next to their share. It isn't secret: it's how you'll confirm a rebuilt key is the right one.
+- Write down who the two custodians are, and replace a share (re-run `split`, both custodians update their vaults) whenever a custodian leaves.
+
+**Check the shares once a year.** Both custodians run `combine` together, check the fingerprint matches, then clear the terminal. That catches a lost or corrupted share before you ever need it.
+
+**To recover** (only if KMS or the AWS account is unavailable), both custodians together:
+
+```bash
+ESCROW_SHARE_1='<share 1>' ESCROW_SHARE_2='<share 2>' pnpm --filter backend key-escrow combine
+```
+
+1. Confirm the printed fingerprint matches the recorded one.
+2. Put the printed `ENCRYPTION_KEY` into Railway with `ENCRYPTION_KEY_PROVIDER=env` to restore service.
+3. Then re-wrap it under a new KMS key (steps 2–5).
+4. Record the recovery as an incident: who, when, why.
 
 ### Ongoing
 
@@ -273,4 +343,4 @@ Without `RESEND_API_KEY` the email is skipped, and the access still shows in the
 3. **Each admin signs in and sets up 2FA first.** Then verify staff SANC/HPCSA registrations in the admin dashboard; unverified clinicians can't reach patient data.
 4. Run the notes backfill (section 4).
 5. Create the ML login and switch the ML service over (section 2).
-6. Move the key into KMS (section 1). You can do this independently of the steps above, in a quiet period.
+6. Move the key into KMS and create the two escrow shares at the same sitting (section 1, steps 4–6). You can do this independently of the steps above, in a quiet period.

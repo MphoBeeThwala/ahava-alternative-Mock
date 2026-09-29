@@ -2889,3 +2889,36 @@ The sidebar and profile page wording for 2FA changed to match: "required for you
 
 Totals after this change: backend integration 18 suites / 190 tests, unit 22 suites / 194, ML service pytest 27, frontend 12. `tsc` is clean on backend and web.
 
+## 40. The admin credential leak is real; sign-in auditing; split-custody key escrow, 2026-09-29
+
+**The leak is a real incident.** The owner confirmed that the credential removed from `scripts/manage-admin.ts` in §39 (admin account `healthsysadmin@ahavaon88.co.za`) is the real production admin account. It was committed on 2026-09-08 (merge of PR #21) to a **public** repository, and until §38 admins could read clinical records.
+
+A scan of the whole git history (all branches) for other secrets found none:
+- no committed `.env` files
+- no production database URLs or Railway hosts with credentials
+- no API keys, private keys, or real-looking JWT or encryption keys
+- no other hard-coded password fallbacks outside the demo-data seed scripts
+
+Every database URL in the repo is a local-development placeholder.
+
+The response steps are in `docs/SECURITY_RUNBOOK.md` §0:
+- rotate the password
+- review admin activity since 2026-09-08 by IP and device, and any patient data admins touched, with two SQL queries tested against the schema
+- POPIA s22 notification if unexplained use is found, a decision for the legal officer
+- optionally purge the value from git history (it doesn't un-publish it) and make the repository private
+
+**Sign-ins are now audited** (`services/signInAudit.ts`). Before this, only actions taken by a session were logged, never the sign-in itself. Now each of these is recorded with IP address and user agent:
+- `LOGIN_FAILED`: unknown account (email stored only as a SHA-256 hash), bad password, or deactivated account
+- `LOGIN_2FA_PENDING`
+- `LOGIN_2FA_FAILED`
+- `LOGIN_SUCCESS`, with the method used: password, password+totp, or password+backup_code
+
+Tested in `mfaPolicy.integration.test.ts`.
+
+**Split-custody escrow of the data key** (`scripts/key-escrow.ts`). The owner chose to keep a vault copy of the data key alongside KMS.
+- It's kept as two XOR shares (share 1 random, share 2 = key XOR share 1) held by two custodians in separate vaults. Either share alone reveals nothing, and rebuilding the key needs both.
+- A fingerprint (the first 16 hex characters of SHA-256 of the key) confirms a rebuilt key without anyone writing it down.
+- Shares carry a version prefix and share number, so a swapped, foreign or truncated share is rejected.
+- `key-escrow.test.ts`: 4 cases.
+- Procedure, yearly check and recovery are in runbook §1 step 6.
+

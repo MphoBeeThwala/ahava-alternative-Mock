@@ -77,6 +77,24 @@ describe("mandatory two-factor authentication for staff", () => {
     expect(login.headers["set-cookie"]).toBeUndefined();
   });
 
+  it("records sign-ins in the audit log: failures, the 2FA step, and success", async () => {
+    const doctor = await register("DOCTOR", "mfa-audit-doctor");
+    const secret = await enrol(doctor.agent);
+
+    await request(app).post("/api/v1/auth/login").send({ email: doctor.email, password: "Wrong!Passw0rd" });
+    const step1 = await request(app).post("/api/v1/auth/login").send({ email: doctor.email, password: STRONG_PASSWORD });
+    await request(app).post("/api/v1/auth/2fa/login-verify").send({ pendingToken: step1.body.pendingToken, code: authenticator.generate(secret) });
+    await request(app).post("/api/v1/auth/login").send({ email: `nobody-${Date.now()}@example.test`, password: STRONG_PASSWORD });
+
+    const events = await prisma.auditLog.findMany({ where: { userId: doctor.userId, resource: "Auth" }, orderBy: { createdAt: "asc" } });
+    expect(events.map((e) => e.action)).toEqual(["LOGIN_FAILED", "LOGIN_2FA_PENDING", "LOGIN_SUCCESS"]);
+    expect((events[2].metadata as any).method).toBe("password+totp");
+    expect((events[2].metadata as any).ipAddress).toBeDefined();
+    const unknown = await prisma.auditLog.findFirst({ where: { resource: "Auth", action: "LOGIN_FAILED", userId: null }, orderBy: { createdAt: "desc" } });
+    expect((unknown!.metadata as any).emailHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(unknown!.metadata)).not.toContain("nobody-");
+  });
+
   it("does not let staff turn 2FA off", async () => {
     const nurse = await register("NURSE", "mfa-disable-nurse");
     const secret = await enrol(nurse.agent);
