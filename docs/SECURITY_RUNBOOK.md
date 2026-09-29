@@ -54,6 +54,12 @@ ADMIN_EMAIL='healthsysadmin@ahavaon88.co.za' ADMIN_PASSWORD='<new long unique pa
 
 This also signs out every session on that account. Once the 2FA change is deployed, the account must also set up two-factor authentication at its next sign-in, which closes this route even if the new password ever leaks.
 
+The app itself had no way to change a password until PR #30. The only route was "Forgot password?", which emails a reset link, and **that reset didn't sign out existing sessions**, so anyone already signed in with the leaked password would have stayed signed in. Until PR #30 is deployed, **use the command above**: it does sign everyone out.
+
+Once it's deployed:
+- There's a **Profile → Password → Change password** option. It's also on the "Secure your account" page staff see before setting up 2FA.
+- Changing or resetting a password signs out every other device, is recorded in the audit log, and emails the account holder.
+
 **2. Check whether anyone else used the account.** Sign-ins themselves weren't audited before today (they are now), but every action a session took was, with its IP address and browser:
 
 ```bash

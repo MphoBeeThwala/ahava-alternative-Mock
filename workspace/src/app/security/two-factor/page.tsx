@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import TwoFactorSettings from "../../../components/TwoFactorSettings";
+import ChangePasswordSettings from "../../../components/ChangePasswordSettings";
 import { authApi } from "../../../lib/api";
 import { useAuth } from "../../../contexts/AuthContext";
 
@@ -60,6 +61,8 @@ export default function TwoFactorSetupPage() {
         ) : (
           <TwoFactorSettings initiallyEnabled={false} required onEnabled={goToDashboard} />
         )}
+        {/* If the password may be known to someone else, replace it here too. */}
+        <ChangePasswordSettings />
         <button onClick={() => logout()} className="text-sm text-[var(--muted)] hover:underline">
           Sign out
         </button>

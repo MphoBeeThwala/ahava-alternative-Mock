@@ -2922,3 +2922,12 @@ Tested in `mfaPolicy.integration.test.ts`.
 - `key-escrow.test.ts`: 4 cases.
 - Procedure, yearly check and recovery are in runbook §1 step 6.
 
+**Follow-up: changing a password (same day).** The owner found there was no way to change a password from inside the app, only the "Forgot password?" email.
+- New `POST /auth/change-password`: needs the current password and the same complexity rules as signup, and rejects reusing the current password. It is reachable during forced 2FA enrolment, so a staff member can replace a suspected-leaked password straight away.
+- On a change, every other session is signed out (`services/sessions.ts`, database and Redis) while this device gets fresh tokens.
+- `PASSWORD_CHANGED` / `PASSWORD_CHANGE_FAILED` are audited, and the account holder is emailed.
+- The emailed reset (`/auth/reset-password`) now also signs out every session. It used to leave them all running, so resetting a leaked password didn't evict whoever was using it. It is also audited (`PASSWORD_RESET`) and sends the same email.
+- The admin 2FA reset and `manage-admin.ts` use the same sign-out helper.
+- UI: a "Password" card on the profile page, and on `/security/two-factor`.
+- Tests: `password.integration.test.ts` (3 cases), which checks that the other device's session renewal is refused after a change or reset.
+

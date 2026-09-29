@@ -15,6 +15,7 @@ import * as bcrypt from '@node-rs/bcrypt';
 import 'dotenv/config';
 import prisma from '../lib/prisma';
 import { writeRequestAudit } from '../services/clinicalAudit';
+import { revokeAllSessions } from '../services/sessions';
 
 async function manageAdmin() {
   const resetTwoFactor = process.argv.includes('--reset-2fa');
@@ -32,11 +33,9 @@ async function manageAdmin() {
   if (adminPassword && !resetTwoFactor) data.passwordHash = await bcrypt.hash(adminPassword, 12);
   if (resetTwoFactor) Object.assign(data, { totpEnabled: false, totpSecret: null, totpBackupCodes: [] });
 
-  await prisma.$transaction([
-    prisma.user.update({ where: { id: admin.id }, data }),
-    // Existing sessions end either way.
-    prisma.refreshToken.deleteMany({ where: { userId: admin.id } }),
-  ]);
+  await prisma.user.update({ where: { id: admin.id }, data });
+  // Existing sessions end either way (database and Redis).
+  await revokeAllSessions(admin.id);
   await writeRequestAudit({
     userId: admin.id,
     userRole: 'ADMIN',

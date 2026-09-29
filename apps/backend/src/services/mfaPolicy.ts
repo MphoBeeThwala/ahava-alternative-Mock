@@ -18,12 +18,14 @@ export function isMfaRequired(role: string | undefined): boolean {
   return (MFA_REQUIRED_ROLES as readonly string[]).includes(role ?? '');
 }
 
-/** What an unenrolled staff session may call: who am I, enrol, sign out. */
+/** What an unenrolled staff session may call: who am I, enrol, change password, sign out. */
 const ENROLMENT_PATHS = [
   '/api/v1/auth/me',
   '/api/v1/auth/logout',
   '/api/v1/auth/2fa/setup',
   '/api/v1/auth/2fa/verify-setup',
+  // Securing the account includes replacing a password they suspect is known.
+  '/api/v1/auth/change-password',
 ];
 
 export function isEnrolmentPath(originalUrl: string): boolean {

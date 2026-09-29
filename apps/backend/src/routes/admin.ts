@@ -7,6 +7,7 @@ import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 import { emailSchema, passwordComplexitySchema } from './auth';
 import { adminOverrideVerification, SancVerificationStatus } from '../services/sancVerification';
 import prisma from '../lib/prisma';
+import { revokeAllSessions } from '../services/sessions';
 
 const router: Router = Router();
 
@@ -249,10 +250,8 @@ router.post('/users/:id/2fa/reset', requireAdmin, async (req: AuthenticatedReque
     const user = await prisma.user.findUnique({ where: { id }, select: { id: true, totpEnabled: true } });
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    await prisma.$transaction([
-      prisma.user.update({ where: { id }, data: { totpEnabled: false, totpSecret: null, totpBackupCodes: [] } }),
-      prisma.refreshToken.deleteMany({ where: { userId: id } }),
-    ]);
+    await prisma.user.update({ where: { id }, data: { totpEnabled: false, totpSecret: null, totpBackupCodes: [] } });
+    await revokeAllSessions(id);
     await invalidateCachedUser(id);
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'UPDATE', resource: 'AdminAction', resourceId: id, metadata: { entity: 'TwoFactorReset', reason: value.reason, wasEnabled: user.totpEnabled }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
     return res.json({ success: true });

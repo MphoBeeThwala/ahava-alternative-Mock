@@ -14,6 +14,8 @@ import { seedBaselineForUser } from "../services/baselineSeed";
 import { addEmailJob } from "../services/queue";
 import { isMfaRequired } from "../services/mfaPolicy";
 import { auditSignIn } from "../services/signInAudit";
+import { revokeAllSessions } from "../services/sessions";
+import { writeRequestAudit } from "../services/clinicalAudit";
 import prisma, { TransactionClient } from "../lib/prisma";
 import { getRedis } from "../services/redis";
 import {
@@ -978,6 +980,14 @@ router.post("/reset-password", authRateLimiter, async (req, res, next) => {
         passwordResetExpiry: null,
       },
     });
+    // Anyone signed in with the old password (the reason people reset) is
+    // signed out. This used to leave every existing session running.
+    await revokeAllSessions(user.id);
+    await writeRequestAudit({
+      userId: user.id, userRole: user.role, action: "PASSWORD_RESET", resource: "Auth", resourceId: user.id,
+      metadata: { via: "email_link" }, ipAddress: req.ip, userAgent: req.get("User-Agent"),
+    });
+    notifyPasswordChanged(user.email, user.firstName, "reset");
 
     res.json({
       success: true,
@@ -987,6 +997,67 @@ router.post("/reset-password", authRateLimiter, async (req, res, next) => {
     return next(error);
   }
 });
+
+// ---------------------------------------------------------------------------
+// POST /auth/change-password — signed-in password change
+// ---------------------------------------------------------------------------
+// There was no way to change a password from inside the app, only the
+// forgotten-password email. Requires the current password; signs out every
+// other session (and this one gets fresh tokens), audits, and emails the
+// account holder so an unexpected change is noticed.
+router.post("/change-password", authMiddleware, authRateLimiter, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { error, value } = Joi.object({
+      currentPassword: Joi.string().required(),
+      newPassword: passwordComplexitySchema,
+    }).validate(req.body);
+    if (error) return res.status(400).json({ error: error.details[0].message });
+
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
+    if (!user || !user.passwordHash) return res.status(400).json({ error: "Password sign-in isn't set up for this account" });
+
+    const valid = await bcrypt.compare(value.currentPassword, user.passwordHash);
+    if (!valid) {
+      await writeRequestAudit({
+        userId: user.id, userRole: user.role, action: "PASSWORD_CHANGE_FAILED", resource: "Auth", resourceId: user.id,
+        metadata: { reason: "bad_current_password" }, ipAddress: req.ip, userAgent: req.get("User-Agent"),
+      });
+      return res.status(401).json({ error: "Current password is incorrect" });
+    }
+    if (await bcrypt.compare(value.newPassword, user.passwordHash)) {
+      return res.status(400).json({ error: "Choose a password you haven't used for this account" });
+    }
+
+    const saltRounds = parseInt(process.env.BCRYPT_ROUNDS || "10", 10);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: await bcrypt.hash(value.newPassword, saltRounds), passwordResetToken: null, passwordResetExpiry: null },
+    });
+    const signedOut = await revokeAllSessions(user.id);
+    // Keep the person who just changed it signed in on this device.
+    const { accessToken, refreshToken } = await generateTokens(user.id, user.role);
+    setAuthCookies(res, req, { accessToken, refreshToken });
+    await writeRequestAudit({
+      userId: user.id, userRole: user.role, action: "PASSWORD_CHANGED", resource: "Auth", resourceId: user.id,
+      metadata: { otherSessionsSignedOut: Math.max(0, signedOut - 1) }, ipAddress: req.ip, userAgent: req.get("User-Agent"),
+    });
+    notifyPasswordChanged(user.email, user.firstName, "change");
+
+    return res.json(buildAuthResponse(req, { success: true, message: "Password changed. You've been signed out on all other devices." }, { accessToken, refreshToken }));
+  } catch (error) {
+    return next(error);
+  }
+});
+
+/** Best-effort "your password changed" email — the cue for someone who didn't do it. */
+function notifyPasswordChanged(email: string, firstName: string, kind: "change" | "reset") {
+  const safeName = firstName.replace(/[<>&"]/g, "");
+  addEmailJob({
+    to: email,
+    subject: "Your Ahava Healthcare password was changed",
+    html: `<p>Hi ${safeName},</p><p>The password for your Ahava Healthcare account was just ${kind === "reset" ? "reset using an emailed link" : "changed"}, and all other devices were signed out.</p><p><strong>If this wasn't you</strong>, reset your password immediately using "Forgot password?" on the sign-in page, and contact support.</p>`,
+  }).catch((err) => console.warn("[auth] password-changed email failed:", (err as Error)?.message ?? err));
+}
 
 // ---------------------------------------------------------------------------
 // GET /auth/verify-email?token=... — verify email address
