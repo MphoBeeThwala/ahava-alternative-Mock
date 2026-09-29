@@ -33,6 +33,8 @@ import consentRoutes from "./routes/consent";
 import healthConnectRoutes from "./routes/healthConnect";
 import doctorMonitoringRoutes from "./routes/doctorMonitoring";
 import bpValidationRoutes from "./routes/bpValidation";
+import accessGrantRoutes from "./routes/accessGrants";
+import patientRecordRoutes from "./routes/patientRecord";
 
 // Import middleware
 import { errorHandler } from "./middleware/errorHandler";
@@ -47,6 +49,7 @@ import { initializeQueue, closeQueues } from "./services/queue";
 import { getWebSocketRedisHealth, initializeWebSocket } from "./services/websocket";
 import prisma from "./lib/prisma";
 import { assertEncryptionKeyConfigured } from "./utils/encryption";
+import { loadEncryptionKeys } from "./lib/keyManagement";
 
 const app: Application = express();
 const server = createServer(app);
@@ -226,6 +229,8 @@ app.use(`${API_V1}/terra`, terraRoutes);
 app.use(`${API_V1}/rook`, rookRoutes);
 app.use(`${API_V1}/consent`, authMiddleware, consentRoutes); // moved from /api/patient/consent to avoid prefix conflict
 app.use(`${API_V1}/doctor/monitoring`, authMiddleware, doctorMonitoringRoutes);
+app.use(`${API_V1}/access-grants`, authMiddleware, accessGrantRoutes);
+app.use(`${API_V1}/patient-records`, authMiddleware, patientRecordRoutes);
 app.use(`${API_V1}/biometrics/health-connect`, healthConnectRoutes);
 app.use("/webhooks", webhookRoutes);
 
@@ -297,6 +302,12 @@ async function startServer() {
   if (process.env.NODE_ENV === "production" && jwtSecret.length < 32) {
     throw new Error("JWT_SECRET must be at least 32 characters in production");
   }
+
+  // Resolve the data key first: from AWS KMS when ENCRYPTION_KEY_PROVIDER=
+  // aws-kms (the plaintext key never exists outside this process's memory),
+  // otherwise from ENCRYPTION_KEY. Throws — so the service doesn't start —
+  // if KMS is configured but can't unwrap the key. lib/keyManagement.ts.
+  await loadEncryptionKeys();
 
   // Fail here rather than partway through a booking. ENCRYPTION_KEY was only
   // read the first time something was encrypted, so a bad key let the service

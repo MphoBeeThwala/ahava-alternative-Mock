@@ -33,6 +33,10 @@ function ensureAppSecrets() {
     require("crypto").randomBytes(32).toString("base64");
   process.env.CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:3000";
   process.env.NODE_ENV = "test";
+  // Mandatory staff 2FA (services/mfaPolicy.ts) is exercised by its own
+  // suite (mfaPolicy.integration.test.ts), which switches this back off.
+  // Only honoured under NODE_ENV=test.
+  process.env.MFA_ENFORCEMENT_DISABLED_FOR_TESTS = "true";
 }
 
 module.exports = async function globalSetup() {

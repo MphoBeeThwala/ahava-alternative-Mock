@@ -2,13 +2,29 @@ import { Router } from 'express';
 import { UserRole } from '@prisma/client';
 import { AuthenticatedRequest, authMiddleware, requirePatient } from '../middleware/auth';
 import { idempotencyMiddleware } from '../middleware/idempotency';
-import { notifyNearbyNurses } from '../services/websocket';
-import { encryptData, isEncryptedPayload, safeDecrypt } from '../utils/encryption';
+import { DISPATCH_RADIUS_KM, notifyNearbyNurses, withdrawBookingOffer } from '../services/websocket';
+import { encryptData, encryptPatientLocation, isEncryptedPayload, safeDecrypt } from '../utils/encryption';
 import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
+import { NO_ACCESS_ERROR, auditAccessDenied, checkVerifiedClinician, displayName, hasActiveAccess, isClinicianRole, patientsWithActiveAccess } from '../services/careAccess';
 import Joi from 'joi';
 import prisma from '../lib/prisma';
 
 const router: Router = Router();
+
+/**
+ * A booking as seen by someone without care access to the patient (an
+ * admin, or a nurse whose access window has closed): scheduling, payment
+ * and status — no address, contact details or visit content.
+ */
+function restrictBooking(booking: any, reason: 'ADMIN_VIEW' | 'ACCESS_EXPIRED') {
+  const { encryptedAddress: _a, encryptedPatientLocation: _l, patient, visit, ...rest } = booking;
+  return {
+    ...rest,
+    patient: patient ? { id: patient.id, firstName: displayName(patient.firstName, patient.lastName) } : undefined,
+    visit: visit ? { id: visit.id, status: visit.status, scheduledStart: visit.scheduledStart, actualStart: visit.actualStart ?? null, actualEnd: visit.actualEnd ?? null } : null,
+    restricted: reason,
+  };
+}
 
 const createBookingSchema = Joi.object({
   encryptedAddress: Joi.string().optional(),
@@ -55,6 +71,7 @@ router.post('/', requirePatient, idempotencyMiddleware({ scope: 'booking-create'
         encryptedAddress,
         scheduledDate: new Date(bookingData.scheduledDate),
         estimatedDuration: bookingData.estimatedDuration,
+        encryptedPatientLocation: encryptPatientLocation(bookingData.patientLat, bookingData.patientLng),
         paymentMethod: bookingData.paymentMethod,
         paymentStatus: 'PENDING',
         amountInCents: bookingData.amountInCents,
@@ -91,11 +108,13 @@ router.post('/', requirePatient, idempotencyMiddleware({ scope: 'booking-create'
       userAgent: req.get('User-Agent'),
     });
 
-    const patientName = booking.patient.firstName + ' ' + booking.patient.lastName;
+    // Nurses who haven't accepted yet get a first name and initial, not the
+    // patient's full identity (minimum necessary before care access exists).
+    const patientName = displayName(booking.patient.firstName, booking.patient.lastName);
     const notifiedCount = await notifyNearbyNurses(
       bookingData.patientLat,
       bookingData.patientLng,
-      10,
+      DISPATCH_RADIUS_KM,
       {
         id: booking.id,
         patientId: booking.patientId,
@@ -106,9 +125,11 @@ router.post('/', requirePatient, idempotencyMiddleware({ scope: 'booking-create'
       patientName
     );
 
+    // Ciphertext never goes back to the client (same as the GET routes).
+    const { encryptedAddress: _addr, encryptedPatientLocation: _loc, ...bookingForClient } = booking;
     res.status(201).json({
       success: true,
-      booking,
+      booking: { ...bookingForClient, address: safeDecrypt(_addr) },
       notifiedNurses: notifiedCount,
     });
   } catch (error) {
@@ -167,8 +188,14 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res, next) => 
     // the requester's own bookings above) — previously the raw ciphertext
     // (encryptData's output) was sent straight to the client and rendered
     // as-is in the UI, instead of the actual visit address.
+    const role = req.user!.role;
+    const allowed = isClinicianRole(role)
+      ? await patientsWithActiveAccess(req.user!.id, bookings.map((b) => b.patientId))
+      : new Set<string>();
     const decryptedBookings = bookings.map((booking) => {
-      const { encryptedAddress, ...rest } = booking;
+      if (role === UserRole.ADMIN) return restrictBooking(booking, 'ADMIN_VIEW');
+      if (role !== UserRole.PATIENT && !allowed.has(booking.patientId)) return restrictBooking(booking, 'ACCESS_EXPIRED');
+      const { encryptedAddress, encryptedPatientLocation: _loc, ...rest } = booking;
       return { ...rest, address: safeDecrypt(encryptedAddress) };
     });
 
@@ -203,6 +230,19 @@ router.get('/:id', authMiddleware, async (req: AuthenticatedRequest, res, next) 
     if (!isAuthorized) {
       return res.status(403).json({ error: 'Access denied' });
     }
+    const role = req.user!.role;
+    if (role === UserRole.ADMIN) {
+      await createAuditLog({ userId: req.user!.id, userRole: role, action: 'READ', resource: 'Booking', resourceId: booking.id, metadata: { view: 'ADMIN_VIEW' }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
+      return res.json({ success: true, booking: restrictBooking(booking, 'ADMIN_VIEW') });
+    }
+    if (booking.patientId !== req.user!.id) {
+      const check = await checkVerifiedClinician(req.user!.id);
+      if (!check.ok) return res.status(check.status).json({ error: check.error, code: check.code });
+      if (!(await hasActiveAccess(req.user!.id, booking.patientId))) {
+        await auditAccessDenied(req, 'Booking', booking.id, booking.patientId);
+        return res.status(403).json(NO_ACCESS_ERROR);
+      }
+    }
 
     // AuditLog: Log booking read access
     await createAuditLog({
@@ -216,7 +256,7 @@ router.get('/:id', authMiddleware, async (req: AuthenticatedRequest, res, next) 
       userAgent: req.get('User-Agent'),
     });
 
-    const { encryptedAddress, ...bookingWithoutCiphertext } = booking;
+    const { encryptedAddress, encryptedPatientLocation: _loc, ...bookingWithoutCiphertext } = booking;
     res.json({ success: true, booking: { ...bookingWithoutCiphertext, address: safeDecrypt(encryptedAddress) } });
   } catch (error) {
     return next(error);
@@ -240,6 +280,9 @@ router.patch('/:id/cancel', requirePatient, async (req: AuthenticatedRequest, re
         await tx.visit.update({ where: { id: booking.visit.id }, data: { status: 'CANCELLED' } });
       }
     });
+
+    // Nothing accepted it yet, so nurses may still be looking at the offer.
+    if (!booking.nurseId) withdrawBookingOffer(id);
 
     // AuditLog: Log booking cancellation
     await createAuditLog({

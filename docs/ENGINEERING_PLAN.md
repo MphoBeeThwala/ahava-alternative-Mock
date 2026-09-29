@@ -2656,3 +2656,278 @@ assumed from a sign-off record alone.
 **Final state: 13/13 test suites, 135/135 tests, zero failures.** `tsc --noEmit` clean. Checked rather than assumed what happens to the disposable database afterward: `globalTeardown.js` stops the embedded Postgres process but deliberately does not delete `.test-pgdata/` (Windows can return from `pg_ctl stop` before file handles are released, making an immediate `rmSync` flaky) — cleanup happens lazily, at the start of the *next* run's `globalSetup.js`. `.test-pgdata/` is gitignored, so this is a local-disk detail, not a repo one, but worth recording accurately rather than assuming "ran a teardown script" means "nothing left behind."
 
 **Still not done**: this exercised a fresh, empty, disposable database — not the actual shape and volume of real production data. A real validation-report result (meaningful sensitivity/specificity numbers) still needs real calibration readings to accumulate in production, which is a usage/time question, not an engineering one.
+
+## 35. Nurse booking service audit — "Go online" was a 404, and six more dispatch bugs, 2026-09-28
+
+Reported symptom: the nurse dashboard's **Go online** failed ("Failed to go online" / "Route not found"). Audited the whole nurse dispatch path end to end: dashboard → `/api` proxy → `routes/nurse.ts`, the WebSocket radar (`services/websocket.ts`), booking accept, and visit status.
+
+**Root cause of the reported bug:** `workspace/src/lib/api/nurse.ts` sent `POST /nurse/availability`; the backend only mounted `PATCH`. Every "Go online" hit the 404 handler. The existing integration test used `PATCH`, so it passed while the real client failed, because nothing checked the client and server against each other. The client now sends `PATCH`, and the backend accepts both verbs so any already-shipped Capacitor build still works.
+
+**Also found and fixed:**
+1. **Nurse "online" but never dispatched.** The server keeps the dispatchable-nurse list in memory, tied to the socket. `NURSE_GO_ONLINE` was sent only from the toggle, and was silently dropped if the socket wasn't connected yet. After any reload, reconnect or backend restart, the dashboard showed "Live radar active" and the nurse got nothing. The dashboard now re-registers every time the socket (re)connects.
+2. **Second tab / reconnect dropped the nurse.** `clients` holds one socket per user. When an *older* socket closed, it deleted the newer one's registration. Close, error and heartbeat now drop only the socket that is still registered.
+3. **Accept race.** Accept read the booking, then wrote it. Two simultaneous accepts both passed the `nurseId IS NULL` check; the loser hit the unique `Visit.bookingId` constraint and got a generic error. Accept now claims the booking with a conditional `updateMany` inside the transaction.
+4. **Cancelled or expired bookings, and offline nurses, could be accepted.** The atomic claim now excludes `paymentStatus = REFUNDED` (the cancel marker in `bookings.ts`) and past `scheduledDate`, and it requires the nurse to be online on the radar. Cancelling an unaccepted booking now also removes the offer from nurses' screens.
+5. **WebSocket `VISIT_STATUS_UPDATE` had no ownership check.** Any nurse or doctor socket could set any status on any visit.
+6. **Visit status had no validation, on REST or WebSocket.** An unknown value caused a Prisma 500, and a nurse could jump from SCHEDULED to COMPLETED or reopen a finished visit. `services/visitStatus.ts` now enforces one step forward (or CANCELLED), with admin override. The update is conditional, so a double tap can't advance a visit twice, and it records `actualStart` and `actualEnd`, which nothing set before. REST status changes now also send `VISIT_STATUS_CHANGED`. The dashboard uses REST, so the patient's live tracker never heard about any change until now.
+
+**Smaller fixes:** going offline sent `lat: 0, lng: 0`, which overwrote the nurse's last location with a point in the Atlantic; it now leaves the location alone. Coordinates are validated on REST and WebSocket. The 30-second accept window no longer runs side effects inside a `setState` updater (in dev this sent `DECLINE_BOOKING` twice). Accept is disabled while in flight, reports when the socket is disconnected, and recovers if the connection drops mid-accept. `BOOKING_TAKEN` only dismisses the card when the booking IDs match.
+
+**Tests:** `services/websocket.integration.test.ts` is new. It runs a real WebSocket server against the real test DB and covers radius dispatch, location validation, the two-nurse race, cancelled bookings, offline nurses, the second-tab close, and cross-nurse status changes. Six of the seven tests fail against the pre-fix `websocket.ts`. `visits.integration.test.ts` adds `POST` availability, offline-keeps-location, availability validation, and status-transition cases. Integration: 14 suites, 149 tests. Unit: 21 suites, 188 tests. `tsc` is clean on backend and workspace.
+
+**Still open after §35:** see §36. All three items were fixed there.
+
+## 36. Nurse dispatch follow-ups from §35: re-offering, the doctor review workflow, stale availability, 2026-09-28
+
+**1. Bookings are offered again, not just once.** A booking used to be offered only at creation, to whoever was online at that moment. `Booking` now stores the patient's location as `encryptedPatientLocation` (AES-256-GCM, see §37; migration `20260928120000_add_booking_dispatch_location`, nullable, so older bookings are unaffected). When a nurse goes online, including the re-registration on every reconnect from §35, they are sent every open booking within `DISPATCH_RADIUS_KM` (10 km) that they haven't declined, soonest first, capped at 10. Declines and expired offers are remembered per replica for 24 hours, so a reload doesn't bring back requests the nurse already passed on. The nurse dashboard now queues offers ("+N more") instead of each new one replacing the last.
+
+**2. The doctor review workflow didn't exist; it's now built minimally.** Behind the 403 from §35, three more things were broken:
+- The doctor dashboard fetched `GET /visits?status=PENDING_REVIEW`, but `PENDING_REVIEW` isn't a visit status and the filter was ignored.
+- It posted to `POST /visits/:id/approve`, a route that never existed.
+- Nothing ever set `Visit.doctorId`.
+
+So the review queue was always empty and "Approve & Complete" always failed. Now:
+- The pending queue is **completed visits with no `doctorReview`**. It's a shared pool, like the triage queue: unclaimed visits, or ones this doctor has claimed.
+- `POST /visits/:id/approve` claims and approves in one conditional write (so two doctors can't both approve), stores the review note, and emails the patient via the existing `notifyVisitApproved` template (best effort).
+- `PATCH /visits/:id/status` is open to the visit's assigned doctor as well as its nurse.
+- An unknown `?status=` filter now returns 400 instead of being silently ignored.
+- On the card, **"Request More Info" and "Escalate to ER" were removed**. They sent `PENDING_REVIEW` (not a status) and `CANCELLED` (meaningless on a visit the nurse already completed) to an endpoint doctors couldn't call, so they never worked. They were replaced with an optional review note sent with the approval. A real "request more info" or ER escalation needs its own clinical workflow design (who is notified, what state the visit enters).
+
+**3. Stale `isAvailable`.** When a nurse's socket drops, a timer runs for `NURSE_OFFLINE_GRACE_MS` (default 2 minutes). If they haven't re-registered on any replica by then, it sets `isAvailable = false`. "Re-registered" is judged by `lastLocationUpdate` being newer than the drop, so this is safe across replicas. A nurse who reloads the page stays online.
+
+**Also:** the nurse dashboard now sends `LOCATION_UPDATE` while online (at most every 20 seconds). Nothing sent it before, so the patient visit tracker's `NURSE_LOCATION_UPDATE` handler never fired, and the dispatch radius used the position from when the nurse first went online.
+
+**Tests:** new integration cases cover:
+- re-offering: in range and not declined gets offered; declined, far away and cancelled bookings don't; reconnect re-offers only what's still open
+- the grace timer: fires after the grace period, doesn't fire on a quick reconnect
+- the doctor queue, approval, double approval, approving a non-completed visit, assigned and unassigned doctor status changes, and invalid status filters
+- booking coordinates being stored
+
+Totals: integration 14 suites, 159 tests; unit 188; frontend 12. The WebSocket suite ran 5 times in a row with no failures.
+
+**Residual:** if a replica crashes (rather than shutting down gracefully), its pending grace timers are lost, so a nurse connected to it who never reconnects stays `isAvailable` until they next go online or offline. Fixing that needs a periodic presence heartbeat with its own column, which wasn't worth a second schema change here.
+
+## 37. Data-protection rule: patient data encrypted, access limited to clinicians and admins, 2026-09-29
+
+**The rule, as stated by the product owner:** every patient's current and historical data is stored securely and encrypted, and only doctors, nurses, system admins, or someone an admin has authorized can access it.
+
+**Correction to §36:** §36 first stored the patient's dispatch location as plaintext `patientLat`/`patientLng` columns, which broke this rule. The migration had not reached `main` or any deployed database, so it was amended in place. It is now one `encryptedPatientLocation` column: `{lat, lng}` JSON encrypted with the same AES-256-GCM `encryptData` as the address, bound to its own AAD purpose label (`booking:patient-location`) so ciphertext from another field can't be swapped in. It is decrypted in memory only for the distance check in `offerOpenBookings`, never sent to nurses. Booking API responses no longer include any ciphertext; the create response previously echoed `encryptedAddress` back. `bookings.integration.test.ts` checks that the stored value isn't plaintext, that it decrypts to the right location, and that no ciphertext is returned.
+
+**Audit against the rule. It is not yet met; this is recorded, not fixed.** Field-level (application) encryption covers only `Booking.encryptedAddress`, `User.encryptedAddress`/`encryptedIdNumber`, the booking dispatch location, and TOTP secrets. Everything else is stored as plaintext columns and relies only on whatever at-rest encryption the database host provides:
+- `BiometricReading`: all vitals, ECG rhythm, risk scores
+- `TriageCase`: symptoms, AI reasoning, doctor notes, diagnosis, recommendations, patient follow-up responses
+- `Visit`: `biometrics`, `treatment`, `nurseReport` (commented "Encrypted" in the schema, but nothing encrypts it), `doctorReview`
+- `Prescription`: medications, diagnosis
+- `Referral`: provisional diagnosis, clinical notes
+- `Message`: content
+- `HealthAlert`: message, anomalies
+- `UserBaseline`: vitals baselines
+- `User`: `dateOfBirth`, `gender`, `phone`, `riskProfile`
+
+There is no admin-granted access mechanism. The only roles are PATIENT, NURSE, DOCTOR and ADMIN, and no record exists of "admin authorized user X to see patient Y".
+
+**Decisions needed before building (for the product owner):**
+1. Which fields get app-level encryption. Free-text clinical notes and diagnoses are straightforward. Numeric vitals are harder: `doctorMonitoring.ts`, `bpValidation.ts`, baselines and the ML service filter and aggregate on them in SQL, and encrypted values can't be queried.
+2. Whether "doctors and nurses" means any clinician, or only one assigned to that patient. Today it is mostly assignment-scoped: nurses see their own visits, doctors see claimed triage cases. The shared review pools (triage, and §36's visit review) and consent-gated monitoring are visible to any doctor.
+3. The shape of admin grants: who can be granted (which roles), how they are scoped (one patient or all), whether they expire, and how they are audited.
+
+## 38. Clinical access control and at-rest encryption of clinical notes, 2026-09-29
+
+**What the product owner asked for:**
+- Every patient's current and historical data is stored securely.
+- Written notes are encrypted when stored.
+- Live vitals are not encrypted on the dashboard.
+- Stored data is readable once an authorised party recalls it.
+- Authorisation goes to SANC-registered nurses and doctors with an HPCSA practice number, and only for the individual patient they are dealing with at that moment, never all patients.
+- Where the plan is wrong, industry standards win, because this is a security, functionality and regulatory matter.
+
+**Standards applied.** These are my reading of them, not legal advice. A POPIA review by the Information Officer or a compliance adviser should confirm the final design.
+- POPIA s19: appropriate, reasonable technical and organisational safeguards for integrity and confidentiality.
+- POPIA s26–s27 and s32: health information is special personal information, processed by or under the responsibility of health professionals bound by confidentiality.
+- POPIA s23: a data subject may ask who has had access to their information.
+- HPCSA ethical guidance on confidentiality and on keeping patient health records; SANC's confidentiality obligations for nurses.
+- ISO/IEC 27001 and ISO 27799 access-control principles: need-to-know / least privilege, segregation of duties, privileged-access control, logging.
+- The "minimum necessary" principle used in health-information security generally (e.g. HIPAA).
+
+### What was built
+
+1. **Verified credentials gate** (`services/careAccess.ts`, `requireVerifiedClinician`). Previously any NURSE or DOCTOR account, once registered, had full clinical access; nothing checked SANC or HPCSA status. Now:
+   - A nurse needs `sancVerificationStatus = 'Active'` and a doctor needs an admin-verified HPCSA number before any patient data, going online, accepting a visit, or claiming a case.
+   - Verification is re-checked when a nurse accepts a visit, in case it was revoked while they were online.
+   - `/triage-review/profile/hpcsa` stays open, because that is where an unverified doctor submits their number.
+   - The sidebar badges "Verified Nurse" and "Licensed Doctor" were shown to every nurse and doctor account regardless of verification. They are now neutral ("Nurse account", "Doctor account").
+
+2. **Per-patient, time-bound access grants** (`PatientAccessGrant`, migration `20260929120000_add_patient_access_grants`). A clinician sees a patient's clinical record only while holding an unexpired, unrevoked grant for that patient. Rows are never deleted: they are the record of who had access, why, and for how long. Grants come from taking on a patient:
+
+   | Trigger | Reason | Window |
+   |---|---|---|
+   | Nurse accepts a visit (atomically, in the accept transaction) | `VISIT_ASSIGNMENT` | Until 48h after the scheduled start. Status changes keep it alive; completion or cancellation winds it down to a 24h documentation window. |
+   | Doctor claims a triage case (claim is now atomic too) | `TRIAGE_CASE` | 7 days while open. Release, prescription or referral closes it to 72h. |
+   | Doctor claims a completed nurse visit for review (new `POST /visits/:id/claim-review`) | `VISIT_REVIEW` | 72h. Approval closes it to 24h. |
+   | Doctor takes on an unassigned monitoring alert (new `POST /doctor/monitoring/:patientId/claim`) | `MONITORING` | 30 days. |
+   | Admin grants it | `ADMIN_GRANT` | 1h to 30 days, reason required. |
+   | Clinician break-glass | `BREAK_GLASS` | 4h, justification of at least 20 characters, reviewed by an admin. |
+
+   The windows live together in `ACCESS_WINDOWS`. Enforcement covers:
+   - visits (list, detail, status, calibration)
+   - bookings
+   - messages
+   - both triage routers
+   - doctor monitoring
+   - the WebSocket status update
+   - the new `GET /patient-records/:patientId`: the patient's chart (demographics, medical passport, 90 days of vitals, triage history, visits, prescriptions, referrals), available for any active grant. Without it, an admin grant or break-glass gave access to nothing.
+
+   Refused attempts are written to the audit log as `ACCESS_DENIED`.
+
+3. **Minimum necessary until claimed.** Work queues show only what is needed to pick up work:
+   - **Triage queue:** acuity, wait time, age and sex. Until now every doctor saw every waiting patient's name, contact details, date of birth, medical passport, symptoms and attachments.
+   - **Visit-review pool:** the same limited view. The nurse's report opens on claim.
+   - **Monitoring worklist:** unclaimed alerts show alert level and age only. A patient already being monitored by another doctor isn't shown to others.
+   - **Dispatch offers to nurses who haven't accepted yet:** "First L." instead of the full name.
+   - **BP validation report (admin):** raw user IDs replaced with a keyed-hash pseudonym (`PSEUDONYM_KEY`, falling back to `ENCRYPTION_KEY`).
+
+4. **Separation of duties for admins.** Admins verify credentials, grant, revoke and review access, and read the grant log. They no longer read clinical content: visits and bookings come back in an operational view (status, dates, amounts; no address, reports or messages), and triage content, messages and patient records are refused. **This departs from the owner's first message**, which listed system admins among those with access. The later message moved authorisation to SANC and HPCSA clinicians, and standing admin access to clinical content is what the standards above advise against. An admin who needs a record can only grant access to a verified clinician; admins can't grant access to themselves.
+
+5. **Admin-granted access, break-glass, and the patient's view** (`routes/accessGrants.ts`):
+   - `GET /access-grants/mine` for clinicians.
+   - `POST /access-grants/break-glass`.
+   - `GET /access-grants/my-record` for patients (s23 transparency: who, which registration, why, when).
+   - Admin list, grant, revoke and break-glass review.
+   - Justifications are encrypted at rest under their own AAD label.
+   - Frontend pages: `/clinician/patients` (active access, break-glass form), `/clinician/patients/[patientId]` (record), `/patient/access-log`, `/admin/access`.
+
+6. **Written clinical notes encrypted at rest** (`lib/clinicalFieldEncryption.ts`). A Prisma client extension, so no route can forget it:
+   - Writes are AES-256-GCM encrypted (existing `utils/encryption.ts`, key rotation supported) under the AAD `phi:clinical-text`.
+   - Every read result, including nested `include`s, is decrypted in place.
+   - Other ciphertext (addresses, TOTP, dispatch location) fails authentication under this AAD and is left to its own code path.
+   - Fields covered:
+     - `TriageCase`: symptoms, AI reasoning and possible conditions, doctor notes, diagnosis, recommendations, final diagnosis, override reason, follow-up message and questions, requested investigations, the patient's follow-up response
+     - `Visit`: nurse report, doctor review, treatment
+     - `Prescription`: diagnosis, notes, medications
+     - `Referral`: provisional diagnosis, clinical notes
+     - `Message`: content
+   - Nothing filters or searches on these fields in SQL; this was checked before enabling.
+   - Legacy plaintext still reads correctly. `pnpm --filter backend encrypt:clinical-notes [--apply]` backfills it: dry run by default, idempotent, and it keeps `updatedAt` unchanged.
+
+### Where the plan was changed, and why: stored vitals are not field-encrypted
+
+The owner asked that stored vitals be encrypted and readable once recalled by an authorised party. I recommend against field-level encryption for vitals, and did not apply it:
+- The early-warning engine (the ML service's TimescaleDB `biometric_time_series`), the monitoring worklist, the BP validation report and baselines all filter and aggregate vitals in SQL. Ciphertext can't be queried, so those features would stop working or need rebuilding around full decrypt-in-memory scans.
+- The standards call for encryption at rest, which storage-level encryption of the database and its backups satisfies, together with access control and audit. They don't call for application-level encryption of every column.
+- "Readable once an authorised party recalls it" is delivered by the grants in item 2: only a verified clinician with current access to that patient gets the data back.
+
+Written notes, where most identifying and sensitive narrative lives, are field-encrypted as requested. Live vitals are shown in plaintext on the dashboard as requested.
+
+**Needs confirming outside the codebase:** that the production Postgres volume and its backups are encrypted at rest by the host (Railway). I could not verify this from here.
+
+### Not done / recommended next
+
+- **Run the backfill in production** after deploying: `encrypt:clinical-notes`, then `--apply`, with the production `ENCRYPTION_KEY`.
+- **MFA for clinicians and admins:** TOTP exists but is optional. Remote access to health records normally requires it.
+- **Key management:** `ENCRYPTION_KEY` is an environment variable. A KMS or HSM, with a rotation schedule, is the stronger setup; the `v3` ciphertext format already carries a key ID.
+- **Least-privilege database roles:** the ML service connects with full database credentials but needs only its own table and `users.riskProfile`.
+- **Break-glass notification:** break-glass shows in the patient's access log, but the patient isn't emailed or sent a push notification.
+- **Audit log:** retention and tamper-evidence. It has a checksum, but that hasn't been reviewed against a retention policy.
+- **Monitoring-claim race:** two doctors taking on the same alert at the same instant can both get a grant. Low impact (both are verified doctors), but not atomic.
+- **Redis dispatch events:** cross-replica dispatch events carry the patient's coordinates over Redis pub/sub. They should be encrypted in transit (`rediss://`).
+
+**Tests:**
+- `services/careAccess.integration.test.ts` (16 cases): credentials, expiry and audit, documentation window, cross-patient scope, minimum-necessary queues, claim rules, admin operational view, admin grant and revoke (including refusing unverified clinicians and self-grants), break-glass review, the patient access log, the patient record, message recipients.
+- `lib/clinicalFieldEncryption.integration.test.ts` (3 cases): raw columns are ciphertext, API reads are plaintext, nested includes are decrypted, legacy rows are still readable.
+- 3 new WebSocket cases: an unverified nurse can't go online, accepting creates the grant, offers use "First L.".
+- Existing suites were updated where they relied on the old behaviour (unverified test clinicians, approve without claim).
+
+Totals: backend integration 16 suites / 181 tests, unit 188, frontend 12. `tsc` is clean on both. A full `next build` could not complete in the build container because `next/font` could not download Google Fonts there; typecheck and lint pass on every new page.
+
+## 39. Mandatory staff 2FA, the data key in AWS KMS, a least-privilege ML login, emergency-access emails, 2026-09-29
+
+**Decisions confirmed by the owner (2026-09-29):**
+- The legal officer agrees with the §38 standards.
+- Railway confirms production data is encrypted at rest with AES-256, including the Postgres volume, backups and PITR archives, on all plans. That settles §38's open question about vitals.
+- The owner asked for: mandatory 2FA; the encryption key in a key management service, with instructions for their side; the ML service on its own database login; and patients emailed when emergency access is used.
+
+Operational steps for the owner are in **`docs/SECURITY_RUNBOOK.md`**.
+
+1. **Mandatory 2FA for nurses, doctors and admins** (`services/mfaPolicy.ts`). Patients may opt in. That follows the §38 recommendation ("clinicians and admins"): staff can reach patient data or control who can.
+   - A staff account without 2FA can still sign in, but `middleware/auth.ts` refuses everything except `auth/me`, `logout` and the 2FA setup endpoints with `403 MFA_ENROLLMENT_REQUIRED`, including WebSocket tickets.
+   - The web client redirects that response to `/security/two-factor`.
+   - Staff can't disable 2FA. A lost authenticator is reset by a *different* admin (`POST /admin/users/:id/2fa/reset`, reason required and audited), which also ends the user's sessions.
+   - The auth cache key moved to `auth:user:v2:` so entries written before `totpEnabled` was cached aren't trusted.
+   - Other integration suites opt out through `MFA_ENFORCEMENT_DISABLED_FOR_TESTS`, which is honoured only under `NODE_ENV=test`. `mfaPolicy.integration.test.ts` (5 cases) turns enforcement back on.
+
+2. **The data key in AWS KMS** (`lib/keyManagement.ts`), using envelope encryption. With `ENCRYPTION_KEY_PROVIDER=aws-kms`:
+   - The API unwraps `ENCRYPTION_KEY_CIPHERTEXT` through KMS at startup and holds the key only in memory (`utils/encryption.ts` key store). It never writes the key to `process.env`.
+   - The unwrap is bound to an encryption context (`app=ahava-healthcare, purpose=patient-data-key`) and, optionally, pinned to one KMS key.
+   - The API refuses to start if a plaintext `ENCRYPTION_KEY` is still set alongside KMS.
+   - `scripts/wrap-encryption-key.ts` wraps the **existing** key, with a round-trip check, so nothing needs re-encrypting.
+   - The previous key for rotation is supported the same way.
+   - `env` stays the default for local development and warns in production.
+   - The BP-validation pseudonym key now derives from the data key (`getPseudonymKey`) instead of reading `ENCRYPTION_KEY` directly, which would have become an empty HMAC key under KMS.
+   - Tests: `keyManagement.test.ts`, 6 cases with a fake KMS that enforces the key ID and encryption context.
+   - Not built: a bulk re-encryption tool. It's only needed after a suspected compromise of the data key itself; master-key rotation is automatic in KMS and needs none.
+
+3. **Least-privilege ML database login** (`scripts/ml-db-role.ts`):
+   - The `ahava_ml` login gets SELECT and INSERT on `biometric_time_series`, SELECT on `users (id, "riskProfile")` and UPDATE on `users ("riskProfile")`, and nothing else.
+   - The script creates the table as the owner if needed, then connects as the new login and runs 11 checks: 4 allowed operations and 7 refusals (email and password hash, triage notes, messages, `biometric_readings`, audit log, deleting history, DDL).
+   - Idempotent. It supports `--verify-only` and `--drop`.
+   - `apps/ml-service/db.py` `ensure_schema` now skips DDL when the table exists, because a restricted role can't run `CREATE TABLE IF NOT EXISTS` at all. It was checked running as the restricted login against Postgres 16, and the ML service's 27 pytest tests still pass.
+   - Tests: `ml-db-role.integration.test.ts`, 3 cases.
+   - Limitation: `riskProfile` also holds the patient's medical passport (allergies, conditions), so the ML login can read that one JSON column in full. Column-level grants can't narrow inside a JSON value.
+
+4. **Emergency-access email** (`notifyEmergencyAccess`):
+   - Sent to the patient's registered address when break-glass is used, naming the clinician, their role and SANC/HPCSA number, the time, when access ends, and a link to the access log.
+   - It deliberately leaves out the written justification.
+   - Best-effort and sent after the grant: the grant, the audit entry and the in-app access log don't depend on it.
+   - Tested in `careAccess.integration.test.ts`.
+
+5. **Found along the way: hard-coded admin credentials.** `scripts/manage-admin.ts` fell back to a real-looking admin email and password committed to the repository.
+   - Removed. The script now needs both values supplied, and gained `--reset-2fa` for when the only admin loses their device.
+   - **The password stays in git history, so it must be treated as public and rotated** (runbook §0).
+   - The demo-patient seed scripts still have fallback passwords (`MockPatient1!`, `SyntheaPatient1!`). Those are for generated test data, but they should never be run against production.
+
+The sidebar and profile page wording for 2FA changed to match: "required for your role" and no "Turn off" button for staff.
+
+Totals after this change: backend integration 18 suites / 190 tests, unit 22 suites / 194, ML service pytest 27, frontend 12. `tsc` is clean on backend and web.
+
+## 40. The admin credential leak is real; sign-in auditing; split-custody key escrow, 2026-09-29
+
+**The leak is a real incident.** The owner confirmed that the credential removed from `scripts/manage-admin.ts` in §39 (admin account `healthsysadmin@ahavaon88.co.za`) is the real production admin account. It was committed on 2026-09-08 (merge of PR #21) to a **public** repository, and until §38 admins could read clinical records.
+
+A scan of the whole git history (all branches) for other secrets found none:
+- no committed `.env` files
+- no production database URLs or Railway hosts with credentials
+- no API keys, private keys, or real-looking JWT or encryption keys
+- no other hard-coded password fallbacks outside the demo-data seed scripts
+
+Every database URL in the repo is a local-development placeholder.
+
+The response steps are in `docs/SECURITY_RUNBOOK.md` §0:
+- rotate the password
+- review admin activity since 2026-09-08 by IP and device, and any patient data admins touched, with two SQL queries tested against the schema
+- POPIA s22 notification if unexplained use is found, a decision for the legal officer
+- optionally purge the value from git history (it doesn't un-publish it) and make the repository private
+
+**Sign-ins are now audited** (`services/signInAudit.ts`). Before this, only actions taken by a session were logged, never the sign-in itself. Now each of these is recorded with IP address and user agent:
+- `LOGIN_FAILED`: unknown account (email stored only as a SHA-256 hash), bad password, or deactivated account
+- `LOGIN_2FA_PENDING`
+- `LOGIN_2FA_FAILED`
+- `LOGIN_SUCCESS`, with the method used: password, password+totp, or password+backup_code
+
+Tested in `mfaPolicy.integration.test.ts`.
+
+**Split-custody escrow of the data key** (`scripts/key-escrow.ts`). The owner chose to keep a vault copy of the data key alongside KMS.
+- It's kept as two XOR shares (share 1 random, share 2 = key XOR share 1) held by two custodians in separate vaults. Either share alone reveals nothing, and rebuilding the key needs both.
+- A fingerprint (the first 16 hex characters of SHA-256 of the key) confirms a rebuilt key without anyone writing it down.
+- Shares carry a version prefix and share number, so a swapped, foreign or truncated share is rejected.
+- `key-escrow.test.ts`: 4 cases.
+- Procedure, yearly check and recovery are in runbook §1 step 6.
+
+**Follow-up: changing a password (same day).** The owner found there was no way to change a password from inside the app, only the "Forgot password?" email.
+- New `POST /auth/change-password`: needs the current password and the same complexity rules as signup, and rejects reusing the current password. It is reachable during forced 2FA enrolment, so a staff member can replace a suspected-leaked password straight away.
+- On a change, every other session is signed out (`services/sessions.ts`, database and Redis) while this device gets fresh tokens.
+- `PASSWORD_CHANGED` / `PASSWORD_CHANGE_FAILED` are audited, and the account holder is emailed.
+- The emailed reset (`/auth/reset-password`) now also signs out every session. It used to leave them all running, so resetting a leaked password didn't evict whoever was using it. It is also audited (`PASSWORD_RESET`) and sends the same email.
+- The admin 2FA reset and `manage-admin.ts` use the same sign-out helper.
+- UI: a "Password" card on the profile page, and on `/security/two-factor`.
+- Tests: `password.integration.test.ts` (3 cases), which checks that the other device's session renewal is refused after a change or reset.
+

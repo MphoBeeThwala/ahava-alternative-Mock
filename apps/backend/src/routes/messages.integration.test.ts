@@ -6,6 +6,7 @@
 import request from "supertest";
 import { app } from "../index";
 import prisma from "../lib/prisma";
+import { grantTestAccess, verifyClinician } from "../testSetup/clinicians";
 
 function uniqueEmail(label: string): string {
   return `${label}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`;
@@ -24,6 +25,8 @@ async function registerRole(role: "PATIENT" | "NURSE" | "DOCTOR", label: string)
     role,
   });
   expect(res.status).toBe(201);
+  // Working clinicians have verified registrations (see testSetup/clinicians.ts).
+  if (role !== "PATIENT") await verifyClinician(res.body.user.id, role);
   return { agent, email, userId: res.body.user.id as string };
 }
 
@@ -40,9 +43,12 @@ async function seedBookingAndVisit(patientId: string, nurseId: string) {
       amountInCents: 50000,
     },
   });
-  return prisma.visit.create({
+  const visit = await prisma.visit.create({
     data: { bookingId: booking.id, nurseId, status: "SCHEDULED", scheduledStart: booking.scheduledDate },
   });
+  // What accepting the visit over the WebSocket would have granted.
+  await grantTestAccess(nurseId, patientId, "VISIT_ASSIGNMENT", visit.id);
+  return visit;
 }
 
 describe("messages: authorization scoped to visit participants", () => {

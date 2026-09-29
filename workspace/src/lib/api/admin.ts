@@ -29,7 +29,7 @@ export interface BpFlagValidationReport {
   caveat?: string | null;
   message?: string;
   pairs?: Array<{
-    userId: string;
+    patientRef: string; // pseudonymous (keyed hash), not a user id
     calibrationReadingId: string;
     calibrationAt: string;
     elevated: boolean;
@@ -47,6 +47,10 @@ export const adminApi = {
   getAllUsers: async (): Promise<User[]> => {
     const res = await apiClient.get('/admin/users');
     return res.data.users || [];
+  },
+  resetTwoFactor: async (userId: string, reason: string) => {
+    const res = await apiClient.post(`/admin/users/${userId}/2fa/reset`, { reason });
+    return res.data;
   },
   updateUserStatus: async (userId: string, isActive: boolean) => {
     const res = await apiClient.patch(`/admin/users/${userId}`, { isActive });

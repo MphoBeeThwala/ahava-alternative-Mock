@@ -3,6 +3,9 @@ import Redis from 'ioredis';
 import crypto from 'crypto';
 import prisma from '../lib/prisma';
 import { verifyWebSocketTicket } from './authSession';
+import { decryptPatientLocation } from '../utils/encryption';
+import { ACCESS_WINDOWS, checkVerifiedClinician, displayName, hasActiveAccess, syncVisitGrant } from './careAccess';
+import { isVisitStatus, visitTimingFor, visitTransitionError } from './visitStatus';
 
 interface AuthenticatedWebSocket extends WebSocket {
   userId?: string;
@@ -13,6 +16,95 @@ interface AuthenticatedWebSocket extends WebSocket {
 
 const clients = new Map<string, AuthenticatedWebSocket>();
 const onlineNurses = new Map<string, { lat: number; lng: number }>(); // Track online nurses with location
+
+export const isValidCoordinate = (lat: unknown, lng: unknown): lat is number =>
+  typeof lat === 'number' && typeof lng === 'number' &&
+  Number.isFinite(lat) && Number.isFinite(lng) &&
+  lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+
+/**
+ * Forget a socket, but only if it is still the one registered for its user.
+ * `clients` holds one socket per user, so when a nurse opened a second tab
+ * (or the page reconnected) and the *old* socket closed afterwards, the old
+ * close handler deleted the new registration too — silently taking an
+ * online nurse off the dispatch radar while their screen still said online.
+ */
+const dropSocket = (ws: AuthenticatedWebSocket) => {
+  if (!ws.userId || clients.get(ws.userId) !== ws) return;
+  clients.delete(ws.userId);
+  if (onlineNurses.delete(ws.userId)) scheduleStaleOffline(ws.userId);
+};
+
+/** REST "go offline" (routes/nurse.ts) — stop dispatching to this nurse from this replica. */
+export const markNurseOffline = (userId: string) => {
+  onlineNurses.delete(userId);
+  cancelStaleOffline(userId);
+};
+
+/** Radius, in km, within which a nurse is offered a booking. */
+export const DISPATCH_RADIUS_KM = 10;
+
+// ===== STALE AVAILABILITY =====
+//
+// User.isAvailable used to stay true forever once a nurse's socket dropped
+// without an explicit "go offline" (app killed, phone out of signal), so
+// anything reading it overstated who could actually be dispatched. Clearing
+// it immediately would flip a nurse offline on every page reload, so it's
+// cleared only after a grace period, and only if the nurse hasn't
+// re-registered anywhere since: NURSE_GO_ONLINE and LOCATION_UPDATE both
+// bump lastLocationUpdate, on whichever replica the nurse reconnected to,
+// so the conditional write below is safe across replicas.
+const staleOfflineTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+const offlineGraceMs = () => {
+  const n = Number(process.env.NURSE_OFFLINE_GRACE_MS);
+  return Number.isFinite(n) && n >= 0 ? n : 120_000;
+};
+
+const cancelStaleOffline = (userId: string) => {
+  const t = staleOfflineTimers.get(userId);
+  if (t) clearTimeout(t);
+  staleOfflineTimers.delete(userId);
+};
+
+const scheduleStaleOffline = (userId: string) => {
+  cancelStaleOffline(userId);
+  const droppedAt = new Date();
+  const timer = setTimeout(() => {
+    staleOfflineTimers.delete(userId);
+    if (onlineNurses.has(userId)) return;
+    prisma.user
+      .updateMany({
+        where: { id: userId, isAvailable: true, lastLocationUpdate: { lte: droppedAt } },
+        data: { isAvailable: false },
+      })
+      .then(({ count }) => {
+        if (count) console.log(`🔴 Nurse ${userId} marked unavailable after disconnect grace period`);
+      })
+      .catch((err) => console.warn('[ws] stale-offline update failed:', (err as Error)?.message ?? err));
+  }, offlineGraceMs());
+  timer.unref?.();
+  staleOfflineTimers.set(userId, timer);
+};
+
+// ===== DECLINES =====
+//
+// Which nurses passed on (or let expire) which booking, so a booking
+// re-offered when a nurse comes online isn't shown again to someone who
+// already said no. In memory and per replica, like onlineNurses; pruned in
+// the heartbeat.
+const declinedBy = new Map<string, { nurses: Set<string>; at: number }>();
+const DECLINE_TTL_MS = 24 * 3600_000;
+
+const recordDecline = (bookingId: string, nurseId: string) => {
+  const entry = declinedBy.get(bookingId) ?? { nurses: new Set<string>(), at: Date.now() };
+  entry.nurses.add(nurseId);
+  entry.at = Date.now();
+  declinedBy.set(bookingId, entry);
+};
+
+const hasDeclined = (bookingId: string, nurseId: string) =>
+  declinedBy.get(bookingId)?.nurses.has(nurseId) ?? false;
 
 const INSTANCE_ID = process.env.INSTANCE_ID ?? crypto.randomUUID();
 const WS_CHANNEL = process.env.WS_REDIS_CHANNEL ?? 'ws:events';
@@ -217,8 +309,7 @@ export const initializeWebSocket = (wss: WebSocketServer) => {
         ws.authTimeout = undefined;
       }
       if (ws.userId) {
-        clients.delete(ws.userId);
-        onlineNurses.delete(ws.userId); // Remove from online nurses
+        dropSocket(ws);
         console.log(`🔌 WebSocket disconnected for user ${ws.userId}`);
       }
     });
@@ -230,10 +321,7 @@ export const initializeWebSocket = (wss: WebSocketServer) => {
         clearTimeout(ws.authTimeout);
         ws.authTimeout = undefined;
       }
-      if (ws.userId) {
-        clients.delete(ws.userId);
-        onlineNurses.delete(ws.userId);
-      }
+      dropSocket(ws);
     });
   });
 
@@ -242,21 +330,24 @@ export const initializeWebSocket = (wss: WebSocketServer) => {
     wss.clients.forEach((ws: AuthenticatedWebSocket) => {
       if (!ws.isAlive) {
         console.log('💔 Terminating dead WebSocket connection');
-        if (ws.userId) {
-          clients.delete(ws.userId);
-          onlineNurses.delete(ws.userId);
-        }
+        dropSocket(ws);
         return ws.terminate();
       }
 
       ws.isAlive = false;
       ws.ping();
     });
+    const cutoff = Date.now() - DECLINE_TTL_MS;
+    declinedBy.forEach((entry, bookingId) => {
+      if (entry.at < cutoff) declinedBy.delete(bookingId);
+    });
   }, 30000); // 30 seconds
 
   // Cleanup on server shutdown
   wss.on('close', () => {
     clearInterval(heartbeat);
+    staleOfflineTimers.forEach((t) => clearTimeout(t));
+    staleOfflineTimers.clear();
     const pub = redisPub;
     const sub = redisSub;
     redisPub = null;
@@ -305,6 +396,18 @@ const handleNurseGoOnline = async (ws: AuthenticatedWebSocket, data: { lat: numb
     return;
   }
 
+  if (!isValidCoordinate(data?.lat, data?.lng)) {
+    ws.send(JSON.stringify({ type: 'NURSE_ONLINE_FAILED', error: 'A valid location is required to go online' }));
+    return;
+  }
+
+  // Only nurses with a verified SANC registration are dispatched to patients.
+  const credential = await checkVerifiedClinician(ws.userId);
+  if (!credential.ok) {
+    ws.send(JSON.stringify({ type: 'NURSE_ONLINE_FAILED', error: credential.error, code: credential.code }));
+    return;
+  }
+
   try {
     // Update database
     await prisma.user.update({
@@ -319,9 +422,12 @@ const handleNurseGoOnline = async (ws: AuthenticatedWebSocket, data: { lat: numb
 
     // Track in memory for fast lookup
     onlineNurses.set(ws.userId, { lat: data.lat, lng: data.lng });
+    cancelStaleOffline(ws.userId);
 
     console.log(`🟢 Nurse ${ws.userId} is now ONLINE at (${data.lat}, ${data.lng})`);
     ws.send(JSON.stringify({ type: 'NURSE_ONLINE_SUCCESS' }));
+
+    await offerOpenBookings(ws.userId, data.lat, data.lng);
   } catch (error) {
     console.error('❌ Nurse go online error:', error);
     ws.send(JSON.stringify({ error: 'Failed to go online' }));
@@ -342,7 +448,7 @@ const handleNurseGoOffline = async (ws: AuthenticatedWebSocket) => {
     });
 
     // Remove from tracking
-    onlineNurses.delete(ws.userId);
+    markNurseOffline(ws.userId);
 
     console.log(`🔴 Nurse ${ws.userId} is now OFFLINE`);
     ws.send(JSON.stringify({ type: 'NURSE_OFFLINE_SUCCESS' }));
@@ -360,39 +466,82 @@ const handleAcceptBooking = async (ws: AuthenticatedWebSocket, data: { bookingId
     return;
   }
 
+  if (typeof data?.bookingId !== 'string' || !data.bookingId) {
+    ws.send(JSON.stringify({ type: 'ACCEPT_BOOKING_FAILED', error: 'bookingId is required' }));
+    return;
+  }
+
+  // Offers only go to nurses who are online on the dispatch radar; without
+  // this any nurse account holding a booking id could claim it.
+  if (!onlineNurses.has(ws.userId)) {
+    ws.send(JSON.stringify({ type: 'ACCEPT_BOOKING_FAILED', error: 'Go online before accepting visits' }));
+    return;
+  }
+  // Re-checked here, not just at go-online: a registration can be revoked
+  // while a nurse is still online.
+  const credential = await checkVerifiedClinician(ws.userId);
+  if (!credential.ok) {
+    markNurseOffline(ws.userId);
+    ws.send(JSON.stringify({ type: 'ACCEPT_BOOKING_FAILED', error: credential.error, code: credential.code }));
+    return;
+  }
+
+  const nurseId = ws.userId;
   try {
-    // Get booking and check it's still available
-    const booking = await prisma.booking.findUnique({
-      where: { id: data.bookingId },
-      include: { patient: true },
-    });
-
-    if (!booking) {
-      ws.send(JSON.stringify({ type: 'ACCEPT_BOOKING_FAILED', error: 'Booking not found' }));
-      return;
-    }
-
-    if (booking.nurseId) {
-      ws.send(JSON.stringify({ type: 'ACCEPT_BOOKING_FAILED', error: 'Booking already taken' }));
-      return;
-    }
-
-    // Assign nurse to booking and create visit
-    const [updatedBooking, visit] = await prisma.$transaction([
-      prisma.booking.update({
+    // Claim atomically. The old read-then-write let two nurses who tapped
+    // Accept at the same moment both pass the "nurseId is null" check; the
+    // loser then hit the unique Visit.bookingId constraint and got a vague
+    // "Failed to accept booking" instead of "already taken". It also let a
+    // nurse accept a booking the patient had already cancelled.
+    const claimed = await prisma.$transaction(async (tx) => {
+      const { count } = await tx.booking.updateMany({
+        where: {
+          id: data.bookingId,
+          nurseId: null,
+          paymentStatus: { not: 'REFUNDED' }, // bookings.ts cancel marks REFUNDED
+          scheduledDate: { gt: new Date() },
+        },
+        data: { nurseId },
+      });
+      if (count === 0) return null;
+      const updatedBooking = await tx.booking.findUniqueOrThrow({
         where: { id: data.bookingId },
-        data: { nurseId: ws.userId },
         include: { patient: { select: { id: true, firstName: true, lastName: true } } },
-      }),
-      prisma.visit.create({
+      });
+      const visit = await tx.visit.create({
         data: {
           bookingId: data.bookingId,
-          nurseId: ws.userId,
+          nurseId,
           status: 'SCHEDULED',
-          scheduledStart: booking.scheduledDate,
+          scheduledStart: updatedBooking.scheduledDate,
         },
-      }),
-    ]);
+      });
+      // Accepting is what gives the nurse access to this one patient's
+      // record: until the visit, then syncVisitGrant keeps it in step with
+      // the visit and winds it down after completion (services/careAccess.ts).
+      const from = Math.max(updatedBooking.scheduledDate.getTime(), Date.now());
+      await tx.patientAccessGrant.create({
+        data: {
+          clinicianId: nurseId,
+          patientId: updatedBooking.patientId,
+          reason: 'VISIT_ASSIGNMENT',
+          sourceId: visit.id,
+          expiresAt: new Date(from + ACCESS_WINDOWS.visitFromScheduledStartHours * 3600_000),
+        },
+      });
+      return { updatedBooking, visit };
+    });
+
+    if (!claimed) {
+      const exists = await prisma.booking.findUnique({ where: { id: data.bookingId }, select: { id: true } });
+      ws.send(JSON.stringify({
+        type: 'ACCEPT_BOOKING_FAILED',
+        error: exists ? 'Booking already taken or no longer available' : 'Booking not found',
+      }));
+      return;
+    }
+    const { updatedBooking, visit } = claimed;
+    const booking = updatedBooking;
 
     console.log(`✅ Nurse ${ws.userId} accepted booking ${data.bookingId}`);
 
@@ -434,7 +583,7 @@ const handleDeclineBooking = async (ws: AuthenticatedWebSocket, data: { bookingI
     return;
   }
 
-  // Just acknowledge - we don't need to do anything in the database
+  if (typeof data?.bookingId === 'string') recordDecline(data.bookingId, ws.userId);
   console.log(`⏭️ Nurse ${ws.userId} declined booking ${data.bookingId}`);
   ws.send(JSON.stringify({ type: 'DECLINE_BOOKING_SUCCESS' }));
 };
@@ -444,6 +593,11 @@ const handleDeclineBooking = async (ws: AuthenticatedWebSocket, data: { bookingI
 const handleLocationUpdate = async (ws: AuthenticatedWebSocket, data: any) => {
   if (!ws.userId || ws.userRole !== 'NURSE') {
     ws.send(JSON.stringify({ error: 'Unauthorized' }));
+    return;
+  }
+
+  if (!isValidCoordinate(data?.lat, data?.lng)) {
+    ws.send(JSON.stringify({ error: 'Invalid location' }));
     return;
   }
 
@@ -460,6 +614,7 @@ const handleLocationUpdate = async (ws: AuthenticatedWebSocket, data: any) => {
 
     // Update in-memory tracking if online
     if (onlineNurses.has(ws.userId)) {
+      cancelStaleOffline(ws.userId);
       onlineNurses.set(ws.userId, { lat: data.lat, lng: data.lng });
     }
 
@@ -515,25 +670,53 @@ const handleVisitStatusUpdate = async (ws: AuthenticatedWebSocket, data: any) =>
     ws.send(JSON.stringify({ error: 'Unauthorized' }));
     return;
   }
+  if (typeof data?.visitId !== 'string' || !isVisitStatus(data?.status)) {
+    ws.send(JSON.stringify({ error: 'Invalid visit status update' }));
+    return;
+  }
 
   try {
-    const visit = await prisma.visit.update({
+    const existing = await prisma.visit.findUnique({
       where: { id: data.visitId },
-      data: { status: data.status },
-      include: {
-        booking: {
-          include: { patient: true },
-        },
-      },
+      include: { booking: { select: { patientId: true } } },
     });
+    // Previously this updated any visit id it was given — any nurse or
+    // doctor socket could change the status of a visit that wasn't theirs.
+    const isAdmin = ws.userRole === 'ADMIN';
+    const isAssigned = existing && (existing.nurseId === ws.userId || existing.doctorId === ws.userId);
+    if (!existing || (!isAdmin && !isAssigned)) {
+      ws.send(JSON.stringify({ error: 'Visit not found' }));
+      return;
+    }
+    if (!isAdmin) {
+      const credential = await checkVerifiedClinician(ws.userId);
+      if (!credential.ok || !(await hasActiveAccess(ws.userId, existing.booking.patientId))) {
+        ws.send(JSON.stringify({ error: 'You do not currently have access to this patient\u2019s record.' }));
+        return;
+      }
+    }
+    const transitionError = visitTransitionError(existing.status, data.status, isAdmin);
+    if (transitionError) {
+      ws.send(JSON.stringify({ error: transitionError }));
+      return;
+    }
+    const { count } = await prisma.visit.updateMany({
+      where: { id: existing.id, status: existing.status },
+      data: { status: data.status, ...visitTimingFor(data.status) },
+    });
+    if (count === 0) {
+      ws.send(JSON.stringify({ error: 'Visit status changed in the meantime' }));
+      return;
+    }
+    await syncVisitGrant(existing, data.status);
 
     // Broadcast status update to all relevant parties
-    const relevantUsers = [visit.booking.patientId];
-    if (visit.doctorId) relevantUsers.push(visit.doctorId);
+    const relevantUsers = [existing.booking.patientId];
+    if (existing.doctorId) relevantUsers.push(existing.doctorId);
     broadcastToUsers(relevantUsers, {
       type: 'VISIT_STATUS_CHANGED',
       data: {
-        visitId: visit.id,
+        visitId: existing.id,
         status: data.status,
         timestamp: new Date().toISOString(),
       },
@@ -603,6 +786,7 @@ export const broadcastToUsers = (userIds: string[], message: any) => {
 
 // Broadcast that a booking has been taken
 const broadcastBookingTakenLocal = (bookingId: string, acceptedByNurseId: string) => {
+  declinedBy.delete(bookingId);
   onlineNurses.forEach((_, nurseId) => {
     if (nurseId !== acceptedByNurseId) {
       const nurseWs = clients.get(nurseId);
@@ -619,6 +803,11 @@ const broadcastBookingTakenLocal = (bookingId: string, acceptedByNurseId: string
 const broadcastBookingTaken = (bookingId: string, acceptedByNurseId: string) => {
   broadcastBookingTakenLocal(bookingId, acceptedByNurseId);
   publishEvent({ instanceId: INSTANCE_ID, type: 'bookingTaken', bookingId, acceptedByNurseId });
+};
+
+/** Patient cancelled before anyone accepted: pull the offer off nurses' screens. */
+export const withdrawBookingOffer = (bookingId: string) => {
+  broadcastBookingTaken(bookingId, '');
 };
 
 // Haversine formula for distance calculation
@@ -673,6 +862,60 @@ const notifyNearbyNursesLocal = (
 
   console.log(`📢 Notified ${notifiedCount} nurses about new booking ${booking.id}`);
   return notifiedCount;
+};
+
+const MAX_REOFFERS = 10;
+
+/**
+ * A booking used to be offered exactly once, at creation, to whoever was
+ * online at that instant. If nobody was, or everyone passed, it was never
+ * offered again, and a nurse coming online later never saw it. Now, when a
+ * nurse goes online, they're sent every open booking within range that they
+ * haven't already declined (soonest first).
+ */
+const offerOpenBookings = async (nurseId: string, lat: number, lng: number) => {
+  try {
+    const open = await prisma.booking.findMany({
+      where: {
+        nurseId: null,
+        paymentStatus: { not: 'REFUNDED' },
+        scheduledDate: { gt: new Date() },
+        encryptedPatientLocation: { not: null },
+      },
+      select: {
+        id: true, scheduledDate: true, estimatedDuration: true, amountInCents: true,
+        encryptedPatientLocation: true,
+        patient: { select: { firstName: true, lastName: true } },
+      },
+      orderBy: { scheduledDate: 'asc' },
+      take: 200,
+    });
+    let offered = 0;
+    for (const b of open) {
+      if (offered >= MAX_REOFFERS) break;
+      if (hasDeclined(b.id, nurseId)) continue;
+      // Decrypted in memory only for the distance check; never sent to the nurse.
+      const location = decryptPatientLocation(b.encryptedPatientLocation);
+      if (!location) continue;
+      const distance = getDistanceFromLatLonInKm(location.lat, location.lng, lat, lng);
+      if (distance > DISPATCH_RADIUS_KM) continue;
+      const delivered = deliverToUserLocal(nurseId, {
+        type: 'NEW_BOOKING_AVAILABLE',
+        data: {
+          bookingId: b.id,
+          patientName: displayName(b.patient.firstName, b.patient.lastName),
+          scheduledDate: b.scheduledDate.toISOString(),
+          estimatedDuration: b.estimatedDuration,
+          amountInCents: b.amountInCents,
+          distanceKm: Math.round(distance * 10) / 10,
+        },
+      });
+      if (delivered) offered += 1;
+    }
+    if (offered) console.log(`📢 Re-offered ${offered} open booking(s) to nurse ${nurseId}`);
+  } catch (err) {
+    console.warn('[ws] offering open bookings failed:', (err as Error)?.message ?? err);
+  }
 };
 
 // Notify nearby online nurses about a new booking

@@ -7,6 +7,7 @@ import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 import { emailSchema, passwordComplexitySchema } from './auth';
 import { adminOverrideVerification, SancVerificationStatus } from '../services/sancVerification';
 import prisma from '../lib/prisma';
+import { revokeAllSessions } from '../services/sessions';
 
 const router: Router = Router();
 
@@ -231,6 +232,32 @@ router.patch('/users/:id/sanc', requireAdmin, async (req: AuthenticatedRequest, 
   } catch (error) { return next(error); }
 });
 
+// Reset a user's two-factor authentication (Admin only) when they've lost
+// their authenticator and backup codes. Clears the secret and ends every
+// session, so the user signs in again and must re-enrol (mandatory for
+// staff). An admin can't reset their own — a second admin has to, so one
+// compromised admin account can't strip its own second factor.
+const mfaResetSchema = Joi.object({ reason: Joi.string().trim().min(10).max(1000).required() });
+
+router.post('/users/:id/2fa/reset', requireAdmin, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { error, value } = mfaResetSchema.validate(req.body);
+    if (error) return res.status(400).json({ error: error.details[0].message });
+    const { id } = req.params;
+    if (id === req.user!.id) {
+      return res.status(403).json({ error: 'Another administrator has to reset your two-factor authentication.' });
+    }
+    const user = await prisma.user.findUnique({ where: { id }, select: { id: true, totpEnabled: true } });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    await prisma.user.update({ where: { id }, data: { totpEnabled: false, totpSecret: null, totpBackupCodes: [] } });
+    await revokeAllSessions(id);
+    await invalidateCachedUser(id);
+    await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'UPDATE', resource: 'AdminAction', resourceId: id, metadata: { entity: 'TwoFactorReset', reason: value.reason, wasEnabled: user.totpEnabled }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
+    return res.json({ success: true });
+  } catch (error) { return next(error); }
+});
+
 // Reset trial/demo data (Admin only) — the "nuclear option" on the admin
 // dashboard. Found via the same report: the button called POST
 // /admin/reset-trial-data, which didn't exist at all, so it 404'd for
@@ -254,6 +281,7 @@ router.post('/reset-trial-data', requireAdmin, async (req: AuthenticatedRequest,
 
     const callerId = req.user!.id;
 
+    await prisma.patientAccessGrant.deleteMany({});
     await prisma.message.deleteMany({});
     await prisma.payment.deleteMany({});
     await prisma.biometricReading.deleteMany({});

@@ -18,7 +18,32 @@ export function generateIVSalt(): string {
   return crypto.randomBytes(16).toString('hex');
 }
 
+/**
+ * Key material installed at startup by lib/keyManagement.ts when the key is
+ * held in a key management service (AWS KMS): decrypted in memory only,
+ * never written to process.env. When unset, the plaintext ENCRYPTION_KEY /
+ * ENCRYPTION_KEY_PREVIOUS environment variables are used (local dev,
+ * tests, and deployments not yet moved to KMS).
+ */
+const keyStore: { current?: Buffer; previous?: Buffer } = {};
+
+export function setEncryptionKeyMaterial(material: { current: Buffer; previous?: Buffer }): void {
+  if (material.current.length !== keyLength) throw new Error('Encryption key must be 32 bytes');
+  if (material.previous && material.previous.length !== keyLength) throw new Error('Previous encryption key must be 32 bytes');
+  keyStore.current = Buffer.from(material.current);
+  keyStore.previous = material.previous ? Buffer.from(material.previous) : undefined;
+}
+
+/** Test helper: forget installed key material (falls back to env). */
+export function clearEncryptionKeyMaterial(): void {
+  keyStore.current?.fill(0);
+  keyStore.previous?.fill(0);
+  keyStore.current = undefined;
+  keyStore.previous = undefined;
+}
+
 export function getEncryptionKey(key?: string): Buffer {
+  if (!key && keyStore.current) return keyStore.current;
   const encryptionKeyStr = key || process.env.ENCRYPTION_KEY;
   if (!encryptionKeyStr) {
     throw new Error('Encryption keys not configured');
@@ -50,9 +75,10 @@ function resolveKeyForId(keyId: string, explicitKey?: string): Buffer {
   }
 
   const previousId = process.env.ENCRYPTION_KEY_PREVIOUS_ID;
-  const previousKey = process.env.ENCRYPTION_KEY_PREVIOUS;
-  if (previousId && previousKey && keyId === previousId) {
-    return getEncryptionKey(previousKey);
+  if (previousId && keyId === previousId) {
+    if (keyStore.previous) return keyStore.previous;
+    const previousKey = process.env.ENCRYPTION_KEY_PREVIOUS;
+    if (previousKey) return getEncryptionKey(previousKey);
   }
 
   throw new Error(
@@ -218,6 +244,35 @@ export function safeDecrypt(value: string | null | undefined, aad?: string): str
   } catch {
     return null;
   }
+}
+
+// AAD purpose label for Booking.encryptedPatientLocation, so ciphertext from
+// another field (e.g. the address) can't be swapped in and decrypt as a location.
+const PATIENT_LOCATION_AAD = 'booking:patient-location';
+
+export function encryptPatientLocation(lat: number, lng: number): string {
+  return encryptData(JSON.stringify({ lat, lng }), PATIENT_LOCATION_AAD);
+}
+
+/** Null for a missing, undecryptable or malformed value — never throws. */
+export function decryptPatientLocation(value: string | null | undefined): { lat: number; lng: number } | null {
+  if (!value || !isEncryptedPayload(value)) return null;
+  try {
+    const parsed = JSON.parse(decryptData(value, PATIENT_LOCATION_AAD));
+    return Number.isFinite(parsed?.lat) && Number.isFinite(parsed?.lng) ? { lat: parsed.lat, lng: parsed.lng } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Key for pseudonymous references in analytics (e.g. the BP-validation
+ * report). PSEUDONYM_KEY if set; otherwise derived from the data key, so it
+ * works the same whether that key came from the environment or from KMS.
+ */
+export function getPseudonymKey(): Buffer {
+  if (process.env.PSEUDONYM_KEY) return Buffer.from(process.env.PSEUDONYM_KEY, 'utf8');
+  return crypto.createHmac('sha256', getEncryptionKey()).update('ahava:pseudonym:v1').digest();
 }
 
 export function hashSensitiveData(data: string): string {

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import RoleGuard, { UserRole } from "../../components/RoleGuard";
 import DashboardLayout from "../../components/DashboardLayout";
 import TwoFactorSettings from "../../components/TwoFactorSettings";
+import ChangePasswordSettings from "../../components/ChangePasswordSettings";
 import { authApi, patientApi, RiskProfile } from "../../lib/api";
 import { useAuth } from "../../contexts/AuthContext";
 
@@ -729,7 +730,8 @@ export default function ProfilePage() {
               )}
             </form>
 
-            {user && <TwoFactorSettings initiallyEnabled={!!user.totpEnabled} />}
+            {user && <ChangePasswordSettings />}
+            {user && <TwoFactorSettings initiallyEnabled={!!user.totpEnabled} required={['NURSE', 'DOCTOR', 'ADMIN'].includes(user.role)} />}
           </div>
         </div>
       </DashboardLayout>

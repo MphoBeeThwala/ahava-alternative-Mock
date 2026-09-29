@@ -1,5 +1,6 @@
 /**
- * Opt-in TOTP two-factor auth (AH-29).
+ * TOTP two-factor auth (AH-29). Optional for patients; mandatory for
+ * nurses, doctors and admins (services/mfaPolicy.ts, ENGINEERING_PLAN §39).
  *
  * Setup flow: POST /setup generates and stores an (unverified) secret ->
  * POST /verify-setup proves possession of it and flips totpEnabled on,
@@ -17,6 +18,8 @@ import Joi from "joi";
 import { authMiddleware, AuthenticatedRequest, invalidateCachedUser } from "../middleware/auth";
 import { authRateLimiter } from "../middleware/rateLimiter";
 import prisma from "../lib/prisma";
+import { isMfaRequired } from "../services/mfaPolicy";
+import { auditSignIn } from "../services/signInAudit";
 import { getRedis } from "../services/redis";
 import { verifyToken, TokenTypeError } from "../services/tokens";
 import { setAuthCookies } from "../services/authSession";
@@ -170,6 +173,12 @@ router.post("/disable", authMiddleware, authRateLimiter, async (req: Authenticat
     }).validate(req.body);
     if (error) return res.status(400).json({ error: error.details[0].message });
 
+    // Mandatory for staff: they can't switch it off. A lost authenticator
+    // is reset by another admin (POST /admin/users/:id/2fa/reset).
+    if (isMfaRequired(req.user!.role)) {
+      return res.status(403).json({ error: "Two-factor authentication is required for your role and can't be turned off. Ask an administrator if you've lost your authenticator.", code: "MFA_REQUIRED" });
+    }
+
     const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
     if (!user || !user.passwordHash || !user.totpEnabled || !user.totpSecret) {
       return res.status(400).json({ error: "Two-factor authentication is not enabled" });
@@ -244,6 +253,7 @@ router.post("/login-verify", authRateLimiter, async (req, res, next) => {
       const backupResult = await consumeBackupCode(value.code, user.totpBackupCodes);
       if (!backupResult.matched) {
         await recordLoginVerifyFailure(userId);
+        await auditSignIn(req, "LOGIN_2FA_FAILED", user);
         return res.status(401).json({ error: "Invalid code" });
       }
       remainingBackupCodes = backupResult.remaining;
@@ -258,6 +268,7 @@ router.post("/login-verify", authRateLimiter, async (req, res, next) => {
     }
 
     const { accessToken, refreshToken } = await generateTokens(user.id, user.role);
+    await auditSignIn(req, "LOGIN_SUCCESS", user, { method: remainingBackupCodes ? "password+backup_code" : "password+totp" });
     setAuthCookies(res, req, { accessToken, refreshToken });
 
     res.json({

@@ -5,6 +5,7 @@ import prisma from '../lib/prisma';
 import { getAccessTokenFromRequest } from '../services/authSession';
 import { verifyToken } from '../services/tokens';
 import { publishAuthCacheInvalidation, onAuthCacheInvalidate } from '../services/websocket';
+import { MFA_ENROLMENT_REQUIRED, isEnrolmentPath, isMfaRequired } from '../services/mfaPolicy';
 
 export interface AuthenticatedRequest extends Request {
   user?: {
@@ -12,6 +13,7 @@ export interface AuthenticatedRequest extends Request {
     email: string;
     role: UserRole;
     isActive: boolean;
+    totpEnabled?: boolean;
   };
 }
 
@@ -26,7 +28,7 @@ async function getCachedUser(userId: string): Promise<NonNullable<AuthenticatedR
   try {
     const { getRedis } = await import('../services/redis');
     const redis = getRedis();
-    const cached = await redis.get(`auth:user:${userId}`);
+    const cached = await redis.get(`auth:user:v2:${userId}`);
     if (cached) return JSON.parse(cached);
   } catch { /* redis unavailable — treat as a cache miss */ }
   return null;
@@ -35,7 +37,7 @@ async function setCachedUser(userId: string, user: NonNullable<AuthenticatedRequ
   try {
     const { getRedis } = await import('../services/redis');
     const redis = getRedis();
-    await redis.set(`auth:user:${userId}`, JSON.stringify(user), 'EX', ttlSeconds);
+    await redis.set(`auth:user:v2:${userId}`, JSON.stringify(user), 'EX', ttlSeconds);
   } catch { /* redis unavailable — request still succeeds, just uncached */ }
 }
 
@@ -44,7 +46,7 @@ export async function invalidateCachedUser(userId: string) {
   try {
     const { getRedis } = await import("../services/redis");
     const redis = getRedis();
-    await redis.del(`auth:user:${userId}`);
+    await redis.del(`auth:user:v2:${userId}`);
   } catch { /* redis unavailable — local map entry above is still cleared */ }
   // AH-08: tell every other replica too — without this, only the replica
   // that handled this request (and Redis's own cache) heard about it.
@@ -59,6 +61,15 @@ export const authMiddleware = async (
   try {
     // Skip verification if already authenticated (e.g. app-level auth already ran for /api/patient)
     if (req.user) return next();
+
+    // Mandatory 2FA for staff (services/mfaPolicy.ts): until enrolled, a
+    // staff session reaches only the enrolment endpoints.
+    const finish = () => {
+      if (req.user && isMfaRequired(req.user.role) && !req.user.totpEnabled && !isEnrolmentPath(req.originalUrl)) {
+        return res.status(403).json(MFA_ENROLMENT_REQUIRED);
+      }
+      return next();
+    };
 
     const authHeader = req.headers.authorization;
     const bearerToken = authHeader?.split(' ')[1];
@@ -98,7 +109,7 @@ export const authMiddleware = async (
       if (redisUser) {
         if (!redisUser.isActive) return res.status(401).json({ error: 'Invalid or inactive user' });
         req.user = redisUser;
-        return next();
+        return finish();
       }
       const cached = userCache.get(decoded.userId);
       if (cached && cached.expiresAt > now) {
@@ -106,7 +117,7 @@ export const authMiddleware = async (
           return res.status(401).json({ error: 'Invalid or inactive user' });
         }
         req.user = cached.user;
-        return next();
+        return finish();
       }
       if (cached) userCache.delete(decoded.userId);
     }
@@ -119,6 +130,7 @@ export const authMiddleware = async (
         email: true,
         role: true,
         isActive: true,
+        totpEnabled: true,
       },
     });
 
@@ -131,7 +143,7 @@ export const authMiddleware = async (
       userCache.set(decoded.userId, { user, expiresAt: now + cacheTtlSeconds * 1000 });
       await setCachedUser(decoded.userId, user, cacheTtlSeconds);
     }
-    next();
+    return finish();
   } catch (error) {
     if (error instanceof jwt.JsonWebTokenError) {
       return res.status(401).json({ error: 'Invalid token' });

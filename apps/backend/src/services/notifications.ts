@@ -129,6 +129,42 @@ export async function notifyVisitApproved(params: {
   });
 }
 
+/**
+ * Break-glass: a clinician opened the patient's record in an emergency,
+ * outside the normal care relationship. The patient is told who, when, and
+ * for how long, and where to see their full access history. The clinician's
+ * written justification is deliberately not included: email is a weaker
+ * channel than the app, and the reason may describe the patient's condition.
+ */
+export async function notifyEmergencyAccess(params: {
+  to: string;
+  patientName: string;
+  clinicianName: string;
+  clinicianRole: string;
+  registration: string | null;
+  grantedAt: Date;
+  expiresAt: Date;
+}): Promise<void> {
+  const when = (d: Date) => d.toLocaleString('en-ZA', { timeZone: 'Africa/Johannesburg', dateStyle: 'medium', timeStyle: 'short' });
+  const frontend = (process.env.FRONTEND_URL || '').replace(/\/+$/, '');
+  const logLink = frontend ? `<p><a href="${escapeHtml(`${frontend}/patient/access-log`)}">See everyone who has accessed your record</a></p>` : '';
+  const body = `
+    <p>Hi ${escapeHtml(params.patientName)},</p>
+    <p>Your health record was opened using <strong>emergency access</strong>. This is used only when someone needs care urgently and the normal route isn't available. Every use is logged and reviewed by an administrator.</p>
+    <p><strong>Opened by:</strong> ${escapeHtml(params.clinicianName)} (${escapeHtml(params.clinicianRole)}${params.registration ? `, ${escapeHtml(params.registration)}` : ''})<br/>
+    <strong>When:</strong> ${escapeHtml(when(params.grantedAt))}<br/>
+    <strong>Access ends:</strong> ${escapeHtml(when(params.expiresAt))}</p>
+    ${logLink}
+    <p>If you don't recognise this, contact ${APP_NAME} support through the app.</p>
+  `;
+  await addEmailJob({
+    to: params.to,
+    subject: 'Your health record was opened with emergency access',
+    html: wrapHtml('Emergency access to your record', body),
+    priority: 1,
+  });
+}
+
 export async function notifyPrescriptionReady(params: {
   to: string;
   patientName: string;

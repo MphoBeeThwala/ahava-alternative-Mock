@@ -9,6 +9,8 @@
  */
 import request from "supertest";
 import { app } from "../index";
+import prisma from "../lib/prisma";
+import { decryptPatientLocation } from "../utils/encryption";
 
 function uniqueEmail(label: string): string {
   return `${label}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`;
@@ -56,6 +58,22 @@ describe("bookings: create", () => {
     expect(res.body.success).toBe(true);
     expect(res.body.booking.paymentStatus).toBe("PENDING");
     expect(typeof res.body.notifiedNurses).toBe("number");
+  });
+
+  it("stores the patient's coordinates encrypted so the booking can be re-offered to nurses later", async () => {
+    const { agent } = await registerRole("PATIENT", "booking-coords");
+
+    const res = await agent.post("/api/v1/bookings").send(validBookingBody());
+
+    expect(res.status).toBe(201);
+    const stored = await prisma.booking.findUnique({ where: { id: res.body.booking.id } });
+    // Encrypted at rest, like the address — never plaintext coordinates.
+    expect(stored!.encryptedPatientLocation).not.toContain("-33.92");
+    expect(decryptPatientLocation(stored!.encryptedPatientLocation)).toEqual({ lat: -33.9249, lng: 18.4241 });
+    // And the ciphertext is never returned to the client.
+    expect(res.body.booking).not.toHaveProperty("encryptedPatientLocation");
+    expect(res.body.booking).not.toHaveProperty("encryptedAddress");
+    expect(res.body.booking.address).toBe("12 Main Road, Cape Town");
   });
 
   it("rejects a booking request from a NURSE (patient-only route)", async () => {

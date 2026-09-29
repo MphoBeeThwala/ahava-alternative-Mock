@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { AuthenticatedRequest, requireAdmin } from '../middleware/auth';
 import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
+import crypto from 'crypto';
+import { getPseudonymKey } from '../utils/encryption';
 import prisma from '../lib/prisma';
 
 // Retrospective validation for AH-45.5a's bp_risk.prompt_bp_check flag —
@@ -11,6 +13,10 @@ import prisma from '../lib/prisma';
 // reading? Nothing computed that until now. Admin-only — this is
 // population-level research/QA data, not a single patient's clinical
 // record, and doesn't belong on the doctor monitoring worklist (#30).
+function pseudonymousRef(userId: string): string {
+  return crypto.createHmac('sha256', getPseudonymKey()).update(`bp-validation:${userId}`).digest('hex').slice(0, 16);
+}
+
 const router: Router = Router();
 
 // Standard clinical convention (WHO, JNC7/8, ACC/AHA all broadly agree in
@@ -82,7 +88,7 @@ router.get('/bp-flag-validation', requireAdmin, async (req: AuthenticatedRequest
     let tp = 0, fp = 0, fn = 0, tn = 0;
     let pairedCount = 0;
     const pairs: Array<{
-      userId: string;
+      patientRef: string;
       calibrationReadingId: string;
       calibrationAt: string;
       elevated: boolean;
@@ -112,7 +118,11 @@ router.get('/bp-flag-validation', requireAdmin, async (req: AuthenticatedRequest
       else tn++;
 
       pairs.push({
-        userId: cal.userId,
+        // Pseudonymous: a keyed hash, stable within the report so pairs from
+        // the same patient group together, but not reversible to a user id
+        // by someone who can list users. This is an algorithm-validation
+        // report, not a patient view (docs/ENGINEERING_PLAN.md §38).
+        patientRef: pseudonymousRef(cal.userId),
         calibrationReadingId: cal.id,
         calibrationAt: cal.createdAt.toISOString(),
         elevated,

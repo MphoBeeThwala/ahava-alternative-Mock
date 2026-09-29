@@ -13,5 +13,6 @@ export * from './wearables';
 export * from './consent';
 export * from './admin';
 export * from './doctorProfile';
+export * from './access';
 
 export { default } from './client';

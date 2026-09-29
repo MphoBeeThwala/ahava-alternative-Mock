@@ -1,5 +1,10 @@
 import { Router } from "express";
-import { AuthenticatedRequest, requireDoctor } from "../middleware/auth";
+import { AuthenticatedRequest } from "../middleware/auth";
+import {
+  ACCESS_WINDOWS, ageFrom, grantAccess, hoursFromNow, patientsWithActiveAccess, requireVerifiedClinician,
+} from "../services/careAccess";
+
+const requireVerifiedDoctor = requireVerifiedClinician(["DOCTOR"]);
 import { writeRequestAudit } from "../services/clinicalAudit";
 import prisma from "../lib/prisma";
 
@@ -26,7 +31,7 @@ function severityRank(r: {
   return 0;
 }
 
-router.get("/", requireDoctor, async (req: AuthenticatedRequest, res, next) => {
+router.get("/", requireVerifiedDoctor, async (req: AuthenticatedRequest, res, next) => {
   try {
     // Only patients who've given BIOMETRIC_MONITORING consent — the
     // PatientConsent type already modeled for exactly this (see
@@ -38,7 +43,7 @@ router.get("/", requireDoctor, async (req: AuthenticatedRequest, res, next) => {
     });
     const consentedIds = consented.map((c) => c.userId);
     if (consentedIds.length === 0) {
-      return res.json({ success: true, patients: [] });
+      return res.json({ success: true, patients: [], unassigned: [] });
     }
 
     // One row per patient — their single most recent reading, not any
@@ -85,14 +90,48 @@ router.get("/", requireDoctor, async (req: AuthenticatedRequest, res, next) => {
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
 
+    // Care access: full detail only for patients this doctor has taken on.
+    // Flagged patients another doctor is already monitoring are theirs; the
+    // rest appear as unassigned alerts (acuity and age only) to claim.
+    const me = req.user!.id;
+    const flaggedIds = flagged.map((r) => r.userId);
+    const mine = await patientsWithActiveAccess(me, flaggedIds);
+    const now = new Date();
+    const heldByOthers = new Set(
+      (
+        await prisma.patientAccessGrant.findMany({
+          where: {
+            patientId: { in: flaggedIds },
+            clinicianId: { not: me },
+            reason: "MONITORING",
+            revokedAt: null,
+            startsAt: { lte: now },
+            expiresAt: { gt: now },
+          },
+          select: { patientId: true },
+        })
+      ).map((g) => g.patientId),
+    );
+    const unassigned = flagged
+      .filter((r) => !mine.has(r.userId) && !heldByOthers.has(r.userId))
+      .map((r) => ({
+        userId: r.userId,
+        patientAge: ageFrom(r.user.dateOfBirth),
+        latestReadingAt: r.createdAt,
+        alertLevel: r.alertLevel ?? "GREEN",
+        restricted: "NOT_CLAIMED" as const,
+      }));
+
     await writeRequestAudit({
-      userId: req.user!.id,
+      userId: me,
       userRole: req.user!.role,
       action: "LIST",
       resource: "PatientMonitoringWorklist",
       metadata: {
         flaggedCount: flagged.length,
         totalConsented: consentedIds.length,
+        fullRecords: mine.size,
+        unassigned: unassigned.length,
       },
       ipAddress: req.ip,
       userAgent: req.get("User-Agent"),
@@ -100,7 +139,8 @@ router.get("/", requireDoctor, async (req: AuthenticatedRequest, res, next) => {
 
     res.json({
       success: true,
-      patients: flagged.map((r) => ({
+      unassigned,
+      patients: flagged.filter((r) => mine.has(r.userId)).map((r) => ({
         userId: r.userId,
         firstName: r.user.firstName,
         lastName: r.user.lastName,
@@ -128,6 +168,50 @@ router.get("/", requireDoctor, async (req: AuthenticatedRequest, res, next) => {
         oxygenSaturation: r.oxygenSaturation,
       })),
     });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// A doctor takes on a flagged patient from the unassigned alerts. Needs
+// the patient's BIOMETRIC_MONITORING consent, and nobody else monitoring
+// them; grants time-bound access to that patient's record.
+router.post("/:patientId/claim", requireVerifiedDoctor, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { patientId } = req.params;
+    const me = req.user!.id;
+    const consent = await prisma.patientConsent.findFirst({
+      where: { userId: patientId, consentType: "BIOMETRIC_MONITORING", withdrawn: false },
+      select: { id: true },
+    });
+    if (!consent) return res.status(404).json({ error: "Patient is not enrolled in monitoring" });
+    const now = new Date();
+    const other = await prisma.patientAccessGrant.findFirst({
+      where: {
+        patientId, clinicianId: { not: me }, reason: "MONITORING",
+        revokedAt: null, startsAt: { lte: now }, expiresAt: { gt: now },
+      },
+      select: { id: true },
+    });
+    if (other) return res.status(409).json({ error: "Another doctor is already monitoring this patient" });
+
+    const grant = await grantAccess({
+      clinicianId: me,
+      patientId,
+      reason: "MONITORING",
+      expiresAt: hoursFromNow(ACCESS_WINDOWS.monitoringDays * 24),
+    });
+    await writeRequestAudit({
+      userId: me,
+      userRole: req.user!.role,
+      action: "UPDATE",
+      resource: "PatientMonitoringWorklist",
+      resourceId: patientId,
+      metadata: { action: "CLAIM_MONITORING", patientId, grantId: grant.id },
+      ipAddress: req.ip,
+      userAgent: req.get("User-Agent"),
+    });
+    return res.json({ success: true, expiresAt: grant.expiresAt });
   } catch (error) {
     return next(error);
   }

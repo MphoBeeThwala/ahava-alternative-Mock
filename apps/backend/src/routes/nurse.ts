@@ -1,9 +1,15 @@
-import { Router } from 'express';
+import { NextFunction, Response, Router } from 'express';
 import { UserRole } from '@prisma/client';
 import { AuthenticatedRequest, authMiddleware, requireNurse } from '../middleware/auth';
 import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 import { safeDecrypt } from '../utils/encryption';
 import prisma from '../lib/prisma';
+import { isValidCoordinate, markNurseOffline } from '../services/websocket';
+import { patientsWithActiveAccess, requireVerifiedClinician } from '../services/careAccess';
+import { redactVisit } from '../services/visitProjection';
+
+// Going online, and reading any visit, needs a verified SANC registration.
+const requireVerifiedNurse = requireVerifiedClinician(['NURSE']);
 
 const router: Router = Router();
 
@@ -20,26 +26,51 @@ router.get('/profile', requireNurse, async (req: AuthenticatedRequest, res, next
   } catch (error) { return next(error); }
 });
 
-// Update availability
-router.patch('/availability', requireNurse, async (req: AuthenticatedRequest, res, next) => {
+// Update availability.
+//
+// The web client has been sending POST here while only PATCH was mounted,
+// so "Go online" always fell through to the 404 handler ("Route not found").
+// Both verbs are accepted: PATCH is the correct one, POST keeps any already
+// shipped mobile (Capacitor) build working until it is updated.
+const updateAvailability = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
-    const { isAvailable, lat, lng } = req.body;
+    const { isAvailable, lat, lng } = req.body ?? {};
+    if (typeof isAvailable !== 'boolean') {
+      return res.status(400).json({ error: 'isAvailable must be a boolean' });
+    }
+    const hasLocation = lat !== undefined || lng !== undefined;
+    if (hasLocation && !isValidCoordinate(lat, lng)) {
+      return res.status(400).json({ error: 'lat/lng must be valid coordinates' });
+    }
+    if (isAvailable && !hasLocation) {
+      return res.status(400).json({ error: 'A location (lat, lng) is required to go online' });
+    }
+
+    const before = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { isAvailable: true } });
     const nurse = await prisma.user.update({
       where: { id: req.user!.id },
-      data: { isAvailable, lastKnownLat: lat, lastKnownLng: lng, lastLocationUpdate: new Date() },
+      // Going offline without a location leaves the last known position
+      // alone — the client used to send 0,0 here, which overwrote it with a
+      // point in the Atlantic.
+      data: hasLocation
+        ? { isAvailable, lastKnownLat: lat, lastKnownLng: lng, lastLocationUpdate: new Date() }
+        : { isAvailable },
       select: { id: true, isAvailable: true, lastKnownLat: true, lastKnownLng: true }
     });
-    await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'UPDATE', resource: 'Nurse', resourceId: nurse.id, metadata: { oldAvailability: !isAvailable, newAvailability: isAvailable, lat, lng }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
-    res.json({ success: true, nurse });
-  } catch (error) { next(error); }
-});
+    if (!isAvailable) markNurseOffline(nurse.id);
+    await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'UPDATE', resource: 'Nurse', resourceId: nurse.id, metadata: { oldAvailability: before?.isAvailable ?? null, newAvailability: isAvailable, lat, lng }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
+    return res.json({ success: true, nurse });
+  } catch (error) { return next(error); }
+};
+router.patch('/availability', requireVerifiedNurse, updateAvailability);
+router.post('/availability', requireVerifiedNurse, updateAvailability);
 
 // Get nurse visits
-router.get('/visits', requireNurse, async (req: AuthenticatedRequest, res, next) => {
+router.get('/visits', requireVerifiedNurse, async (req: AuthenticatedRequest, res, next) => {
   try {
     const visits = await prisma.visit.findMany({
       where: { nurseId: req.user!.id },
-      include: { booking: { select: { scheduledDate: true, amountInCents: true, encryptedAddress: true, patient: { select: { id: true, firstName: true, lastName: true, phone: true } } } } },
+      include: { booking: { select: { patientId: true, scheduledDate: true, amountInCents: true, encryptedAddress: true, patient: { select: { id: true, firstName: true, lastName: true, phone: true } } } } },
       orderBy: { scheduledStart: 'desc' }
     });
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'LIST', resource: 'Nurse', metadata: { entity: 'Visit', count: visits.length }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
@@ -47,8 +78,11 @@ router.get('/visits', requireNurse, async (req: AuthenticatedRequest, res, next)
     // encryptedAddress at all, so the nurse assigned to go to a patient
     // could never actually see the visit address — the frontend always
     // showed its generic "Address on file" fallback text.
+    // Past visits stay listed (history, earnings) but the patient's details
+    // are only shown while the nurse still has care access.
+    const allowed = await patientsWithActiveAccess(req.user!.id, visits.map((v) => v.booking.patientId));
     const decryptedVisits = visits.map((visit) => {
-      if (!visit.booking) return visit;
+      if (!allowed.has(visit.booking.patientId)) return redactVisit(visit, 'ACCESS_EXPIRED');
       const { encryptedAddress, ...bookingRest } = visit.booking;
       return { ...visit, booking: { ...bookingRest, address: safeDecrypt(encryptedAddress) } };
     });

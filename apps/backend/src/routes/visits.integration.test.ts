@@ -9,6 +9,7 @@
 import request from "supertest";
 import { app } from "../index";
 import prisma from "../lib/prisma";
+import { grantTestAccess, verifyClinician } from "../testSetup/clinicians";
 
 function uniqueEmail(label: string): string {
   return `${label}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`;
@@ -27,6 +28,8 @@ async function registerRole(role: "PATIENT" | "NURSE" | "DOCTOR", label: string)
     role,
   });
   expect(res.status).toBe(201);
+  // Working clinicians have verified registrations (see testSetup/clinicians.ts).
+  if (role !== "PATIENT") await verifyClinician(res.body.user.id, role);
   return { agent, email, userId: res.body.user.id as string };
 }
 
@@ -51,6 +54,8 @@ async function seedBookingAndVisit(patientId: string, nurseId: string, address =
       scheduledStart: booking.scheduledDate,
     },
   });
+  // What accepting the visit over the WebSocket would have granted.
+  await grantTestAccess(nurseId, patientId, "VISIT_ASSIGNMENT", visit.id);
   return { booking, visit };
 }
 
@@ -143,6 +148,57 @@ describe("visits: status updates (nurse only, assigned nurse only)", () => {
   });
 });
 
+describe("visits: status transitions", () => {
+  it("rejects an unknown status with 400 rather than a 500", async () => {
+    const patient = await registerRole("PATIENT", "transition-patient1");
+    const nurse = await registerRole("NURSE", "transition-nurse1");
+    const { visit } = await seedBookingAndVisit(patient.userId, nurse.userId);
+
+    const res = await nurse.agent.patch(`/api/v1/visits/${visit.id}/status`).send({ status: "TELEPORTED" });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("refuses to skip steps or reopen a completed visit", async () => {
+    const patient = await registerRole("PATIENT", "transition-patient2");
+    const nurse = await registerRole("NURSE", "transition-nurse2");
+    const { visit } = await seedBookingAndVisit(patient.userId, nurse.userId);
+
+    const skip = await nurse.agent.patch(`/api/v1/visits/${visit.id}/status`).send({ status: "COMPLETED" });
+    expect(skip.status).toBe(409);
+
+    await prisma.visit.update({ where: { id: visit.id }, data: { status: "COMPLETED" } });
+    const reopen = await nurse.agent.patch(`/api/v1/visits/${visit.id}/status`).send({ status: "IN_PROGRESS" });
+    expect(reopen.status).toBe(409);
+  });
+
+  it("walks the full flow and records actualStart / actualEnd", async () => {
+    const patient = await registerRole("PATIENT", "transition-patient3");
+    const nurse = await registerRole("NURSE", "transition-nurse3");
+    const { visit } = await seedBookingAndVisit(patient.userId, nurse.userId);
+
+    for (const status of ["EN_ROUTE", "ARRIVED", "IN_PROGRESS", "COMPLETED"]) {
+      const res = await nurse.agent.patch(`/api/v1/visits/${visit.id}/status`).send({ status });
+      expect(res.status).toBe(200);
+      expect(res.body.visit.status).toBe(status);
+    }
+
+    const persisted = await prisma.visit.findUnique({ where: { id: visit.id } });
+    expect(persisted!.actualStart).not.toBeNull();
+    expect(persisted!.actualEnd).not.toBeNull();
+  });
+
+  it("lets the nurse cancel a visit that hasn't ended", async () => {
+    const patient = await registerRole("PATIENT", "transition-patient4");
+    const nurse = await registerRole("NURSE", "transition-nurse4");
+    const { visit } = await seedBookingAndVisit(patient.userId, nurse.userId);
+
+    const res = await nurse.agent.patch(`/api/v1/visits/${visit.id}/status`).send({ status: "CANCELLED" });
+
+    expect(res.status).toBe(200);
+  });
+});
+
 describe("nurse: profile, availability, own visits", () => {
   it("returns the nurse's own profile with SANC fields, not another user's", async () => {
     const nurse = await registerRole("NURSE", "nurse-profile");
@@ -172,6 +228,41 @@ describe("nurse: profile, availability, own visits", () => {
     expect(res.status).toBe(200);
     expect(res.body.nurse.isAvailable).toBe(true);
     expect(res.body.nurse.lastKnownLat).toBeCloseTo(-33.9);
+  });
+
+  it("accepts POST as well as PATCH for availability (the web client sent POST and got a 404)", async () => {
+    const nurse = await registerRole("NURSE", "nurse-availability-post");
+
+    const res = await nurse.agent
+      .post("/api/v1/nurse/availability")
+      .send({ isAvailable: true, lat: -26.2, lng: 28.04 });
+
+    expect(res.status).toBe(200);
+    expect(res.body.nurse.isAvailable).toBe(true);
+  });
+
+  it("keeps the last known location when going offline without one", async () => {
+    const nurse = await registerRole("NURSE", "nurse-offline-keeps-location");
+    await nurse.agent.patch("/api/v1/nurse/availability").send({ isAvailable: true, lat: -33.9, lng: 18.4 });
+
+    const res = await nurse.agent.patch("/api/v1/nurse/availability").send({ isAvailable: false });
+
+    expect(res.status).toBe(200);
+    expect(res.body.nurse.isAvailable).toBe(false);
+    expect(res.body.nurse.lastKnownLat).toBeCloseTo(-33.9);
+    expect(res.body.nurse.lastKnownLng).toBeCloseTo(18.4);
+  });
+
+  it("rejects going online without a valid location, or a non-boolean isAvailable", async () => {
+    const nurse = await registerRole("NURSE", "nurse-availability-invalid");
+
+    const noLocation = await nurse.agent.patch("/api/v1/nurse/availability").send({ isAvailable: true });
+    const badLat = await nurse.agent.patch("/api/v1/nurse/availability").send({ isAvailable: true, lat: 200, lng: 18.4 });
+    const badFlag = await nurse.agent.patch("/api/v1/nurse/availability").send({ isAvailable: "yes", lat: -33.9, lng: 18.4 });
+
+    expect(noLocation.status).toBe(400);
+    expect(badLat.status).toBe(400);
+    expect(badFlag.status).toBe(400);
   });
 
   it("lists only the requesting nurse's own visits, with decrypted address", async () => {
@@ -279,5 +370,93 @@ describe("visits: nurse BP-calibration recording", () => {
     });
 
     expect(res.status).toBe(403);
+  });
+});
+
+describe("doctor: nurse-visit review queue and approval", () => {
+  async function completedVisit(label: string) {
+    const patient = await registerRole("PATIENT", `${label}-patient`);
+    const nurse = await registerRole("NURSE", `${label}-nurse`);
+    const { visit } = await seedBookingAndVisit(patient.userId, nurse.userId);
+    await prisma.visit.update({ where: { id: visit.id }, data: { status: "COMPLETED" } });
+    return { patient, nurse, visit };
+  }
+
+  it("lists completed, unreviewed visits in the doctor's pending queue", async () => {
+    const doctor = await registerRole("DOCTOR", "review-queue-doctor");
+    const { visit } = await completedVisit("review-queue");
+    const patient2 = await registerRole("PATIENT", "review-queue-p2");
+    const nurse2 = await registerRole("NURSE", "review-queue-n2");
+    const { visit: active } = await seedBookingAndVisit(patient2.userId, nurse2.userId);
+
+    const res = await doctor.agent.get("/api/v1/visits?status=PENDING_REVIEW");
+
+    expect(res.status).toBe(200);
+    const ids = res.body.visits.map((v: any) => v.id);
+    expect(ids).toContain(visit.id);
+    expect(ids).not.toContain(active.id);
+  });
+
+  it("approves a completed visit, assigns it to the doctor, and takes it out of the queue", async () => {
+    const doctor = await registerRole("DOCTOR", "review-approve-doctor");
+    const { visit } = await completedVisit("review-approve");
+
+    const claim = await doctor.agent.post(`/api/v1/visits/${visit.id}/claim-review`).send({});
+    expect(claim.status).toBe(200);
+    const res = await doctor.agent.post(`/api/v1/visits/${visit.id}/approve`).send({ review: "Vitals reviewed, no concerns." });
+
+    expect(res.status).toBe(200);
+    const persisted = await prisma.visit.findUnique({ where: { id: visit.id } });
+    expect(persisted!.doctorId).toBe(doctor.userId);
+    expect(persisted!.doctorReview).toBe("Vitals reviewed, no concerns.");
+    const queue = await doctor.agent.get("/api/v1/visits?status=PENDING_REVIEW");
+    expect(queue.body.visits.map((v: any) => v.id)).not.toContain(visit.id);
+  });
+
+  it("refuses a second doctor approving an already-reviewed visit", async () => {
+    const first = await registerRole("DOCTOR", "review-twice-doctor1");
+    const second = await registerRole("DOCTOR", "review-twice-doctor2");
+    const { visit } = await completedVisit("review-twice");
+    await first.agent.post(`/api/v1/visits/${visit.id}/claim-review`).send({});
+    await first.agent.post(`/api/v1/visits/${visit.id}/approve`).send({});
+
+    const claim = await second.agent.post(`/api/v1/visits/${visit.id}/claim-review`).send({});
+    const res = await second.agent.post(`/api/v1/visits/${visit.id}/approve`).send({});
+
+    expect(claim.status).toBe(409);
+    expect(res.status).toBe(409);
+    expect((await prisma.visit.findUnique({ where: { id: visit.id } }))!.doctorId).toBe(first.userId);
+  });
+
+  it("refuses to approve a visit the nurse hasn't completed, and refuses nurses", async () => {
+    const doctor = await registerRole("DOCTOR", "review-early-doctor");
+    const patient = await registerRole("PATIENT", "review-early-patient");
+    const nurse = await registerRole("NURSE", "review-early-nurse");
+    const { visit } = await seedBookingAndVisit(patient.userId, nurse.userId);
+
+    expect((await doctor.agent.post(`/api/v1/visits/${visit.id}/approve`).send({})).status).toBe(409);
+    expect((await nurse.agent.post(`/api/v1/visits/${visit.id}/approve`).send({})).status).toBe(403);
+  });
+
+  it("lets the assigned doctor update status, but not an unassigned doctor", async () => {
+    const assigned = await registerRole("DOCTOR", "status-doctor-assigned");
+    const other = await registerRole("DOCTOR", "status-doctor-other");
+    const patient = await registerRole("PATIENT", "status-doctor-patient");
+    const nurse = await registerRole("NURSE", "status-doctor-nurse");
+    const { visit } = await seedBookingAndVisit(patient.userId, nurse.userId);
+    await prisma.visit.update({ where: { id: visit.id }, data: { doctorId: assigned.userId } });
+    await grantTestAccess(assigned.userId, patient.userId, "VISIT_REVIEW", visit.id);
+
+    const denied = await other.agent.patch(`/api/v1/visits/${visit.id}/status`).send({ status: "CANCELLED" });
+    const allowed = await assigned.agent.patch(`/api/v1/visits/${visit.id}/status`).send({ status: "CANCELLED" });
+
+    expect(denied.status).toBe(403);
+    expect(allowed.status).toBe(200);
+  });
+
+  it("rejects an unknown status filter instead of ignoring it", async () => {
+    const nurse = await registerRole("NURSE", "status-filter-nurse");
+    const res = await nurse.agent.get("/api/v1/visits?status=NOPE");
+    expect(res.status).toBe(400);
   });
 });

@@ -149,9 +149,22 @@ export default function NurseDashboard() {
     const [loading, setLoading] = useState(false);
     const [visits, setVisits] = useState<Visit[]>([]);
     const [statusFilter, setStatusFilter] = useState<VisitStatusFilter>('ALL');
-    const [incomingBooking, setIncomingBooking] = useState<IncomingBooking | null>(null);
-    const [countdown, setCountdown] = useState(ACCEPT_WINDOW_SEC);
+    // Requests waiting for this nurse, shown one at a time (head of the
+    // queue). Going online can now deliver several open requests at once;
+    // a single slot meant each one overwrote the last.
+    const [offers, setOffers] = useState<IncomingBooking[]>([]);
+    const incomingBooking = offers[0] ?? null;
+    const removeOffer = useCallback((bookingId: string) => {
+        setOffers((q) => q.filter((o) => o.bookingId !== bookingId));
+    }, []);
+    // Tied to a booking id so a new head never inherits the previous one's 0.
+    const [countdown, setCountdown] = useState<{ id: string | null; left: number }>({ id: null, left: ACCEPT_WINDOW_SEC });
+    const [acceptingId, setAcceptingId] = useState<string | null>(null);
+    const accepting = acceptingId !== null;
     const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    // Where to register on the dispatch radar. Kept so the socket can
+    // re-register after a page reload or reconnect without asking for GPS again.
+    const lastCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
 
     const { send, lastMessage, connected } = useVisitWebSocket(token);
 
@@ -159,10 +172,11 @@ export default function NurseDashboard() {
         try {
             const data = await nurseApi.getProfile();
             const profileUser = data.user || data;
-            setIsAvailable(profileUser.isAvailable || false);
-            if (profileUser.lastKnownLat && profileUser.lastKnownLng) {
+            if (profileUser.lastKnownLat != null && profileUser.lastKnownLng != null) {
+                lastCoordsRef.current = { lat: profileUser.lastKnownLat, lng: profileUser.lastKnownLng };
                 setLocationStatus(`Active at ${profileUser.lastKnownLat.toFixed(4)}, ${profileUser.lastKnownLng.toFixed(4)}`);
             }
+            setIsAvailable(profileUser.isAvailable || false);
         } catch (error) {
             console.error('Failed to load profile:', error);
         }
@@ -183,9 +197,16 @@ export default function NurseDashboard() {
         loadVisits();
     }, [user, loadProfile, loadVisits]);
 
-    const goOnlineViaWs = useCallback((lat: number, lng: number) => {
-        send({ type: 'NURSE_GO_ONLINE', data: { lat, lng } });
-    }, [send]);
+    // The server's list of dispatchable nurses lives in memory and is tied to
+    // the socket, so it is lost on every reload, reconnect or backend
+    // restart. Previously NURSE_GO_ONLINE was only sent from the toggle
+    // (and dropped silently if the socket wasn't connected yet), so a nurse
+    // whose profile still said "online" saw "Live radar active" but never
+    // received a single request. Re-register whenever the socket (re)connects.
+    useEffect(() => {
+        if (!connected || !isAvailable || !lastCoordsRef.current) return;
+        send({ type: 'NURSE_GO_ONLINE', data: lastCoordsRef.current });
+    }, [connected, isAvailable, send]);
 
     const toggleAvailability = async () => {
         setLoading(true);
@@ -202,9 +223,9 @@ export default function NurseDashboard() {
                     const lat = position.coords.latitude;
                     const lng = position.coords.longitude;
                     await nurseApi.updateAvailability({ lat, lng, isAvailable: true });
-                    setIsAvailable(true);
+                    lastCoordsRef.current = { lat, lng };
+                    setIsAvailable(true); // registers on the socket via the effect above
                     setLocationStatus(`Active at ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
-                    goOnlineViaWs(lat, lng);
                     loadVisits();
                 } catch (error: unknown) {
                     const e = error as { response?: { data?: { error?: string } } };
@@ -215,14 +236,15 @@ export default function NurseDashboard() {
             }, () => {
                 toast.error("Location access denied. Cannot go online.");
                 setLoading(false);
-            });
+            }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
         } else {
             try {
-                await nurseApi.updateAvailability({ lat: 0, lng: 0, isAvailable: false });
+                await nurseApi.updateAvailability({ isAvailable: false });
                 send({ type: 'NURSE_GO_OFFLINE' });
                 setIsAvailable(false);
                 setLocationStatus("Offline");
-                setIncomingBooking(null);
+                setOffers([]);
+                setAcceptingId(null);
             } catch (error: unknown) {
                 const e = error as { response?: { data?: { error?: string } } };
                 toast.error(e.response?.data?.error || "Failed to go offline.");
@@ -242,61 +264,102 @@ export default function NurseDashboard() {
         }
     };
 
+    // Stream position while online: keeps the dispatch radius accurate as the
+    // nurse moves, and feeds the patient's live tracker (NURSE_LOCATION_UPDATE),
+    // which nothing ever sent before. Throttled to one update per 20s.
+    useEffect(() => {
+        if (!isAvailable || !connected || typeof navigator === 'undefined' || !navigator.geolocation) return;
+        let lastSent = 0;
+        const watchId = navigator.geolocation.watchPosition((position) => {
+            const now = Date.now();
+            if (now - lastSent < 20_000) return;
+            lastSent = now;
+            const coords = { lat: position.coords.latitude, lng: position.coords.longitude };
+            lastCoordsRef.current = coords;
+            send({ type: 'LOCATION_UPDATE', data: coords });
+        }, () => { /* keep the last known position */ }, { enableHighAccuracy: true, maximumAge: 30_000 });
+        return () => navigator.geolocation.clearWatch(watchId);
+    }, [isAvailable, connected, send]);
+
     useEffect(() => {
         if (!lastMessage) return;
         if (lastMessage.type === 'NEW_BOOKING_AVAILABLE') {
             const d = lastMessage.data as unknown as IncomingBooking;
-            setIncomingBooking(d);
-            setCountdown(ACCEPT_WINDOW_SEC);
+            setOffers((q) => (q.some((o) => o.bookingId === d.bookingId) ? q : [...q, d]));
             toast.info(`New visit request — ${d.patientName} (${d.distanceKm} km away)`);
         }
         if (lastMessage.type === 'BOOKING_TAKEN') {
-            setIncomingBooking(null);
-            if (countdownRef.current) clearInterval(countdownRef.current);
+            const takenId = (lastMessage.data as { bookingId?: string } | undefined)?.bookingId;
+            if (takenId) removeOffer(takenId);
         }
         if (lastMessage.type === 'ACCEPT_BOOKING_SUCCESS') {
-            setIncomingBooking(null);
-            if (countdownRef.current) clearInterval(countdownRef.current);
+            const id = (lastMessage.data as { bookingId?: string } | undefined)?.bookingId ?? acceptingId;
+            if (id) removeOffer(id);
+            setAcceptingId(null);
             toast.success('Visit accepted! Check your visits list.');
             loadVisits();
         }
         if (lastMessage.type === 'ACCEPT_BOOKING_FAILED') {
-            setIncomingBooking(null);
+            if (acceptingId) removeOffer(acceptingId);
+            setAcceptingId(null);
             toast.error(lastMessage.error || 'Could not accept — booking already taken.');
         }
         if (lastMessage.type === 'NURSE_ONLINE_SUCCESS') {
             toast.success('You are now online. Listening for nearby requests.');
         }
-    }, [lastMessage, toast, loadVisits]);
+        if (lastMessage.type === 'NURSE_ONLINE_FAILED') {
+            toast.error(lastMessage.error || 'Could not register for nearby requests.');
+        }
+        // lastMessage is the only trigger; acceptingId is read, not reacted to.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [lastMessage, toast, loadVisits, removeOffer]);
+
+    // Accept window: tick down once per second while a request is showing.
+    // The expiry side effects live in their own effect below rather than
+    // inside the setState updater (React may run updaters twice, which sent
+    // DECLINE_BOOKING twice in dev).
+    const incomingId = incomingBooking?.bookingId ?? null;
+    useEffect(() => {
+        if (!incomingId || accepting) return;
+        setCountdown((c) => (c.id === incomingId ? c : { id: incomingId, left: ACCEPT_WINDOW_SEC }));
+        countdownRef.current = setInterval(() => {
+            setCountdown((c) => (c.id === incomingId ? { id: c.id, left: Math.max(0, c.left - 1) } : c));
+        }, 1000);
+        return () => { if (countdownRef.current) clearInterval(countdownRef.current); };
+    }, [incomingId, accepting]);
 
     useEffect(() => {
-        if (incomingBooking) {
-            if (countdownRef.current) clearInterval(countdownRef.current);
-            countdownRef.current = setInterval(() => {
-                setCountdown((c) => {
-                    if (c <= 1) {
-                        clearInterval(countdownRef.current!);
-                        setIncomingBooking(null);
-                        send({ type: 'DECLINE_BOOKING', data: { bookingId: incomingBooking.bookingId } });
-                        return ACCEPT_WINDOW_SEC;
-                    }
-                    return c - 1;
-                });
-            }, 1000);
-        }
-        return () => { if (countdownRef.current) clearInterval(countdownRef.current); };
-    }, [incomingBooking, send]);
+        if (!incomingId || accepting || countdown.id !== incomingId || countdown.left > 0) return;
+        send({ type: 'DECLINE_BOOKING', data: { bookingId: incomingId } });
+        removeOffer(incomingId);
+    }, [countdown, incomingId, accepting, send, removeOffer]);
+    const secondsLeft = countdown.id === incomingId ? countdown.left : ACCEPT_WINDOW_SEC;
+
+    // If the socket drops mid-accept the result will never arrive; don't leave
+    // the card spinning forever. The visits list is the source of truth.
+    useEffect(() => {
+        if (connected || !acceptingId) return;
+        removeOffer(acceptingId);
+        setAcceptingId(null);
+        toast.error('Connection lost while accepting — check My visits to see if it went through.');
+        loadVisits();
+    }, [connected, acceptingId, toast, loadVisits, removeOffer]);
 
     const handleAccept = () => {
-        if (!incomingBooking) return;
-        send({ type: 'ACCEPT_BOOKING', data: { bookingId: incomingBooking.bookingId } });
+        if (!incomingBooking || accepting) return;
+        const sent = send({ type: 'ACCEPT_BOOKING', data: { bookingId: incomingBooking.bookingId } });
+        if (!sent) {
+            toast.error('Not connected — could not accept. Check your connection.');
+            return;
+        }
+        setAcceptingId(incomingBooking.bookingId);
         if (countdownRef.current) clearInterval(countdownRef.current);
     };
 
     const handlePass = () => {
-        if (!incomingBooking) return;
+        if (!incomingBooking || accepting) return;
         send({ type: 'DECLINE_BOOKING', data: { bookingId: incomingBooking.bookingId } });
-        setIncomingBooking(null);
+        removeOffer(incomingBooking.bookingId);
         if (countdownRef.current) clearInterval(countdownRef.current);
     };
 
@@ -337,6 +400,7 @@ export default function NurseDashboard() {
                             <div className="mb-3 flex items-center justify-between">
                                 <span className="flex items-center gap-2 text-sm font-extrabold text-[var(--primary)]">
                                     <Icon name="bell" size={16} /> New visit request
+                                    {offers.length > 1 && <span className="text-xs font-semibold text-[var(--muted)]">+{offers.length - 1} more</span>}
                                 </span>
                                 <div className="relative flex h-10 w-10 items-center justify-center">
                                     <svg width="40" height="40" viewBox="0 0 40 40" className="-rotate-90">
@@ -344,11 +408,11 @@ export default function NurseDashboard() {
                                         <circle
                                             cx="20" cy="20" r="16" fill="none" stroke="var(--primary)" strokeWidth={4}
                                             strokeDasharray={2 * Math.PI * 16}
-                                            strokeDashoffset={2 * Math.PI * 16 * (1 - countdown / ACCEPT_WINDOW_SEC)}
+                                            strokeDashoffset={2 * Math.PI * 16 * (1 - secondsLeft / ACCEPT_WINDOW_SEC)}
                                             style={{ transition: 'stroke-dashoffset 1s linear' }}
                                         />
                                     </svg>
-                                    <span className="num absolute text-xs font-bold text-[var(--foreground)]">{countdown}</span>
+                                    <span className="num absolute text-xs font-bold text-[var(--foreground)]">{secondsLeft}</span>
                                 </div>
                             </div>
                             <div className="mb-4 grid grid-cols-2 gap-3 text-sm">
@@ -358,10 +422,10 @@ export default function NurseDashboard() {
                                 <div><p className="text-[var(--text-eyebrow)] font-bold uppercase text-[var(--ink-3)]">Duration</p><p className="num font-bold text-[var(--foreground)]">{incomingBooking.estimatedDuration} min</p></div>
                             </div>
                             <div className="flex gap-2">
-                                <button onClick={handleAccept} className="btn-primary flex-[2] rounded-xl font-bold" style={{ minHeight: 'var(--tap-primary)' }}>
-                                    Accept
+                                <button onClick={handleAccept} disabled={accepting} className="btn-primary flex-[2] rounded-xl font-bold disabled:opacity-60" style={{ minHeight: 'var(--tap-primary)' }}>
+                                    {accepting ? 'Accepting…' : 'Accept'}
                                 </button>
-                                <button onClick={handlePass} className="flex-1 rounded-xl border font-semibold" style={{ borderColor: 'var(--border)', minHeight: 'var(--tap-primary)' }}>
+                                <button onClick={handlePass} disabled={accepting} className="flex-1 rounded-xl border font-semibold disabled:opacity-60" style={{ borderColor: 'var(--border)', minHeight: 'var(--tap-primary)' }}>
                                     Pass
                                 </button>
                             </div>
@@ -426,7 +490,9 @@ export default function NurseDashboard() {
                         ) : (
                             <div className="space-y-3">
                                 {filteredVisits.map((visit) => {
-                                    const flow = VISIT_STATUS_FLOW[visit.status];
+                                    // Past the documentation window the server returns the visit
+                                    // without the patient's details (restricted), and refuses changes.
+                                    const flow = visit.restricted ? undefined : VISIT_STATUS_FLOW[visit.status];
                                     return (
                                         <div key={visit.id} className="rounded-xl border p-4" style={{ borderColor: 'var(--border)' }}>
                                             <div className="mb-2 flex items-start justify-between gap-3">
@@ -435,7 +501,9 @@ export default function NurseDashboard() {
                                                     <p className="text-sm text-[var(--muted)]">
                                                         {visit.booking?.scheduledDate ? new Date(visit.booking.scheduledDate).toLocaleString() : 'Date TBD'}
                                                     </p>
-                                                    <p className="truncate text-sm text-[var(--muted)]" title={visit.booking?.address}>{visit.booking?.address ?? 'Address on file'}</p>
+                                                    <p className="truncate text-sm text-[var(--muted)]" title={visit.booking?.address}>
+                                                        {visit.restricted ? 'Your access to this patient\u2019s record has ended' : visit.booking?.address ?? 'Address on file'}
+                                                    </p>
                                                 </div>
                                                 <StatusBadge variant={visit.status === 'COMPLETED' ? 'success' : 'warning'} className="shrink-0 text-xs">
                                                     {visit.status}
@@ -450,7 +518,7 @@ export default function NurseDashboard() {
                                                     {flow.label}
                                                 </button>
                                             )}
-                                            {visit.status === 'IN_PROGRESS' && (
+                                            {visit.status === 'IN_PROGRESS' && !visit.restricted && (
                                                 <CalibrationForm visitId={visit.id} onRecorded={loadVisits} />
                                             )}
                                         </div>

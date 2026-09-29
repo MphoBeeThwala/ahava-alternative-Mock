@@ -1,6 +1,18 @@
 import { PrismaClient } from '@prisma/client';
+import { clinicalFieldEncryption } from './clinicalFieldEncryption';
 
-const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
+function createClient() {
+  return new PrismaClient({
+    log: process.env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],
+    ...(pooledDatabaseUrl ? { datasources: { db: { url: pooledDatabaseUrl } } } : {}),
+  // Written clinical content is encrypted at rest (lib/clinicalFieldEncryption.ts).
+  }).$extends(clinicalFieldEncryption);
+}
+
+type ExtendedPrismaClient = ReturnType<typeof createClient>;
+/** The client handed to `prisma.$transaction(async (tx) => ...)`. */
+export type TransactionClient = Omit<ExtendedPrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$extends'>;
+const globalForPrisma = globalThis as unknown as { prisma: ExtendedPrismaClient };
 
 /**
  * Connection pool sizing for PgBouncer (Railway's POOLED_DATABASE_URL).
@@ -47,20 +59,7 @@ function buildPooledDatabaseUrl(): string | undefined {
 
 const pooledDatabaseUrl = buildPooledDatabaseUrl();
 
-export const prisma =
-  globalForPrisma.prisma ??
-  new PrismaClient({
-    log: process.env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],
-    ...(pooledDatabaseUrl
-      ? {
-          datasources: {
-            db: {
-              url: pooledDatabaseUrl,
-            },
-          },
-        }
-      : {}),
-  });
+export const prisma: ExtendedPrismaClient = globalForPrisma.prisma ?? createClient();
 
 if (process.env.NODE_ENV !== 'production') {
   globalForPrisma.prisma = prisma;
