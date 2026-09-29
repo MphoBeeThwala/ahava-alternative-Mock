@@ -220,6 +220,25 @@ export function safeDecrypt(value: string | null | undefined, aad?: string): str
   }
 }
 
+// AAD purpose label for Booking.encryptedPatientLocation, so ciphertext from
+// another field (e.g. the address) can't be swapped in and decrypt as a location.
+const PATIENT_LOCATION_AAD = 'booking:patient-location';
+
+export function encryptPatientLocation(lat: number, lng: number): string {
+  return encryptData(JSON.stringify({ lat, lng }), PATIENT_LOCATION_AAD);
+}
+
+/** Null for a missing, undecryptable or malformed value — never throws. */
+export function decryptPatientLocation(value: string | null | undefined): { lat: number; lng: number } | null {
+  if (!value || !isEncryptedPayload(value)) return null;
+  try {
+    const parsed = JSON.parse(decryptData(value, PATIENT_LOCATION_AAD));
+    return Number.isFinite(parsed?.lat) && Number.isFinite(parsed?.lng) ? { lat: parsed.lat, lng: parsed.lng } : null;
+  } catch {
+    return null;
+  }
+}
+
 export function hashSensitiveData(data: string): string {
   return crypto.createHash('sha256').update(data).digest('hex');
 }

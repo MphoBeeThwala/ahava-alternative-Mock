@@ -3,6 +3,7 @@ import Redis from 'ioredis';
 import crypto from 'crypto';
 import prisma from '../lib/prisma';
 import { verifyWebSocketTicket } from './authSession';
+import { decryptPatientLocation } from '../utils/encryption';
 import { isVisitStatus, visitTimingFor, visitTransitionError } from './visitStatus';
 
 interface AuthenticatedWebSocket extends WebSocket {
@@ -842,12 +843,11 @@ const offerOpenBookings = async (nurseId: string, lat: number, lng: number) => {
         nurseId: null,
         paymentStatus: { not: 'REFUNDED' },
         scheduledDate: { gt: new Date() },
-        patientLat: { not: null },
-        patientLng: { not: null },
+        encryptedPatientLocation: { not: null },
       },
       select: {
         id: true, scheduledDate: true, estimatedDuration: true, amountInCents: true,
-        patientLat: true, patientLng: true,
+        encryptedPatientLocation: true,
         patient: { select: { firstName: true, lastName: true } },
       },
       orderBy: { scheduledDate: 'asc' },
@@ -857,7 +857,10 @@ const offerOpenBookings = async (nurseId: string, lat: number, lng: number) => {
     for (const b of open) {
       if (offered >= MAX_REOFFERS) break;
       if (hasDeclined(b.id, nurseId)) continue;
-      const distance = getDistanceFromLatLonInKm(b.patientLat!, b.patientLng!, lat, lng);
+      // Decrypted in memory only for the distance check; never sent to the nurse.
+      const location = decryptPatientLocation(b.encryptedPatientLocation);
+      if (!location) continue;
+      const distance = getDistanceFromLatLonInKm(location.lat, location.lng, lat, lng);
       if (distance > DISPATCH_RADIUS_KM) continue;
       const delivered = deliverToUserLocal(nurseId, {
         type: 'NEW_BOOKING_AVAILABLE',

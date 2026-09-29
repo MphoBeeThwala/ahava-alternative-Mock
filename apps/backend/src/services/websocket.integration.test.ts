@@ -12,7 +12,7 @@ import request from "supertest";
 import WebSocket, { WebSocketServer } from "ws";
 import { app } from "../index";
 import prisma from "../lib/prisma";
-import { encryptData } from "../utils/encryption";
+import { encryptData, encryptPatientLocation } from "../utils/encryption";
 import { createWebSocketTicket } from "./authSession";
 import { initializeWebSocket, notifyNearbyNurses } from "./websocket";
 
@@ -95,12 +95,14 @@ async function goOnline(userId: string, lat: number, lng: number) {
   return client;
 }
 
-async function createBooking(patientId: string, overrides: Record<string, unknown> = {}) {
+async function createBooking(
+  patientId: string,
+  { at = CAPE_TOWN, ...overrides }: { at?: { lat: number; lng: number } } & Record<string, unknown> = {},
+) {
   return prisma.booking.create({
     data: {
       patientId,
-      patientLat: CAPE_TOWN.lat,
-      patientLng: CAPE_TOWN.lng,
+      encryptedPatientLocation: encryptPatientLocation(at.lat, at.lng),
       encryptedAddress: encryptData("12 Test Road"),
       scheduledDate: new Date(Date.now() + 2 * 3600_000),
       paymentMethod: "CARD",
@@ -207,11 +209,10 @@ describe("nurse dispatch over WebSocket", () => {
     // A spot of its own, so open bookings left by other tests (or earlier
     // runs against the same database) can't crowd these out of the re-offer cap.
     const here = { lat: -20 - Math.random() * 10, lng: 20 + Math.random() * 10 };
-    const at = { patientLat: here.lat, patientLng: here.lng };
-    const waiting = await createBooking(patientId, at);
-    const passed = await createBooking(patientId, at);
-    const farAway = await createBooking(patientId, { patientLat: here.lat + 1, patientLng: here.lng });
-    const cancelled = await createBooking(patientId, { ...at, paymentStatus: "REFUNDED" });
+    const waiting = await createBooking(patientId, { at: here });
+    const passed = await createBooking(patientId, { at: here });
+    const farAway = await createBooking(patientId, { at: { lat: here.lat + 1, lng: here.lng } });
+    const cancelled = await createBooking(patientId, { at: here, paymentStatus: "REFUNDED" });
 
     const first = await goOnline(nurseId, here.lat, here.lng);
     await first.next((m) => m.type === "NEW_BOOKING_AVAILABLE" && m.data.bookingId === waiting.id);

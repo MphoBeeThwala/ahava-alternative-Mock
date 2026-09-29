@@ -3,7 +3,7 @@ import { UserRole } from '@prisma/client';
 import { AuthenticatedRequest, authMiddleware, requirePatient } from '../middleware/auth';
 import { idempotencyMiddleware } from '../middleware/idempotency';
 import { DISPATCH_RADIUS_KM, notifyNearbyNurses, withdrawBookingOffer } from '../services/websocket';
-import { encryptData, isEncryptedPayload, safeDecrypt } from '../utils/encryption';
+import { encryptData, encryptPatientLocation, isEncryptedPayload, safeDecrypt } from '../utils/encryption';
 import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 import Joi from 'joi';
 import prisma from '../lib/prisma';
@@ -55,8 +55,7 @@ router.post('/', requirePatient, idempotencyMiddleware({ scope: 'booking-create'
         encryptedAddress,
         scheduledDate: new Date(bookingData.scheduledDate),
         estimatedDuration: bookingData.estimatedDuration,
-        patientLat: bookingData.patientLat,
-        patientLng: bookingData.patientLng,
+        encryptedPatientLocation: encryptPatientLocation(bookingData.patientLat, bookingData.patientLng),
         paymentMethod: bookingData.paymentMethod,
         paymentStatus: 'PENDING',
         amountInCents: bookingData.amountInCents,
@@ -108,9 +107,11 @@ router.post('/', requirePatient, idempotencyMiddleware({ scope: 'booking-create'
       patientName
     );
 
+    // Ciphertext never goes back to the client (same as the GET routes).
+    const { encryptedAddress: _addr, encryptedPatientLocation: _loc, ...bookingForClient } = booking;
     res.status(201).json({
       success: true,
-      booking,
+      booking: { ...bookingForClient, address: safeDecrypt(_addr) },
       notifiedNurses: notifiedCount,
     });
   } catch (error) {
@@ -170,7 +171,7 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res, next) => 
     // (encryptData's output) was sent straight to the client and rendered
     // as-is in the UI, instead of the actual visit address.
     const decryptedBookings = bookings.map((booking) => {
-      const { encryptedAddress, ...rest } = booking;
+      const { encryptedAddress, encryptedPatientLocation: _loc, ...rest } = booking;
       return { ...rest, address: safeDecrypt(encryptedAddress) };
     });
 
@@ -218,7 +219,7 @@ router.get('/:id', authMiddleware, async (req: AuthenticatedRequest, res, next) 
       userAgent: req.get('User-Agent'),
     });
 
-    const { encryptedAddress, ...bookingWithoutCiphertext } = booking;
+    const { encryptedAddress, encryptedPatientLocation: _loc, ...bookingWithoutCiphertext } = booking;
     res.json({ success: true, booking: { ...bookingWithoutCiphertext, address: safeDecrypt(encryptedAddress) } });
   } catch (error) {
     return next(error);

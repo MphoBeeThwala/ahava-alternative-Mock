@@ -182,11 +182,11 @@ model Booking {
   scheduledDate   DateTime
   estimatedDuration Int         @default(60) // minutes
 
-  // Where the visit is, for nurse dispatch. Plaintext coordinates (the
-  // street address stays encrypted); needed so an unaccepted booking can be
-  // offered again to a nurse who comes online after it was created.
-  patientLat      Float?
-  patientLng      Float?
+  // Where the visit is, for nurse dispatch: {lat, lng} as JSON, encrypted
+  // like encryptedAddress (patient location is patient data). Needed so an
+  // unaccepted booking can be offered again to a nurse who comes online
+  // after it was created. Decrypted in the app for the distance check.
+  encryptedPatientLocation String?
   
   // Payment
   paymentMethod   PaymentMethod

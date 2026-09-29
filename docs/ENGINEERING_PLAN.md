@@ -2679,7 +2679,7 @@ Reported symptom: the nurse dashboard's **Go online** failed ("Failed to go onli
 
 ## 36. Nurse dispatch follow-ups from §35: re-offering, the doctor review workflow, stale availability, 2026-09-28
 
-**1. Bookings are offered again, not just once.** A booking used to be offered only at creation, to whoever was online at that moment. `Booking` now stores `patientLat`/`patientLng` (migration `20260928120000_add_booking_dispatch_location`, nullable, so older bookings are unaffected). When a nurse goes online, including the re-registration on every reconnect from §35, they are sent every open booking within `DISPATCH_RADIUS_KM` (10 km) that they haven't declined, soonest first, capped at 10. Declines and expired offers are remembered per replica for 24 hours, so a reload doesn't bring back requests the nurse already passed on. The nurse dashboard now queues offers ("+N more") instead of each new one replacing the last.
+**1. Bookings are offered again, not just once.** A booking used to be offered only at creation, to whoever was online at that moment. `Booking` now stores the patient's location as `encryptedPatientLocation` (AES-256-GCM, see §37; migration `20260928120000_add_booking_dispatch_location`, nullable, so older bookings are unaffected). When a nurse goes online, including the re-registration on every reconnect from §35, they are sent every open booking within `DISPATCH_RADIUS_KM` (10 km) that they haven't declined, soonest first, capped at 10. Declines and expired offers are remembered per replica for 24 hours, so a reload doesn't bring back requests the nurse already passed on. The nurse dashboard now queues offers ("+N more") instead of each new one replacing the last.
 
 **2. The doctor review workflow didn't exist; it's now built minimally.** Behind the 403 from §35, three more things were broken:
 - The doctor dashboard fetched `GET /visits?status=PENDING_REVIEW`, but `PENDING_REVIEW` isn't a visit status and the filter was ignored.
@@ -2706,3 +2706,27 @@ So the review queue was always empty and "Approve & Complete" always failed. Now
 Totals: integration 14 suites, 159 tests; unit 188; frontend 12. The WebSocket suite ran 5 times in a row with no failures.
 
 **Residual:** if a replica crashes (rather than shutting down gracefully), its pending grace timers are lost, so a nurse connected to it who never reconnects stays `isAvailable` until they next go online or offline. Fixing that needs a periodic presence heartbeat with its own column, which wasn't worth a second schema change here.
+
+## 37. Data-protection rule: patient data encrypted, access limited to clinicians and admins, 2026-09-29
+
+**The rule, as stated by the product owner:** every patient's current and historical data is stored securely and encrypted, and only doctors, nurses, system admins, or someone an admin has authorized can access it.
+
+**Correction to §36:** §36 first stored the patient's dispatch location as plaintext `patientLat`/`patientLng` columns, which broke this rule. The migration had not reached `main` or any deployed database, so it was amended in place. It is now one `encryptedPatientLocation` column: `{lat, lng}` JSON encrypted with the same AES-256-GCM `encryptData` as the address, bound to its own AAD purpose label (`booking:patient-location`) so ciphertext from another field can't be swapped in. It is decrypted in memory only for the distance check in `offerOpenBookings`, never sent to nurses. Booking API responses no longer include any ciphertext; the create response previously echoed `encryptedAddress` back. `bookings.integration.test.ts` checks that the stored value isn't plaintext, that it decrypts to the right location, and that no ciphertext is returned.
+
+**Audit against the rule. It is not yet met; this is recorded, not fixed.** Field-level (application) encryption covers only `Booking.encryptedAddress`, `User.encryptedAddress`/`encryptedIdNumber`, the booking dispatch location, and TOTP secrets. Everything else is stored as plaintext columns and relies only on whatever at-rest encryption the database host provides:
+- `BiometricReading`: all vitals, ECG rhythm, risk scores
+- `TriageCase`: symptoms, AI reasoning, doctor notes, diagnosis, recommendations, patient follow-up responses
+- `Visit`: `biometrics`, `treatment`, `nurseReport` (commented "Encrypted" in the schema, but nothing encrypts it), `doctorReview`
+- `Prescription`: medications, diagnosis
+- `Referral`: provisional diagnosis, clinical notes
+- `Message`: content
+- `HealthAlert`: message, anomalies
+- `UserBaseline`: vitals baselines
+- `User`: `dateOfBirth`, `gender`, `phone`, `riskProfile`
+
+There is no admin-granted access mechanism. The only roles are PATIENT, NURSE, DOCTOR and ADMIN, and no record exists of "admin authorized user X to see patient Y".
+
+**Decisions needed before building (for the product owner):**
+1. Which fields get app-level encryption. Free-text clinical notes and diagnoses are straightforward. Numeric vitals are harder: `doctorMonitoring.ts`, `bpValidation.ts`, baselines and the ML service filter and aggregate on them in SQL, and encrypted values can't be queried.
+2. Whether "doctors and nurses" means any clinician, or only one assigned to that patient. Today it is mostly assignment-scoped: nurses see their own visits, doctors see claimed triage cases. The shared review pools (triage, and §36's visit review) and consent-gated monitoring are visible to any doctor.
+3. The shape of admin grants: who can be granted (which roles), how they are scoped (one patient or all), whether they expire, and how they are audited.
