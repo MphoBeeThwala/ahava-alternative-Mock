@@ -7,7 +7,8 @@ import DashboardLayout from "../../../components/DashboardLayout";
 import { Card } from "../../../components/ui/Card";
 import { PageHeader } from "../../../components/ui/PageHeader";
 import { StatusBadge } from "../../../components/ui/StatusBadge";
-import { doctorApi, MonitoringWorklistPatient } from "../../../lib/api";
+import { doctorApi, MonitoringWorklistPatient, UnassignedMonitoringAlert } from "../../../lib/api";
+import { useToast } from "../../../contexts/ToastContext";
 
 function alertVariant(level: string): "danger" | "warning" | "success" {
   if (level === "RED") return "danger";
@@ -24,7 +25,10 @@ function age(dateOfBirth: string | null): string {
 }
 
 export default function DoctorMonitoringPage() {
+  const toast = useToast();
   const [patients, setPatients] = useState<MonitoringWorklistPatient[]>([]);
+  const [unassigned, setUnassigned] = useState<UnassignedMonitoringAlert[]>([]);
+  const [claiming, setClaiming] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,8 +36,9 @@ export default function DoctorMonitoringPage() {
     try {
       setError(null);
       setLoading(true);
-      const data = await doctorApi.getMonitoringWorklist();
-      setPatients(data);
+      const data = await doctorApi.getMonitoring();
+      setPatients(data.patients);
+      setUnassigned(data.unassigned);
     } catch (e: unknown) {
       const err = e as { response?: { data?: { error?: string } } };
       setError(err.response?.data?.error ?? "Unable to load the monitoring worklist.");
@@ -45,6 +50,23 @@ export default function DoctorMonitoringPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Taking on an alert grants access to that one patient's record for the
+  // monitoring window; it's recorded and visible to the patient.
+  const claim = async (patientId: string) => {
+    setClaiming(patientId);
+    try {
+      await doctorApi.claimMonitoringPatient(patientId);
+      toast.success("You're now monitoring this patient.");
+      await load();
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } };
+      toast.error(err.response?.data?.error ?? "Could not take on this patient.");
+      await load();
+    } finally {
+      setClaiming(null);
+    }
+  };
 
   return (
     <RoleGuard allowedRoles={[UserRole.DOCTOR]}>
@@ -89,11 +111,41 @@ export default function DoctorMonitoringPage() {
               </Card>
             )}
 
+            {!loading && !error && unassigned.length > 0 && (
+              <Card>
+                <div className="p-4">
+                  <h2 className="text-sm font-bold text-[var(--foreground)]">Unassigned alerts</h2>
+                  <p className="mt-0.5 text-xs text-[var(--muted)]">
+                    Flagged patients no doctor is monitoring yet. Details open once you take a patient on.
+                  </p>
+                  <div className="mt-3 divide-y divide-[var(--border)]">
+                    {unassigned.map((a) => (
+                      <div key={a.userId} className="flex flex-wrap items-center justify-between gap-3 py-2.5">
+                        <div className="text-sm text-[var(--foreground)]">
+                          <StatusBadge variant={alertVariant(a.alertLevel)}>{a.alertLevel}</StatusBadge>
+                          <span className="ml-2">{a.patientAge != null ? `${a.patientAge}y` : "Age unknown"}</span>
+                          <span className="ml-2 text-xs text-[var(--muted)]">{new Date(a.latestReadingAt).toLocaleString()}</span>
+                        </div>
+                        <button
+                          onClick={() => claim(a.userId)}
+                          disabled={claiming === a.userId}
+                          className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white disabled:opacity-60"
+                          style={{ background: "var(--role-doctor)" }}
+                        >
+                          {claiming === a.userId ? "Taking on…" : "Take on patient"}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </Card>
+            )}
+
             {!loading && !error && patients.length === 0 && (
               <Card>
                 <div className="py-8 text-center text-[var(--muted)]">
-                  No consented patients currently flagged. This list shows only patients with an Amber/Red alert
-                  level or an active risk signal on their most recent reading.
+                  You&apos;re not monitoring any flagged patients. This list shows patients you&apos;ve taken on whose most
+                  recent reading has an Amber/Red alert level or an active risk signal.
                 </div>
               </Card>
             )}
@@ -112,6 +164,9 @@ export default function DoctorMonitoringPage() {
                           <div className="text-xs text-[var(--muted)] mt-0.5">
                             Latest reading: {new Date(p.latestReadingAt).toLocaleString()}
                           </div>
+                          <Link href={`/clinician/patients/${p.userId}`} className="text-xs font-medium hover:underline" style={{ color: "var(--primary)" }}>
+                            Open patient record →
+                          </Link>
                         </div>
                         <StatusBadge variant={alertVariant(p.alertLevel)}>{p.alertLevel}</StatusBadge>
                       </div>

@@ -6,9 +6,11 @@ import type { Visit } from '../../../../lib/api';
 export function NurseVisitCard({
   visit,
   onApprove,
+  onClaim,
 }: {
   visit: Visit;
   onApprove: (visitId: string, review?: string) => Promise<void> | void;
+  onClaim: (visitId: string) => Promise<void> | void;
 }) {
   const [review, setReview] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -21,6 +23,36 @@ export function NurseVisitCard({
       setSubmitting(false);
     }
   };
+
+  // Unclaimed: date, age and sex only until a doctor takes the review, which
+  // grants access to this one patient's record.
+  if (visit.restricted) {
+    return (
+      <Card>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-base font-bold text-[var(--foreground)]">
+              Completed visit
+              {visit.patientAge != null && <span className="font-normal text-[var(--muted)]"> · {visit.patientAge}y{visit.patientSex ? ` · ${visit.patientSex}` : ''}</span>}
+            </h3>
+            <p className="text-sm text-[var(--muted)]">{visit.booking?.scheduledDate ? new Date(visit.booking.scheduledDate).toLocaleString() : ''}</p>
+          </div>
+          {visit.restricted === 'NOT_CLAIMED' ? (
+            <button
+              onClick={async () => { setSubmitting(true); try { await onClaim(visit.id); } finally { setSubmitting(false); } }}
+              disabled={submitting}
+              className="rounded-lg px-5 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              style={{ background: 'var(--role-doctor)' }}
+            >
+              {submitting ? 'Claiming…' : 'Claim for review'}
+            </button>
+          ) : (
+            <span className="text-sm text-[var(--muted)]">Your access to this record has ended</span>
+          )}
+        </div>
+      </Card>
+    );
+  }
 
   return (
     <Card>

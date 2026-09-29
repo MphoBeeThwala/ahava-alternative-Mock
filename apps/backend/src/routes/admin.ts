@@ -254,6 +254,7 @@ router.post('/reset-trial-data', requireAdmin, async (req: AuthenticatedRequest,
 
     const callerId = req.user!.id;
 
+    await prisma.patientAccessGrant.deleteMany({});
     await prisma.message.deleteMany({});
     await prisma.payment.deleteMany({});
     await prisma.biometricReading.deleteMany({});

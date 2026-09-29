@@ -9,6 +9,7 @@
 import request from "supertest";
 import { app } from "../index";
 import prisma from "../lib/prisma";
+import { grantTestAccess, verifyClinician } from "../testSetup/clinicians";
 
 function uniqueEmail(label: string): string {
   return `${label}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`;
@@ -27,6 +28,8 @@ async function registerRole(role: "PATIENT" | "NURSE" | "DOCTOR", label: string)
     role,
   });
   expect(res.status).toBe(201);
+  // Working clinicians have verified registrations (see testSetup/clinicians.ts).
+  if (role !== "PATIENT") await verifyClinician(res.body.user.id, role);
   return { agent, email, userId: res.body.user.id as string };
 }
 
@@ -51,6 +54,8 @@ async function seedBookingAndVisit(patientId: string, nurseId: string, address =
       scheduledStart: booking.scheduledDate,
     },
   });
+  // What accepting the visit over the WebSocket would have granted.
+  await grantTestAccess(nurseId, patientId, "VISIT_ASSIGNMENT", visit.id);
   return { booking, visit };
 }
 
@@ -396,6 +401,8 @@ describe("doctor: nurse-visit review queue and approval", () => {
     const doctor = await registerRole("DOCTOR", "review-approve-doctor");
     const { visit } = await completedVisit("review-approve");
 
+    const claim = await doctor.agent.post(`/api/v1/visits/${visit.id}/claim-review`).send({});
+    expect(claim.status).toBe(200);
     const res = await doctor.agent.post(`/api/v1/visits/${visit.id}/approve`).send({ review: "Vitals reviewed, no concerns." });
 
     expect(res.status).toBe(200);
@@ -410,10 +417,13 @@ describe("doctor: nurse-visit review queue and approval", () => {
     const first = await registerRole("DOCTOR", "review-twice-doctor1");
     const second = await registerRole("DOCTOR", "review-twice-doctor2");
     const { visit } = await completedVisit("review-twice");
+    await first.agent.post(`/api/v1/visits/${visit.id}/claim-review`).send({});
     await first.agent.post(`/api/v1/visits/${visit.id}/approve`).send({});
 
+    const claim = await second.agent.post(`/api/v1/visits/${visit.id}/claim-review`).send({});
     const res = await second.agent.post(`/api/v1/visits/${visit.id}/approve`).send({});
 
+    expect(claim.status).toBe(409);
     expect(res.status).toBe(409);
     expect((await prisma.visit.findUnique({ where: { id: visit.id } }))!.doctorId).toBe(first.userId);
   });
@@ -435,6 +445,7 @@ describe("doctor: nurse-visit review queue and approval", () => {
     const nurse = await registerRole("NURSE", "status-doctor-nurse");
     const { visit } = await seedBookingAndVisit(patient.userId, nurse.userId);
     await prisma.visit.update({ where: { id: visit.id }, data: { doctorId: assigned.userId } });
+    await grantTestAccess(assigned.userId, patient.userId, "VISIT_REVIEW", visit.id);
 
     const denied = await other.agent.patch(`/api/v1/visits/${visit.id}/status`).send({ status: "CANCELLED" });
     const allowed = await assigned.agent.patch(`/api/v1/visits/${visit.id}/status`).send({ status: "CANCELLED" });

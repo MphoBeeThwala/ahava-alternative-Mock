@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import prisma from '../lib/prisma';
 import { verifyWebSocketTicket } from './authSession';
 import { decryptPatientLocation } from '../utils/encryption';
+import { ACCESS_WINDOWS, checkVerifiedClinician, displayName, hasActiveAccess, syncVisitGrant } from './careAccess';
 import { isVisitStatus, visitTimingFor, visitTransitionError } from './visitStatus';
 
 interface AuthenticatedWebSocket extends WebSocket {
@@ -400,6 +401,13 @@ const handleNurseGoOnline = async (ws: AuthenticatedWebSocket, data: { lat: numb
     return;
   }
 
+  // Only nurses with a verified SANC registration are dispatched to patients.
+  const credential = await checkVerifiedClinician(ws.userId);
+  if (!credential.ok) {
+    ws.send(JSON.stringify({ type: 'NURSE_ONLINE_FAILED', error: credential.error, code: credential.code }));
+    return;
+  }
+
   try {
     // Update database
     await prisma.user.update({
@@ -469,6 +477,14 @@ const handleAcceptBooking = async (ws: AuthenticatedWebSocket, data: { bookingId
     ws.send(JSON.stringify({ type: 'ACCEPT_BOOKING_FAILED', error: 'Go online before accepting visits' }));
     return;
   }
+  // Re-checked here, not just at go-online: a registration can be revoked
+  // while a nurse is still online.
+  const credential = await checkVerifiedClinician(ws.userId);
+  if (!credential.ok) {
+    markNurseOffline(ws.userId);
+    ws.send(JSON.stringify({ type: 'ACCEPT_BOOKING_FAILED', error: credential.error, code: credential.code }));
+    return;
+  }
 
   const nurseId = ws.userId;
   try {
@@ -498,6 +514,19 @@ const handleAcceptBooking = async (ws: AuthenticatedWebSocket, data: { bookingId
           nurseId,
           status: 'SCHEDULED',
           scheduledStart: updatedBooking.scheduledDate,
+        },
+      });
+      // Accepting is what gives the nurse access to this one patient's
+      // record: until the visit, then syncVisitGrant keeps it in step with
+      // the visit and winds it down after completion (services/careAccess.ts).
+      const from = Math.max(updatedBooking.scheduledDate.getTime(), Date.now());
+      await tx.patientAccessGrant.create({
+        data: {
+          clinicianId: nurseId,
+          patientId: updatedBooking.patientId,
+          reason: 'VISIT_ASSIGNMENT',
+          sourceId: visit.id,
+          expiresAt: new Date(from + ACCESS_WINDOWS.visitFromScheduledStartHours * 3600_000),
         },
       });
       return { updatedBooking, visit };
@@ -659,6 +688,13 @@ const handleVisitStatusUpdate = async (ws: AuthenticatedWebSocket, data: any) =>
       ws.send(JSON.stringify({ error: 'Visit not found' }));
       return;
     }
+    if (!isAdmin) {
+      const credential = await checkVerifiedClinician(ws.userId);
+      if (!credential.ok || !(await hasActiveAccess(ws.userId, existing.booking.patientId))) {
+        ws.send(JSON.stringify({ error: 'You do not currently have access to this patient\u2019s record.' }));
+        return;
+      }
+    }
     const transitionError = visitTransitionError(existing.status, data.status, isAdmin);
     if (transitionError) {
       ws.send(JSON.stringify({ error: transitionError }));
@@ -672,6 +708,7 @@ const handleVisitStatusUpdate = async (ws: AuthenticatedWebSocket, data: any) =>
       ws.send(JSON.stringify({ error: 'Visit status changed in the meantime' }));
       return;
     }
+    await syncVisitGrant(existing, data.status);
 
     // Broadcast status update to all relevant parties
     const relevantUsers = [existing.booking.patientId];
@@ -866,7 +903,7 @@ const offerOpenBookings = async (nurseId: string, lat: number, lng: number) => {
         type: 'NEW_BOOKING_AVAILABLE',
         data: {
           bookingId: b.id,
-          patientName: `${b.patient.firstName} ${b.patient.lastName}`,
+          patientName: displayName(b.patient.firstName, b.patient.lastName),
           scheduledDate: b.scheduledDate.toISOString(),
           estimatedDuration: b.estimatedDuration,
           amountInCents: b.amountInCents,

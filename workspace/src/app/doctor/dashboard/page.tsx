@@ -112,6 +112,18 @@ export default function DoctorDashboard() {
         }
     };
 
+    const handleClaimReview = async (visitId: string) => {
+        try {
+            await doctorApi.claimVisitReview(visitId);
+            toast.success('Review claimed. The visit report is now open to you.');
+            loadPendingVisits();
+        } catch (error: unknown) {
+            const err = error as { response?: { data?: { error?: string } } };
+            toast.error(err.response?.data?.error || 'Failed to claim this review.');
+            loadPendingVisits();
+        }
+    };
+
     const handleClaim = async (caseId: string) => {
         try {
             await doctorApi.claimTriageCase(caseId);
@@ -363,6 +375,7 @@ export default function DoctorDashboard() {
                                 key={visit.id}
                                 visit={visit}
                                 onApprove={handleApprove}
+                                onClaim={handleClaimReview}
                             />
                         ))}
                     </div>

@@ -490,7 +490,9 @@ export default function NurseDashboard() {
                         ) : (
                             <div className="space-y-3">
                                 {filteredVisits.map((visit) => {
-                                    const flow = VISIT_STATUS_FLOW[visit.status];
+                                    // Past the documentation window the server returns the visit
+                                    // without the patient's details (restricted), and refuses changes.
+                                    const flow = visit.restricted ? undefined : VISIT_STATUS_FLOW[visit.status];
                                     return (
                                         <div key={visit.id} className="rounded-xl border p-4" style={{ borderColor: 'var(--border)' }}>
                                             <div className="mb-2 flex items-start justify-between gap-3">
@@ -499,7 +501,9 @@ export default function NurseDashboard() {
                                                     <p className="text-sm text-[var(--muted)]">
                                                         {visit.booking?.scheduledDate ? new Date(visit.booking.scheduledDate).toLocaleString() : 'Date TBD'}
                                                     </p>
-                                                    <p className="truncate text-sm text-[var(--muted)]" title={visit.booking?.address}>{visit.booking?.address ?? 'Address on file'}</p>
+                                                    <p className="truncate text-sm text-[var(--muted)]" title={visit.booking?.address}>
+                                                        {visit.restricted ? 'Your access to this patient\u2019s record has ended' : visit.booking?.address ?? 'Address on file'}
+                                                    </p>
                                                 </div>
                                                 <StatusBadge variant={visit.status === 'COMPLETED' ? 'success' : 'warning'} className="shrink-0 text-xs">
                                                     {visit.status}
@@ -514,7 +518,7 @@ export default function NurseDashboard() {
                                                     {flow.label}
                                                 </button>
                                             )}
-                                            {visit.status === 'IN_PROGRESS' && (
+                                            {visit.status === 'IN_PROGRESS' && !visit.restricted && (
                                                 <CalibrationForm visitId={visit.id} onRecorded={loadVisits} />
                                             )}
                                         </div>

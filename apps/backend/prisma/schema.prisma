@@ -55,6 +55,17 @@ enum MessageType {
   SYSTEM
 }
 
+// Why a clinician holds access to one patient's record. See
+// services/careAccess.ts and docs/ENGINEERING_PLAN.md §38.
+enum AccessGrantReason {
+  VISIT_ASSIGNMENT // nurse accepted a home visit for this patient
+  TRIAGE_CASE      // doctor claimed this patient's triage case
+  VISIT_REVIEW     // doctor claimed review of a completed nurse visit
+  MONITORING       // doctor took on a remote-monitoring alert
+  ADMIN_GRANT      // an admin authorized it, with a recorded reason
+  BREAK_GLASS      // clinician self-granted emergency access; reviewed by an admin
+}
+
 enum TriageCaseStatus {
   PENDING_REVIEW      // AI done, waiting for doctor
   ASSIGNED            // Doctor claimed the case
@@ -148,6 +159,8 @@ model User {
   prescriptionsAsDoctor  Prescription[] @relation("DoctorPrescriptions")
   referralsAsPatient     Referral[]     @relation("PatientReferrals")
   referralsAsDoctor      Referral[]     @relation("DoctorReferrals")
+  accessGrantsAsClinician PatientAccessGrant[] @relation("GrantClinician")
+  accessGrantsAsPatient   PatientAccessGrant[] @relation("GrantPatient")
 
   // Audit
   createdAt         DateTime @default(now())
@@ -652,4 +665,41 @@ model Referral {
   @@index([patientId])
   @@index([doctorId])
   @@map("referrals")
+}
+
+// Per-patient, time-bound access for a verified clinician (need-to-know /
+// "legitimate relationship" access). Clinicians see a patient's clinical
+// record only while they hold an unexpired, unrevoked grant for that
+// patient. Rows are never deleted: they are the record of who had access,
+// why, and for how long (POPIA s19/s23, HPCSA confidentiality guidance).
+model PatientAccessGrant {
+  id            String            @id @default(cuid())
+  clinicianId   String
+  patientId     String
+  reason        AccessGrantReason
+  // The visit / triage case the access came from, when there is one.
+  sourceId      String?
+  // Free-text reason (admin grants, break-glass). Encrypted at rest.
+  justification String?
+  grantedById   String?
+  startsAt      DateTime          @default(now())
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  revokedById   String?
+  // Break-glass grants must be reviewed by an admin after the fact.
+  reviewedAt    DateTime?
+  reviewedById  String?
+  reviewNote    String?
+
+  clinician     User              @relation("GrantClinician", fields: [clinicianId], references: [id])
+  patient       User              @relation("GrantPatient", fields: [patientId], references: [id])
+
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@index([clinicianId, patientId, expiresAt])
+  @@index([patientId, createdAt])
+  @@index([sourceId])
+  @@index([reason, reviewedAt])
+  @@map("patient_access_grants")
 }

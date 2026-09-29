@@ -1,6 +1,16 @@
 import { Router } from "express";
 import { Prisma, TriageCaseStatus, UserRole } from "@prisma/client";
+import { Response } from "express";
 import { AuthenticatedRequest, requireDoctor } from "../middleware/auth";
+import {
+  ACCESS_WINDOWS, NO_ACCESS_ERROR, ageFrom, auditAccessDenied, checkVerifiedClinician, closeSourceGrants,
+  extendSourceGrants, grantAccess, hasActiveAccess, hoursFromNow, patientsWithActiveAccess, requireVerifiedClinician,
+} from "../services/careAccess";
+
+// Every case route needs a doctor with a verified HPCSA practice number.
+// (The /profile/hpcsa routes below keep plain requireDoctor: that's where
+// an unverified doctor submits their number in the first place.)
+const requireVerifiedDoctor = requireVerifiedClinician(["DOCTOR"]);
 import { writeRequestAudit as createAuditLog } from "../services/clinicalAudit";
 import prisma from "../lib/prisma";
 import { markCaseReviewed } from "../jobs/triageEscalation";
@@ -108,15 +118,82 @@ function decorateTriageCase<T extends { id: string; imageStorageRef?: string | n
   };
 }
 
-function canAccessCase(
-  user: NonNullable<AuthenticatedRequest["user"]>,
-  triageCase: { patientId: string; doctorId: string | null },
-) {
-  return (
-    user.role === UserRole.ADMIN ||
-    triageCase.patientId === user.id ||
-    triageCase.doctorId === user.id
-  );
+/**
+ * Read access to a case's documents: the patient themselves, or the doctor
+ * who claimed it while they hold care access to the patient. Admins no
+ * longer read case content (separation of duties).
+ */
+async function canAccessCase(
+  req: AuthenticatedRequest,
+  triageCase: { id?: string; patientId: string; doctorId: string | null },
+): Promise<boolean> {
+  const user = req.user!;
+  if (triageCase.patientId === user.id) return true;
+  if (user.role !== UserRole.DOCTOR || triageCase.doctorId !== user.id) return false;
+  const check = await checkVerifiedClinician(user.id);
+  const ok = check.ok && (await hasActiveAccess(user.id, triageCase.patientId));
+  if (!ok) await auditAccessDenied(req, "TriageCase", triageCase.id ?? "", triageCase.patientId);
+  return ok;
+}
+
+/**
+ * Guard for acting on a case: it must be claimed by this doctor (claiming
+ * is what grants access — POST /:id/claim) and their access still active.
+ * Previously every action except release accepted an *unclaimed* case, so
+ * any doctor could review, prescribe or refer without ever claiming it.
+ */
+async function ensureCaseAccess(
+  req: AuthenticatedRequest,
+  res: Response,
+  triageCase: { id: string; patientId: string; doctorId: string | null },
+): Promise<boolean> {
+  if (triageCase.doctorId === null) {
+    res.status(409).json({ error: "Claim this case before acting on it" });
+    return false;
+  }
+  if (triageCase.doctorId !== req.user!.id) {
+    res.status(403).json({ error: "Case is assigned to another doctor" });
+    return false;
+  }
+  if (!(await hasActiveAccess(req.user!.id, triageCase.patientId))) {
+    await auditAccessDenied(req, "TriageCase", triageCase.id, triageCase.patientId);
+    res.status(403).json(NO_ACCESS_ERROR);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * An unclaimed (or no-longer-accessible) case in the queue: enough to
+ * prioritise and pick it up — acuity, wait time, age and sex — and nothing
+ * that identifies the patient or describes their complaint.
+ */
+function minimalCase(tc: any, reason: "NOT_CLAIMED" | "ACCESS_EXPIRED") {
+  return {
+    id: tc.id,
+    status: tc.status,
+    createdAt: tc.createdAt,
+    slaDeadline: tc.slaDeadline ?? null,
+    escalationLevel: tc.escalationLevel ?? 0,
+    aiTriageLevel: tc.aiTriageLevel,
+    finalTriageLevel: tc.finalTriageLevel ?? null,
+    doctorId: tc.doctorId,
+    patientId: tc.patientId,
+    patientAge: ageFrom(tc.patient?.dateOfBirth),
+    patientSex: tc.patient?.gender ? String(tc.patient.gender).charAt(0).toUpperCase() : null,
+    restricted: reason,
+  };
+}
+
+/** Full detail for cases this doctor holds; the minimal view for the rest. */
+async function projectCases(req: AuthenticatedRequest, cases: any[]) {
+  const me = req.user!.id;
+  const mine = cases.filter((c) => c.doctorId === me).map((c) => c.patientId);
+  const allowed = await patientsWithActiveAccess(me, mine);
+  return cases.map((c) => {
+    if (c.doctorId !== me) return minimalCase(c, "NOT_CLAIMED");
+    return allowed.has(c.patientId) ? decorateTriageCase(c) : minimalCase(c, "ACCESS_EXPIRED");
+  });
 }
 
 function getQueueWhere(
@@ -194,7 +271,7 @@ async function getDoctorProfile(userId: string) {
   });
 }
 
-router.get("/", requireDoctor, async (req: AuthenticatedRequest, res, next) => {
+router.get("/", requireVerifiedDoctor, async (req: AuthenticatedRequest, res, next) => {
   try {
     const rawStatus = String(req.query.status ?? "PENDING_REVIEW").toUpperCase();
     if (
@@ -223,7 +300,7 @@ router.get("/", requireDoctor, async (req: AuthenticatedRequest, res, next) => {
       userAgent: req.get("User-Agent"),
     });
 
-    res.json({ success: true, cases: cases.map(decorateTriageCase) });
+    res.json({ success: true, cases: await projectCases(req, cases) });
   } catch (error) {
     return next(error);
   }
@@ -231,7 +308,7 @@ router.get("/", requireDoctor, async (req: AuthenticatedRequest, res, next) => {
 
 router.get(
   "/pending",
-  requireDoctor,
+  requireVerifiedDoctor,
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const cases = await prisma.triageCase.findMany({
@@ -250,7 +327,7 @@ router.get(
         userAgent: req.get("User-Agent"),
       });
 
-      res.json({ success: true, cases: cases.map(decorateTriageCase) });
+      res.json({ success: true, cases: await projectCases(req, cases) });
     } catch (error) {
       return next(error);
     }
@@ -259,7 +336,7 @@ router.get(
 
 router.post(
   "/:id/claim",
-  requireDoctor,
+  requireVerifiedDoctor,
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const { id } = req.params;
@@ -280,11 +357,25 @@ router.post(
         return res.status(403).json({ error: "Case already claimed by another doctor" });
       }
 
-      const updated = await prisma.triageCase.update({
-        where: { id },
-        data: { doctorId: req.user!.id, status: TriageCaseStatus.ASSIGNED },
-        include: triageCaseInclude,
+      // Conditional claim, so two doctors can't both take the same case.
+      if (triageCase.doctorId !== req.user!.id) {
+        const { count } = await prisma.triageCase.updateMany({
+          where: { id, doctorId: null, status: TriageCaseStatus.PENDING_REVIEW },
+          data: { doctorId: req.user!.id, status: TriageCaseStatus.ASSIGNED },
+        });
+        if (count === 0) {
+          return res.status(403).json({ error: "Case already claimed by another doctor" });
+        }
+      }
+      // Claiming is what gives this doctor access to this patient's record.
+      await grantAccess({
+        clinicianId: req.user!.id,
+        patientId: triageCase.patientId,
+        reason: "TRIAGE_CASE",
+        sourceId: id,
+        expiresAt: hoursFromNow(ACCESS_WINDOWS.triageOpenDays * 24),
       });
+      const updated = await prisma.triageCase.findUniqueOrThrow({ where: { id }, include: triageCaseInclude });
 
       await createAuditLog({
         userId: req.user!.id,
@@ -310,7 +401,7 @@ router.post(
 
 router.post(
   "/:id/request-follow-up",
-  requireDoctor,
+  requireVerifiedDoctor,
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const { id } = req.params;
@@ -335,9 +426,7 @@ router.post(
       if (!triageCase) {
         return res.status(404).json({ error: "Triage case not found" });
       }
-      if (triageCase.doctorId && triageCase.doctorId !== req.user!.id) {
-        return res.status(403).json({ error: "Access denied" });
-      }
+      if (!(await ensureCaseAccess(req, res, triageCase))) return;
 
       const updated = await prisma.triageCase.update({
         where: { id },
@@ -367,6 +456,9 @@ router.post(
         },
       });
 
+      // Case still open (waiting on the patient / release): keep access alive.
+      await extendSourceGrants(id, req.user!.id, hoursFromNow(ACCESS_WINDOWS.triageOpenDays * 24));
+
       await createAuditLog({
         userId: req.user!.id,
         userRole: req.user!.role,
@@ -392,7 +484,7 @@ router.post(
 
 router.post(
   "/:id/review",
-  requireDoctor,
+  requireVerifiedDoctor,
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const { id } = req.params;
@@ -419,9 +511,7 @@ router.post(
         return res.status(404).json({ error: "Triage case not found" });
       }
 
-      if (triageCase.doctorId && triageCase.doctorId !== req.user!.id) {
-        return res.status(403).json({ error: "Access denied" });
-      }
+      if (!(await ensureCaseAccess(req, res, triageCase))) return;
 
       const {
         chosenLevel,
@@ -458,6 +548,9 @@ router.post(
 
       await markCaseReviewed(id, req.user!.id);
 
+      // Case still open (waiting on the patient / release): keep access alive.
+      await extendSourceGrants(id, req.user!.id, hoursFromNow(ACCESS_WINDOWS.triageOpenDays * 24));
+
       await createAuditLog({
         userId: req.user!.id,
         userRole: req.user!.role,
@@ -483,7 +576,7 @@ router.post(
 
 router.post(
   "/:id/release",
-  requireDoctor,
+  requireVerifiedDoctor,
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const { id } = req.params;
@@ -496,9 +589,7 @@ router.post(
         return res.status(404).json({ error: "Triage case not found" });
       }
 
-      if (triageCase.doctorId !== req.user!.id) {
-        return res.status(403).json({ error: "Access denied" });
-      }
+      if (!(await ensureCaseAccess(req, res, triageCase))) return;
 
       const reviewedStatusError = getReviewedStatusError(
         triageCase.status,
@@ -564,6 +655,9 @@ router.post(
         }
       }
 
+      // Case closed: access winds down to the post-case window.
+      await closeSourceGrants(id, req.user!.id, hoursFromNow(ACCESS_WINDOWS.triageAfterCloseHours));
+
       await createAuditLog({
         userId: req.user!.id,
         userRole: req.user!.role,
@@ -600,8 +694,8 @@ router.get(
       if (!triageCase) {
         return res.status(404).json({ error: "Triage case not found" });
       }
-      if (!req.user || !canAccessCase(req.user, triageCase)) {
-        return res.status(403).json({ error: "Access denied" });
+      if (!req.user || !(await canAccessCase(req, triageCase))) {
+        return res.status(403).json(NO_ACCESS_ERROR);
       }
 
       const manifest = parseTriageAttachmentManifest(triageCase.imageStorageRef);
@@ -625,7 +719,7 @@ router.get(
 
 router.post(
   "/:id/prescription",
-  requireDoctor,
+  requireVerifiedDoctor,
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const { id } = req.params;
@@ -644,9 +738,7 @@ router.post(
       if (!triageCase) {
         return res.status(404).json({ error: "Triage case not found" });
       }
-      if (triageCase.doctorId && triageCase.doctorId !== req.user!.id) {
-        return res.status(403).json({ error: "Access denied" });
-      }
+      if (!(await ensureCaseAccess(req, res, triageCase))) return;
 
       const reviewedStatusError = getReviewedStatusError(
         triageCase.status,
@@ -743,6 +835,9 @@ router.post(
         });
       }
 
+      // Case closed: access winds down to the post-case window.
+      await closeSourceGrants(id, req.user!.id, hoursFromNow(ACCESS_WINDOWS.triageAfterCloseHours));
+
       await createAuditLog({
         userId: req.user!.id,
         userRole: req.user!.role,
@@ -787,8 +882,8 @@ router.get(
       if (!prescription) {
         return res.status(404).json({ error: "Prescription not found" });
       }
-      if (!req.user || !canAccessCase(req.user, prescription.triageCase)) {
-        return res.status(403).json({ error: "Access denied" });
+      if (!req.user || !(await canAccessCase(req, prescription.triageCase))) {
+        return res.status(403).json(NO_ACCESS_ERROR);
       }
 
       const pdf = await generatePrescriptionPdf({
@@ -832,7 +927,7 @@ router.get(
 
 router.post(
   "/:id/emergency-referral",
-  requireDoctor,
+  requireVerifiedDoctor,
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const { id } = req.params;
@@ -862,9 +957,7 @@ router.post(
       if (!triageCase) {
         return res.status(404).json({ error: "Triage case not found" });
       }
-      if (triageCase.doctorId && triageCase.doctorId !== req.user!.id) {
-        return res.status(403).json({ error: "Access denied" });
-      }
+      if (!(await ensureCaseAccess(req, res, triageCase))) return;
 
       const reviewedStatusError = getReviewedStatusError(
         triageCase.status,
@@ -950,6 +1043,9 @@ router.post(
         });
       }
 
+      // Case closed: access winds down to the post-case window.
+      await closeSourceGrants(id, req.user!.id, hoursFromNow(ACCESS_WINDOWS.triageAfterCloseHours));
+
       await createAuditLog({
         userId: req.user!.id,
         userRole: req.user!.role,
@@ -998,8 +1094,8 @@ router.get("/:id/referral/pdf", async (req: AuthenticatedRequest, res, next) => 
     if (!referral) {
       return res.status(404).json({ error: "Referral not found" });
     }
-    if (!req.user || !canAccessCase(req.user, referral.triageCase)) {
-      return res.status(403).json({ error: "Access denied" });
+    if (!req.user || !(await canAccessCase(req, referral.triageCase))) {
+      return res.status(403).json(NO_ACCESS_ERROR);
     }
 
     const pdf = await generateReferralPdf({

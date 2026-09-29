@@ -221,23 +221,53 @@ export default function DashboardLayout({
               >
                 <Icon name="watch" size={18} /><span>Smartwatch</span>
               </Link>
+              <Link
+                href="/patient/access-log"
+                className={linkClass(pathname === "/patient/access-log")}
+                aria-current={pathname === "/patient/access-log" ? "page" : undefined}
+                onClick={() => setIsSidebarOpen(false)}
+              >
+                <Icon name="lock" size={18} /><span>Who accessed my record</span>
+              </Link>
             </>
           )}
           {user.role === "NURSE" && (
-            <div className="mt-4 flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold" style={{ background: 'rgba(5,150,105,0.08)', color: 'var(--role-nurse)' }}>
-              <Icon name="check-circle" size={14} />
-              <span>Verified Nurse</span>
-            </div>
+            <>
+              <Link
+                href="/clinician/patients"
+                className={linkClass(pathname.startsWith("/clinician/patients"))}
+                aria-current={pathname.startsWith("/clinician/patients") ? "page" : undefined}
+                onClick={() => setIsSidebarOpen(false)}
+              >
+                <Icon name="lock" size={18} /><span>My patients</span>
+              </Link>
+              {/* Was "Verified Nurse" for every nurse account, verified or not.
+                  Verification is enforced server-side (services/careAccess.ts). */}
+              <div className="mt-4 flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold" style={{ background: 'rgba(5,150,105,0.08)', color: 'var(--role-nurse)' }}>
+                <Icon name="user" size={14} />
+                <span>Nurse account</span>
+              </div>
+            </>
           )}
           {user.role === "ADMIN" && (
-            <Link
-              href="/admin/bp-validation"
-              className={linkClass(pathname === "/admin/bp-validation")}
-              aria-current={pathname === "/admin/bp-validation" ? "page" : undefined}
-              onClick={() => setIsSidebarOpen(false)}
-            >
-              <Icon name="check-circle" size={18} /><span>BP-Check Validation</span>
-            </Link>
+            <>
+              <Link
+                href="/admin/bp-validation"
+                className={linkClass(pathname === "/admin/bp-validation")}
+                aria-current={pathname === "/admin/bp-validation" ? "page" : undefined}
+                onClick={() => setIsSidebarOpen(false)}
+              >
+                <Icon name="check-circle" size={18} /><span>BP-Check Validation</span>
+              </Link>
+              <Link
+                href="/admin/access"
+                className={linkClass(pathname === "/admin/access")}
+                aria-current={pathname === "/admin/access" ? "page" : undefined}
+                onClick={() => setIsSidebarOpen(false)}
+              >
+                <Icon name="lock" size={18} /><span>Patient access</span>
+              </Link>
+            </>
           )}
           {user.role === "DOCTOR" && (
             <>
@@ -249,9 +279,18 @@ export default function DashboardLayout({
               >
                 <Icon name="pulse" size={18} /><span>Patient Monitoring</span>
               </Link>
+              <Link
+                href="/clinician/patients"
+                className={linkClass(pathname.startsWith("/clinician/patients"))}
+                aria-current={pathname.startsWith("/clinician/patients") ? "page" : undefined}
+                onClick={() => setIsSidebarOpen(false)}
+              >
+                <Icon name="lock" size={18} /><span>My patients</span>
+              </Link>
+              {/* Was "Licensed Doctor" for every doctor account, verified or not. */}
               <div className="mt-4 flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold" style={{ background: 'rgba(37,99,235,0.08)', color: 'var(--role-doctor)' }}>
                 <Icon name="building" size={14} />
-                <span>Licensed Doctor</span>
+                <span>Doctor account</span>
               </div>
             </>
           )}

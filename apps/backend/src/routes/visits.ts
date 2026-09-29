@@ -1,6 +1,11 @@
 import { Router } from 'express';
-import { UserRole, VisitStatus } from '@prisma/client';
-import { AuthenticatedRequest, authMiddleware, requireDoctor, requireNurse, requireRole } from '../middleware/auth';
+import { AccessGrantReason, UserRole, VisitStatus } from '@prisma/client';
+import { AuthenticatedRequest, authMiddleware, requireRole } from '../middleware/auth';
+import {
+  ACCESS_WINDOWS, NO_ACCESS_ERROR, auditAccessDenied, checkVerifiedClinician, closeSourceGrants, grantAccess,
+  hasActiveAccess, hoursFromNow, isClinicianRole, patientsWithActiveAccess, requireVerifiedClinician, syncVisitGrant,
+} from '../services/careAccess';
+import { redactVisit } from '../services/visitProjection';
 import { notifyVisitApproved } from '../services/notifications';
 import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 import { safeDecrypt } from '../utils/encryption';
@@ -29,33 +34,77 @@ const router: Router = Router();
 
 const PENDING_REVIEW = 'PENDING_REVIEW';
 
-// Get visits for user
+const requireVerifiedDoctor = requireVerifiedClinician(['DOCTOR']);
+const requireVerifiedNurse = requireVerifiedClinician(['NURSE']);
+
+const visitListInclude = {
+  booking: { select: { patientId: true, encryptedAddress: true, scheduledDate: true, amountInCents: true, patient: { select: { id: true, firstName: true, lastName: true, dateOfBirth: true, gender: true } } } },
+  nurse: { select: { id: true, firstName: true, lastName: true } },
+} as const;
+
+/** Full record, minus identifiers the caller doesn't need. */
+function fullVisit<T extends { booking?: { encryptedAddress?: string; patient?: any } | null }>(visit: T) {
+  const out: any = withDecryptedBookingAddress(visit);
+  if (out.booking?.patient) {
+    const { dateOfBirth: _dob, gender: _g, ...patient } = out.booking.patient;
+    out.booking = { ...out.booking, patient };
+  }
+  return out;
+}
+
+// Get visits for user.
+//
+// Patients see their own visits in full. A verified nurse or doctor sees
+// the visits they're assigned to, but the patient's details only while
+// they hold care access to that patient (services/careAccess.ts); older
+// ones stay listed with scheduling and status only. Admins get the
+// operational view (status, dates), never clinical content.
 router.get('/', authMiddleware, async (req: AuthenticatedRequest, res, next) => {
   try {
     const where: any = {};
     const statusFilter = typeof req.query.status === 'string' ? req.query.status : undefined;
     const role = req.user!.role;
-    if (statusFilter === PENDING_REVIEW && (role === UserRole.DOCTOR || role === UserRole.ADMIN)) {
+    const me = req.user!.id;
+    if (isClinicianRole(role)) {
+      const check = await checkVerifiedClinician(me);
+      if (!check.ok) return res.status(check.status).json({ error: check.error, code: check.code });
+    }
+
+    const reviewQueue = statusFilter === PENDING_REVIEW && role === UserRole.DOCTOR;
+    if (reviewQueue) {
       // The doctor dashboard's nurse-visit review queue. There is no
       // PENDING_REVIEW visit status: a visit awaits review once the nurse
-      // has completed it and no doctor has signed it off yet. Like the
-      // triage queue it's a shared pool — any doctor can pick one up, and
-      // approving it assigns it to them (POST /:id/approve).
+      // has completed it and no doctor has signed it off yet. Unclaimed ones
+      // show only what's needed to pick one up; claiming (POST
+      // /:id/claim-review) grants access to that patient's record.
       where.status = VisitStatus.COMPLETED;
       where.doctorReview = null;
-      if (role === UserRole.DOCTOR) where.OR = [{ doctorId: null }, { doctorId: req.user!.id }];
+      where.OR = [{ doctorId: null }, { doctorId: me }];
     } else {
-      if (role === UserRole.PATIENT) where.booking = { patientId: req.user!.id };
-      else if (role === UserRole.NURSE) where.nurseId = req.user!.id;
-      else if (role === UserRole.DOCTOR) where.doctorId = req.user!.id;
+      if (role === UserRole.PATIENT) where.booking = { patientId: me };
+      else if (role === UserRole.NURSE) where.nurseId = me;
+      else if (role === UserRole.DOCTOR) where.doctorId = me;
       if (statusFilter !== undefined) {
         if (!isVisitStatus(statusFilter)) return res.status(400).json({ error: 'Invalid visit status filter' });
         where.status = statusFilter;
       }
     }
-    const visits = await prisma.visit.findMany({ where, include: { booking: { select: { patientId: true, encryptedAddress: true, patient: { select: { id: true, firstName: true, lastName: true } } } }, nurse: { select: { id: true, firstName: true, lastName: true } } }, orderBy: { createdAt: 'desc' } });
-    await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'LIST', resource: 'Visit', metadata: { count: visits.length, role: req.user!.role }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
-    return res.json({ success: true, visits: visits.map(withDecryptedBookingAddress) });
+    const visits = await prisma.visit.findMany({ where, include: visitListInclude, orderBy: { createdAt: 'desc' } });
+
+    let result: any[];
+    if (role === UserRole.PATIENT) {
+      result = visits.map(fullVisit);
+    } else if (role === UserRole.ADMIN) {
+      result = visits.map((v) => redactVisit(v, 'ADMIN_VIEW'));
+    } else {
+      const allowed = await patientsWithActiveAccess(me, visits.map((v) => v.booking.patientId));
+      result = visits.map((v) => {
+        if (reviewQueue && v.doctorId !== me) return redactVisit(v, 'NOT_CLAIMED');
+        return allowed.has(v.booking.patientId) ? fullVisit(v) : redactVisit(v, 'ACCESS_EXPIRED');
+      });
+    }
+    await createAuditLog({ userId: me, userRole: role, action: 'LIST', resource: 'Visit', metadata: { count: visits.length, role, fullRecords: result.filter((v) => !v.restricted).length }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
+    return res.json({ success: true, visits: result });
   } catch (error) { return next(error); }
 });
 
@@ -63,17 +112,34 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res, next) => 
 router.get('/:id', authMiddleware, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
-    const visit = await prisma.visit.findUnique({ where: { id }, include: { booking: { select: { patientId: true, encryptedAddress: true, patient: { select: { id: true, firstName: true, lastName: true } } } }, nurse: true, doctor: true, messages: { orderBy: { createdAt: 'desc' }, take: 10 } } });
+    const me = req.user!.id;
+    const role = req.user!.role;
+    const visit = await prisma.visit.findUnique({ where: { id }, include: { booking: { select: { patientId: true, encryptedAddress: true, scheduledDate: true, amountInCents: true, patient: { select: { id: true, firstName: true, lastName: true } } } }, nurse: { select: { id: true, firstName: true, lastName: true } }, doctor: { select: { id: true, firstName: true, lastName: true } }, messages: { orderBy: { createdAt: 'desc' }, take: 10 } } });
     if (!visit) return res.status(404).json({ error: 'Visit not found' });
-    const isAuthorized = req.user!.role === UserRole.ADMIN || visit.booking.patientId === req.user!.id || visit.nurseId === req.user!.id || visit.doctorId === req.user!.id;
-    if (!isAuthorized) return res.status(403).json({ error: 'Access denied' });
-    await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'READ', resource: 'Visit', resourceId: visit.id, metadata: { patientId: visit.booking.patientId, nurseId: visit.nurseId, status: visit.status }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
-    return res.json({ success: true, visit: withDecryptedBookingAddress(visit) });
+
+    if (role === UserRole.ADMIN) {
+      await createAuditLog({ userId: me, userRole: role, action: 'READ', resource: 'Visit', resourceId: visit.id, metadata: { view: 'ADMIN_VIEW', status: visit.status }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
+      return res.json({ success: true, visit: redactVisit(visit, 'ADMIN_VIEW') });
+    }
+    const isPatient = visit.booking.patientId === me;
+    if (!isPatient) {
+      const isAssigned = visit.nurseId === me || visit.doctorId === me;
+      if (!isClinicianRole(role) || !isAssigned) return res.status(403).json({ error: 'Access denied' });
+      const check = await checkVerifiedClinician(me);
+      if (!check.ok) return res.status(check.status).json({ error: check.error, code: check.code });
+      if (!(await hasActiveAccess(me, visit.booking.patientId))) {
+        await auditAccessDenied(req, 'Visit', visit.id, visit.booking.patientId);
+        return res.status(403).json(NO_ACCESS_ERROR);
+      }
+    }
+    await createAuditLog({ userId: me, userRole: role, action: 'READ', resource: 'Visit', resourceId: visit.id, metadata: { patientId: visit.booking.patientId, nurseId: visit.nurseId, status: visit.status }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
+    return res.json({ success: true, visit: fullVisit(visit) });
   } catch (error) { return next(error); }
 });
 
-// Update visit status (assigned nurse, assigned doctor, or admin). Was
-// nurse-only, so the doctor dashboard's status actions always got a 403.
+// Update visit status: the assigned nurse or doctor while they hold care
+// access, or an admin correcting a stuck visit (status only — the admin
+// response carries no clinical content).
 router.patch('/:id/status', requireRole([UserRole.NURSE, UserRole.DOCTOR, UserRole.ADMIN]), async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
@@ -82,14 +148,23 @@ router.patch('/:id/status', requireRole([UserRole.NURSE, UserRole.DOCTOR, UserRo
     const visit = await prisma.visit.findUnique({ where: { id }, include: { booking: { select: { patientId: true } } } });
     if (!visit) return res.status(404).json({ error: 'Visit not found' });
     const isAdmin = req.user!.role === UserRole.ADMIN;
-    const isAssigned = visit.nurseId === req.user!.id || visit.doctorId === req.user!.id;
-    if (!isAdmin && !isAssigned) return res.status(403).json({ error: 'Access denied' });
+    if (!isAdmin) {
+      const isAssigned = visit.nurseId === req.user!.id || visit.doctorId === req.user!.id;
+      if (!isAssigned) return res.status(403).json({ error: 'Access denied' });
+      const check = await checkVerifiedClinician(req.user!.id);
+      if (!check.ok) return res.status(check.status).json({ error: check.error, code: check.code });
+      if (!(await hasActiveAccess(req.user!.id, visit.booking.patientId))) {
+        await auditAccessDenied(req, 'Visit', visit.id, visit.booking.patientId);
+        return res.status(403).json(NO_ACCESS_ERROR);
+      }
+    }
     const transitionError = visitTransitionError(visit.status, status, isAdmin);
     if (transitionError) return res.status(409).json({ error: transitionError });
     // Conditional on the status we just read, so a double-tapped button (or
     // two devices) can't advance the same visit twice.
     const { count } = await prisma.visit.updateMany({ where: { id, status: visit.status }, data: { status, ...visitTimingFor(status) } });
     if (count === 0) return res.status(409).json({ error: 'Visit status changed in the meantime; refresh and try again' });
+    await syncVisitGrant(visit, status);
     const updated = await prisma.visit.findUnique({ where: { id } });
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'UPDATE', resource: 'Visit', resourceId: id, metadata: { oldStatus: visit.status, newStatus: status }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
     // The nurse dashboard changes status over REST, not the WebSocket, so
@@ -97,17 +172,48 @@ router.patch('/:id/status', requireRole([UserRole.NURSE, UserRole.DOCTOR, UserRo
     const recipients = [visit.booking.patientId];
     if (visit.doctorId) recipients.push(visit.doctorId);
     broadcastToUsers(recipients, { type: 'VISIT_STATUS_CHANGED', data: { visitId: id, status, timestamp: new Date().toISOString() } });
-    return res.json({ success: true, visit: updated });
+    return res.json({ success: true, visit: isAdmin ? { id, status: updated!.status } : updated });
   } catch (error) { return next(error); }
 });
 
-// Doctor sign-off on a completed nurse visit. The doctor dashboard has
-// called this since it was built, but the route never existed (404), and
-// nothing else ever set Visit.doctorId — so the review queue was always
-// empty and "Approve & Complete" always failed.
-router.post('/:id/approve', requireDoctor, async (req: AuthenticatedRequest, res, next) => {
+// A doctor takes on review of a completed nurse visit. Assigns the visit
+// and grants time-bound access to that one patient's record.
+router.post('/:id/claim-review', requireVerifiedDoctor, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
+    const me = req.user!.id;
+    const visit = await prisma.visit.findUnique({ where: { id }, include: { booking: { select: { patientId: true } } } });
+    if (!visit) return res.status(404).json({ error: 'Visit not found' });
+    if (visit.status !== VisitStatus.COMPLETED || visit.doctorReview !== null) {
+      return res.status(409).json({ error: 'This visit is not awaiting review' });
+    }
+    if (visit.doctorId !== me) {
+      const { count } = await prisma.visit.updateMany({
+        where: { id, status: VisitStatus.COMPLETED, doctorReview: null, doctorId: null },
+        data: { doctorId: me },
+      });
+      if (count === 0) return res.status(409).json({ error: 'Another doctor has already taken this review' });
+    }
+    await grantAccess({
+      clinicianId: me,
+      patientId: visit.booking.patientId,
+      reason: AccessGrantReason.VISIT_REVIEW,
+      sourceId: id,
+      expiresAt: hoursFromNow(ACCESS_WINDOWS.visitReviewHours),
+    });
+    await createAuditLog({ userId: me, userRole: req.user!.role, action: 'UPDATE', resource: 'Visit', resourceId: id, metadata: { action: 'CLAIM_REVIEW', patientId: visit.booking.patientId }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
+    const full = await prisma.visit.findUnique({ where: { id }, include: visitListInclude });
+    return res.json({ success: true, visit: fullVisit(full!) });
+  } catch (error) { return next(error); }
+});
+
+// Doctor sign-off on a completed nurse visit the doctor has claimed
+// (POST /:id/claim-review). Emails the patient; access then winds down to
+// the documentation window.
+router.post('/:id/approve', requireVerifiedDoctor, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    const me = req.user!.id;
     const rawReview = req.body?.review;
     if (rawReview !== undefined && typeof rawReview !== 'string') {
       return res.status(400).json({ error: 'review must be a string' });
@@ -123,25 +229,23 @@ router.post('/:id/approve', requireDoctor, async (req: AuthenticatedRequest, res
     if (visit.status !== VisitStatus.COMPLETED) {
       return res.status(409).json({ error: 'Only a completed visit can be approved' });
     }
-
-    const isAdmin = req.user!.role === UserRole.ADMIN;
-    // Claim-and-approve in one conditional write, so two doctors can't both
-    // sign off the same visit and a visit already claimed by another doctor
-    // can't be taken over (admins may approve any unreviewed visit).
-    const { count } = await prisma.visit.updateMany({
-      where: {
-        id,
-        status: VisitStatus.COMPLETED,
-        doctorReview: null,
-        ...(isAdmin ? {} : { OR: [{ doctorId: null }, { doctorId: req.user!.id }] }),
-      },
-      data: { doctorReview: review, ...(isAdmin ? {} : { doctorId: req.user!.id }) },
-    });
-    if (count === 0) {
-      return res.status(409).json({ error: 'Visit has already been reviewed or is assigned to another doctor' });
+    if (visit.doctorId !== me) {
+      return res.status(409).json({ error: 'Claim this visit for review before approving it' });
+    }
+    if (!(await hasActiveAccess(me, visit.booking.patientId))) {
+      await auditAccessDenied(req, 'Visit', visit.id, visit.booking.patientId);
+      return res.status(403).json(NO_ACCESS_ERROR);
     }
 
-    await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'UPDATE', resource: 'Visit', resourceId: id, metadata: { action: 'DOCTOR_APPROVE', patientId: visit.booking.patientId }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
+    // Conditional, so a double submit can't overwrite the first review.
+    const { count } = await prisma.visit.updateMany({
+      where: { id, status: VisitStatus.COMPLETED, doctorReview: null, doctorId: me },
+      data: { doctorReview: review },
+    });
+    if (count === 0) return res.status(409).json({ error: 'Visit has already been reviewed' });
+    await closeSourceGrants(id, me, hoursFromNow(ACCESS_WINDOWS.documentationHours));
+
+    await createAuditLog({ userId: me, userRole: req.user!.role, action: 'UPDATE', resource: 'Visit', resourceId: id, metadata: { action: 'DOCTOR_APPROVE', patientId: visit.booking.patientId }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
 
     const patient = visit.booking.patient;
     if (patient?.email) {
@@ -162,7 +266,7 @@ router.post('/:id/approve', requireDoctor, async (req: AuthenticatedRequest, res
 // separate table; writes a normal BiometricReading, source "manual",
 // deviceType "nurse_calibration" so it's distinguishable from an arbitrary
 // self-reported entry without a parallel schema.
-router.post('/:id/biometrics', requireNurse, async (req: AuthenticatedRequest, res, next) => {
+router.post('/:id/biometrics', requireVerifiedNurse, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
     const visit = await prisma.visit.findUnique({
@@ -171,6 +275,10 @@ router.post('/:id/biometrics', requireNurse, async (req: AuthenticatedRequest, r
     });
     if (!visit) return res.status(404).json({ error: 'Visit not found' });
     if (visit.nurseId !== req.user!.id) return res.status(403).json({ error: 'Access denied' });
+    if (!(await hasActiveAccess(req.user!.id, visit.booking.patientId))) {
+      await auditAccessDenied(req, 'Visit', visit.id, visit.booking.patientId);
+      return res.status(403).json(NO_ACCESS_ERROR);
+    }
     if (visit.status !== VisitStatus.IN_PROGRESS) {
       return res.status(400).json({ error: 'Biometrics can only be recorded while the visit is in progress' });
     }

@@ -5,6 +5,11 @@ import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 import { safeDecrypt } from '../utils/encryption';
 import prisma from '../lib/prisma';
 import { isValidCoordinate, markNurseOffline } from '../services/websocket';
+import { patientsWithActiveAccess, requireVerifiedClinician } from '../services/careAccess';
+import { redactVisit } from '../services/visitProjection';
+
+// Going online, and reading any visit, needs a verified SANC registration.
+const requireVerifiedNurse = requireVerifiedClinician(['NURSE']);
 
 const router: Router = Router();
 
@@ -57,15 +62,15 @@ const updateAvailability = async (req: AuthenticatedRequest, res: Response, next
     return res.json({ success: true, nurse });
   } catch (error) { return next(error); }
 };
-router.patch('/availability', requireNurse, updateAvailability);
-router.post('/availability', requireNurse, updateAvailability);
+router.patch('/availability', requireVerifiedNurse, updateAvailability);
+router.post('/availability', requireVerifiedNurse, updateAvailability);
 
 // Get nurse visits
-router.get('/visits', requireNurse, async (req: AuthenticatedRequest, res, next) => {
+router.get('/visits', requireVerifiedNurse, async (req: AuthenticatedRequest, res, next) => {
   try {
     const visits = await prisma.visit.findMany({
       where: { nurseId: req.user!.id },
-      include: { booking: { select: { scheduledDate: true, amountInCents: true, encryptedAddress: true, patient: { select: { id: true, firstName: true, lastName: true, phone: true } } } } },
+      include: { booking: { select: { patientId: true, scheduledDate: true, amountInCents: true, encryptedAddress: true, patient: { select: { id: true, firstName: true, lastName: true, phone: true } } } } },
       orderBy: { scheduledStart: 'desc' }
     });
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'LIST', resource: 'Nurse', metadata: { entity: 'Visit', count: visits.length }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
@@ -73,8 +78,11 @@ router.get('/visits', requireNurse, async (req: AuthenticatedRequest, res, next)
     // encryptedAddress at all, so the nurse assigned to go to a patient
     // could never actually see the visit address — the frontend always
     // showed its generic "Address on file" fallback text.
+    // Past visits stay listed (history, earnings) but the patient's details
+    // are only shown while the nurse still has care access.
+    const allowed = await patientsWithActiveAccess(req.user!.id, visits.map((v) => v.booking.patientId));
     const decryptedVisits = visits.map((visit) => {
-      if (!visit.booking) return visit;
+      if (!allowed.has(visit.booking.patientId)) return redactVisit(visit, 'ACCESS_EXPIRED');
       const { encryptedAddress, ...bookingRest } = visit.booking;
       return { ...visit, booking: { ...bookingRest, address: safeDecrypt(encryptedAddress) } };
     });

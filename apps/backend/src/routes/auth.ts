@@ -12,7 +12,7 @@ import Joi from "joi";
 import { verifySancRegistration } from "../services/sancVerification";
 import { seedBaselineForUser } from "../services/baselineSeed";
 import { addEmailJob } from "../services/queue";
-import prisma from "../lib/prisma";
+import prisma, { TransactionClient } from "../lib/prisma";
 import { getRedis } from "../services/redis";
 import {
   clearAuthCookies,
@@ -127,7 +127,7 @@ function hashRefreshToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
-type PrismaWriteClient = Prisma.TransactionClient | typeof prisma;
+type PrismaWriteClient = TransactionClient | typeof prisma;
 
 type SignedTokens = {
   accessToken: string;

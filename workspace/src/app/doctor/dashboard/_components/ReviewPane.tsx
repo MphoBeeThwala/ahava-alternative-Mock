@@ -75,6 +75,44 @@ export function ReviewPane({
     }
   };
 
+  // Minimum necessary: an unclaimed case (or one whose access window has
+  // closed) shows acuity, wait, age and sex only. Claiming grants access to
+  // this one patient's record (docs/ENGINEERING_PLAN.md §38).
+  if (tc.restricted) {
+    return (
+      <div className="flex-1 overflow-y-auto p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--border)] pb-4">
+          <div>
+            <h2 className="text-lg font-bold text-[var(--foreground)]">
+              Unclaimed patient
+              {tc.patientAge != null && <span className="font-normal text-[var(--muted)]"> · {tc.patientAge}y{tc.patientSex ? ` · ${tc.patientSex}` : ''}</span>}
+            </h2>
+            <div className="mt-1.5"><StatusBadge variant="neutral">{tc.status.replace(/_/g, ' ')}</StatusBadge></div>
+          </div>
+          <AcuityRow level={triageLevelToAcuity(tc.finalTriageLevel ?? tc.aiTriageLevel)} className="max-w-[220px]">
+            <span className="text-xs font-medium text-[var(--muted)]">SATS {tc.finalTriageLevel ?? tc.aiTriageLevel}</span>
+          </AcuityRow>
+        </div>
+        <div className="mt-4 max-w-md rounded-[var(--radius)] border border-[var(--border)] p-4">
+          {tc.restricted === 'ACCESS_EXPIRED' ? (
+            <p className="text-sm text-[var(--muted)]">Your access to this patient&apos;s record has ended. Ask an administrator if you still need it.</p>
+          ) : (
+            <>
+              <p className="mb-3 text-sm text-[var(--muted)]">
+                The patient&apos;s details, complaint and history open once you claim the case. Claiming is recorded and gives you access to this patient only.
+              </p>
+              {tc.status === 'PENDING_REVIEW' && (
+                <button type="button" onClick={() => onClaim(tc.id)} className="w-full rounded-lg py-2.5 text-sm font-semibold text-white" style={{ background: 'var(--role-doctor)', minHeight: 'var(--tap-min)' }}>
+                  Claim case
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       ref={paneRef}

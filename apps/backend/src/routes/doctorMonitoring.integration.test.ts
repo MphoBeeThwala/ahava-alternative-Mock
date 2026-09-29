@@ -10,6 +10,7 @@
 import request from "supertest";
 import { app } from "../index";
 import prisma from "../lib/prisma";
+import { grantTestAccess, verifyClinician } from "../testSetup/clinicians";
 
 function uniqueEmail(label: string): string {
   return `${label}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`;
@@ -28,6 +29,8 @@ async function registerRole(role: "PATIENT" | "NURSE" | "DOCTOR", label: string)
     role,
   });
   expect(res.status).toBe(201);
+  // Working clinicians have verified registrations (see testSetup/clinicians.ts).
+  if (role !== "PATIENT") await verifyClinician(res.body.user.id, role);
   return { agent, email, userId: res.body.user.id as string };
 }
 
@@ -89,7 +92,7 @@ describe("doctor monitoring: consent gating and severity filtering", () => {
 
     const res = await doctor.agent.get("/api/v1/doctor/monitoring");
     expect(res.status).toBe(200);
-    expect(res.body.patients.map((p: any) => p.userId)).not.toContain(patient.userId);
+    expect([...res.body.patients, ...res.body.unassigned].map((p: any) => p.userId)).not.toContain(patient.userId);
   });
 
   it("surfaces a consented patient with a RED latest reading", async () => {
@@ -98,11 +101,24 @@ describe("doctor monitoring: consent gating and severity filtering", () => {
     await seedReading(patient.userId, { alertLevel: "RED" });
     const doctor = await registerRole("DOCTOR", "mon-doctor-red");
 
+    // Unclaimed: listed as an unassigned alert with acuity and age only.
+    const before = await doctor.agent.get("/api/v1/doctor/monitoring");
+    expect(before.status).toBe(200);
+    const alert = before.body.unassigned.find((p: any) => p.userId === patient.userId);
+    expect(alert).toBeDefined();
+    expect(alert.alertLevel).toBe("RED");
+    expect(alert).not.toHaveProperty("firstName");
+    expect(alert).not.toHaveProperty("heartRateResting");
+    expect(before.body.patients.map((p: any) => p.userId)).not.toContain(patient.userId);
+
+    // Claimed: full detail for this doctor.
+    const claim = await doctor.agent.post(`/api/v1/doctor/monitoring/${patient.userId}/claim`).send({});
+    expect(claim.status).toBe(200);
     const res = await doctor.agent.get("/api/v1/doctor/monitoring");
-    expect(res.status).toBe(200);
     const found = res.body.patients.find((p: any) => p.userId === patient.userId);
     expect(found).toBeDefined();
     expect(found.alertLevel).toBe("RED");
+    expect(found.firstName).toBe("mon-red");
   });
 
   it("does not surface a consented patient whose latest reading is GREEN, even if an older reading was RED", async () => {
@@ -114,7 +130,7 @@ describe("doctor monitoring: consent gating and severity filtering", () => {
 
     const res = await doctor.agent.get("/api/v1/doctor/monitoring");
     expect(res.status).toBe(200);
-    expect(res.body.patients.map((p: any) => p.userId)).not.toContain(patient.userId);
+    expect([...res.body.patients, ...res.body.unassigned].map((p: any) => p.userId)).not.toContain(patient.userId);
   });
 
   it("does not surface a consented patient with an unflagged GREEN reading", async () => {
@@ -125,6 +141,6 @@ describe("doctor monitoring: consent gating and severity filtering", () => {
 
     const res = await doctor.agent.get("/api/v1/doctor/monitoring");
     expect(res.status).toBe(200);
-    expect(res.body.patients.map((p: any) => p.userId)).not.toContain(patient.userId);
+    expect([...res.body.patients, ...res.body.unassigned].map((p: any) => p.userId)).not.toContain(patient.userId);
   });
 });

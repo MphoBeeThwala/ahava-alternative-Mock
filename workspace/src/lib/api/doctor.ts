@@ -1,6 +1,14 @@
 import { apiClient } from './client';
 import type { TriageAttachment, MedicalPassportSummary, SafetySummary } from './patient';
 
+export interface UnassignedMonitoringAlert {
+  userId: string;
+  patientAge: number | null;
+  latestReadingAt: string;
+  alertLevel: string;
+  restricted: 'NOT_CLAIMED';
+}
+
 export interface TriageCase {
   id: string;
   patientId: string;
@@ -28,6 +36,10 @@ export interface TriageCase {
   patientFollowUpResponse?: string | null;
   patientRespondedAt?: string | null;
   attachments?: TriageAttachment[];
+  /** Unclaimed / access-ended cases carry only acuity, wait time, age and sex. */
+  restricted?: 'NOT_CLAIMED' | 'ACCESS_EXPIRED';
+  patientAge?: number | null;
+  patientSex?: string | null;
   medicalPassport?: MedicalPassportSummary | null;
   reviewSafety?: SafetySummary | null;
   patient?: {
@@ -113,6 +125,24 @@ export const doctorApi = {
     const res = await apiClient.get('/doctor/monitoring');
     const data = res.data ?? {};
     return Array.isArray(data.patients) ? data.patients : [];
+  },
+  /** Patients you're monitoring (full detail) plus unassigned alerts (acuity and age only). */
+  getMonitoring: async (): Promise<{ patients: MonitoringWorklistPatient[]; unassigned: UnassignedMonitoringAlert[] }> => {
+    const res = await apiClient.get('/doctor/monitoring');
+    const data = res.data ?? {};
+    return {
+      patients: Array.isArray(data.patients) ? data.patients : [],
+      unassigned: Array.isArray(data.unassigned) ? data.unassigned : [],
+    };
+  },
+  claimMonitoringPatient: async (patientId: string) => {
+    const res = await apiClient.post(`/doctor/monitoring/${patientId}/claim`, {});
+    return res.data;
+  },
+  /** Take on review of a completed nurse visit; grants access to that patient. */
+  claimVisitReview: async (visitId: string) => {
+    const res = await apiClient.post(`/visits/${visitId}/claim-review`, {});
+    return res.data;
   },
   getPendingVisits: async () => {
     const res = await apiClient.get('/visits?status=PENDING_REVIEW');

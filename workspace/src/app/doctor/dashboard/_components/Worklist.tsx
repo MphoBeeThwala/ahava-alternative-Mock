@@ -66,8 +66,11 @@ export function Worklist({
           <div className="space-y-2">
             {visible.map((tc) => {
               const level = tc.finalTriageLevel ?? tc.aiTriageLevel;
-              const age = ageFromDateOfBirth(tc.patient?.dateOfBirth);
-              const sexInitial = tc.patient?.gender ? tc.patient.gender.charAt(0).toUpperCase() : null;
+              // Unclaimed cases arrive with only acuity, age and sex (no name,
+              // no complaint) until a doctor claims them.
+              const restricted = Boolean(tc.restricted);
+              const age = restricted ? tc.patientAge ?? null : ageFromDateOfBirth(tc.patient?.dateOfBirth);
+              const sexInitial = restricted ? tc.patientSex ?? null : tc.patient?.gender ? tc.patient.gender.charAt(0).toUpperCase() : null;
               return (
                 <button
                   key={tc.id}
@@ -82,14 +85,16 @@ export function Worklist({
                   >
                     <div className="flex items-center justify-between gap-2">
                       <p className="truncate text-sm font-semibold text-[var(--foreground)]">
-                        {tc.patient?.firstName} {tc.patient?.lastName}
+                        {restricted ? 'Unclaimed patient' : `${tc.patient?.firstName ?? ''} ${tc.patient?.lastName ?? ''}`}
                         {age != null && <span className="font-normal text-[var(--muted)]"> · {age}{sexInitial ? ` · ${sexInitial}` : ''}</span>}
                       </p>
                       <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-[var(--ink-3)]">
                         <Icon name="clock" size={12} /> {formatWaitingClock(tc.createdAt)}
                       </span>
                     </div>
-                    <p className="mt-0.5 truncate text-xs text-[var(--muted)]">{tc.symptoms}</p>
+                    <p className="mt-0.5 truncate text-xs text-[var(--muted)]">
+                      {restricted ? (tc.restricted === 'ACCESS_EXPIRED' ? 'Your access to this record has ended' : 'Claim to view details') : tc.symptoms}
+                    </p>
                   </AcuityRow>
                 </button>
               );

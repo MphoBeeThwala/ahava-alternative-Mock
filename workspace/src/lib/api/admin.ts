@@ -29,7 +29,7 @@ export interface BpFlagValidationReport {
   caveat?: string | null;
   message?: string;
   pairs?: Array<{
-    userId: string;
+    patientRef: string; // pseudonymous (keyed hash), not a user id
     calibrationReadingId: string;
     calibrationAt: string;
     elevated: boolean;

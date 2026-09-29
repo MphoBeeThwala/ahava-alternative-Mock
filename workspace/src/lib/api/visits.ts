@@ -22,6 +22,15 @@ export interface Visit {
     patient?: { firstName?: string; lastName?: string };
     scheduledDate?: string;
   };
+  doctorId?: string | null;
+  /**
+   * Set when the caller may see that the visit exists but not the patient's
+   * record: NOT_CLAIMED (unclaimed review), ACCESS_EXPIRED (care access has
+   * ended), ADMIN_VIEW (operations view). Clinical fields are absent.
+   */
+  restricted?: 'NOT_CLAIMED' | 'ACCESS_EXPIRED' | 'ADMIN_VIEW';
+  patientAge?: number | null;
+  patientSex?: string | null;
 }
 
 export const visitsApi = {

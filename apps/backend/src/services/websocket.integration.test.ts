@@ -12,6 +12,7 @@ import request from "supertest";
 import WebSocket, { WebSocketServer } from "ws";
 import { app } from "../index";
 import prisma from "../lib/prisma";
+import { grantTestAccess, verifyClinician } from "../testSetup/clinicians";
 import { encryptData, encryptPatientLocation } from "../utils/encryption";
 import { createWebSocketTicket } from "./authSession";
 import { initializeWebSocket, notifyNearbyNurses } from "./websocket";
@@ -85,6 +86,8 @@ async function register(role: "PATIENT" | "NURSE", label: string) {
     role,
   });
   expect(res.status).toBe(201);
+  // Working nurses have verified SANC registrations (see testSetup/clinicians.ts).
+  if (role === "NURSE") await verifyClinician(res.body.user.id, "NURSE");
   return res.body.user.id as string;
 }
 
@@ -128,6 +131,42 @@ describe("nurse dispatch over WebSocket", () => {
     expect(offer.data.distanceKm).toBeLessThan(10);
     await new Promise((r) => setTimeout(r, 100));
     expect(far.inbox.some((m) => m.data?.bookingId === booking.id)).toBe(false);
+  });
+
+  it("refuses to dispatch to a nurse whose SANC registration isn't verified", async () => {
+    const nurseId = await register("NURSE", "ws-unverified");
+    await prisma.user.update({ where: { id: nurseId }, data: { sancVerificationStatus: "NAME_MISMATCH" } });
+    const nurse = await connect(nurseId, "NURSE");
+    nurse.send({ type: "NURSE_GO_ONLINE", data: CAPE_TOWN });
+    const res = await nurse.nextType("NURSE_ONLINE_FAILED");
+    expect(res.error).toMatch(/SANC/);
+  });
+
+  it("gives the accepting nurse time-bound access to that one patient", async () => {
+    const patientId = await register("PATIENT", "ws-grant-patient");
+    const nurseId = await register("NURSE", "ws-grant-nurse");
+    const nurse = await goOnline(nurseId, CAPE_TOWN.lat, CAPE_TOWN.lng);
+    const booking = await createBooking(patientId);
+
+    nurse.send({ type: "ACCEPT_BOOKING", data: { bookingId: booking.id } });
+    const ok = await nurse.nextType("ACCEPT_BOOKING_SUCCESS");
+
+    const grant = await prisma.patientAccessGrant.findFirstOrThrow({ where: { clinicianId: nurseId, patientId } });
+    expect(grant.reason).toBe("VISIT_ASSIGNMENT");
+    expect(grant.sourceId).toBe(ok.data.visitId);
+    expect(grant.expiresAt.getTime()).toBeGreaterThan(booking.scheduledDate.getTime());
+  });
+
+  it("offers requests with the patient's first name and initial only", async () => {
+    const patientId = await register("PATIENT", "ws-privacy-patient"); // last name "PATIENT"
+    const here = { lat: -20 - Math.random() * 10, lng: 20 + Math.random() * 10 };
+    const booking = await createBooking(patientId, { at: here });
+
+    // Re-offered by the server when the nurse comes online (offerOpenBookings).
+    const nurse = await goOnline(await register("NURSE", "ws-privacy-nurse"), here.lat, here.lng);
+    const offer = await nurse.next((m) => m.type === "NEW_BOOKING_AVAILABLE" && m.data.bookingId === booking.id);
+
+    expect(offer.data.patientName).toBe("ws-privacy-patient P.");
   });
 
   it("rejects going online without a valid location", async () => {

@@ -2730,3 +2730,112 @@ There is no admin-granted access mechanism. The only roles are PATIENT, NURSE, D
 1. Which fields get app-level encryption. Free-text clinical notes and diagnoses are straightforward. Numeric vitals are harder: `doctorMonitoring.ts`, `bpValidation.ts`, baselines and the ML service filter and aggregate on them in SQL, and encrypted values can't be queried.
 2. Whether "doctors and nurses" means any clinician, or only one assigned to that patient. Today it is mostly assignment-scoped: nurses see their own visits, doctors see claimed triage cases. The shared review pools (triage, and §36's visit review) and consent-gated monitoring are visible to any doctor.
 3. The shape of admin grants: who can be granted (which roles), how they are scoped (one patient or all), whether they expire, and how they are audited.
+
+## 38. Clinical access control and at-rest encryption of clinical notes, 2026-09-29
+
+**What the product owner asked for:**
+- Every patient's current and historical data is stored securely.
+- Written notes are encrypted when stored.
+- Live vitals are not encrypted on the dashboard.
+- Stored data is readable once an authorised party recalls it.
+- Authorisation goes to SANC-registered nurses and doctors with an HPCSA practice number, and only for the individual patient they are dealing with at that moment, never all patients.
+- Where the plan is wrong, industry standards win, because this is a security, functionality and regulatory matter.
+
+**Standards applied.** These are my reading of them, not legal advice. A POPIA review by the Information Officer or a compliance adviser should confirm the final design.
+- POPIA s19: appropriate, reasonable technical and organisational safeguards for integrity and confidentiality.
+- POPIA s26–s27 and s32: health information is special personal information, processed by or under the responsibility of health professionals bound by confidentiality.
+- POPIA s23: a data subject may ask who has had access to their information.
+- HPCSA ethical guidance on confidentiality and on keeping patient health records; SANC's confidentiality obligations for nurses.
+- ISO/IEC 27001 and ISO 27799 access-control principles: need-to-know / least privilege, segregation of duties, privileged-access control, logging.
+- The "minimum necessary" principle used in health-information security generally (e.g. HIPAA).
+
+### What was built
+
+1. **Verified credentials gate** (`services/careAccess.ts`, `requireVerifiedClinician`). Previously any NURSE or DOCTOR account, once registered, had full clinical access; nothing checked SANC or HPCSA status. Now:
+   - A nurse needs `sancVerificationStatus = 'Active'` and a doctor needs an admin-verified HPCSA number before any patient data, going online, accepting a visit, or claiming a case.
+   - Verification is re-checked when a nurse accepts a visit, in case it was revoked while they were online.
+   - `/triage-review/profile/hpcsa` stays open, because that is where an unverified doctor submits their number.
+   - The sidebar badges "Verified Nurse" and "Licensed Doctor" were shown to every nurse and doctor account regardless of verification. They are now neutral ("Nurse account", "Doctor account").
+
+2. **Per-patient, time-bound access grants** (`PatientAccessGrant`, migration `20260929120000_add_patient_access_grants`). A clinician sees a patient's clinical record only while holding an unexpired, unrevoked grant for that patient. Rows are never deleted: they are the record of who had access, why, and for how long. Grants come from taking on a patient:
+
+   | Trigger | Reason | Window |
+   |---|---|---|
+   | Nurse accepts a visit (atomically, in the accept transaction) | `VISIT_ASSIGNMENT` | Until 48h after the scheduled start. Status changes keep it alive; completion or cancellation winds it down to a 24h documentation window. |
+   | Doctor claims a triage case (claim is now atomic too) | `TRIAGE_CASE` | 7 days while open. Release, prescription or referral closes it to 72h. |
+   | Doctor claims a completed nurse visit for review (new `POST /visits/:id/claim-review`) | `VISIT_REVIEW` | 72h. Approval closes it to 24h. |
+   | Doctor takes on an unassigned monitoring alert (new `POST /doctor/monitoring/:patientId/claim`) | `MONITORING` | 30 days. |
+   | Admin grants it | `ADMIN_GRANT` | 1h to 30 days, reason required. |
+   | Clinician break-glass | `BREAK_GLASS` | 4h, justification of at least 20 characters, reviewed by an admin. |
+
+   The windows live together in `ACCESS_WINDOWS`. Enforcement covers:
+   - visits (list, detail, status, calibration)
+   - bookings
+   - messages
+   - both triage routers
+   - doctor monitoring
+   - the WebSocket status update
+   - the new `GET /patient-records/:patientId`: the patient's chart (demographics, medical passport, 90 days of vitals, triage history, visits, prescriptions, referrals), available for any active grant. Without it, an admin grant or break-glass gave access to nothing.
+
+   Refused attempts are written to the audit log as `ACCESS_DENIED`.
+
+3. **Minimum necessary until claimed.** Work queues show only what is needed to pick up work:
+   - **Triage queue:** acuity, wait time, age and sex. Until now every doctor saw every waiting patient's name, contact details, date of birth, medical passport, symptoms and attachments.
+   - **Visit-review pool:** the same limited view. The nurse's report opens on claim.
+   - **Monitoring worklist:** unclaimed alerts show alert level and age only. A patient already being monitored by another doctor isn't shown to others.
+   - **Dispatch offers to nurses who haven't accepted yet:** "First L." instead of the full name.
+   - **BP validation report (admin):** raw user IDs replaced with a keyed-hash pseudonym (`PSEUDONYM_KEY`, falling back to `ENCRYPTION_KEY`).
+
+4. **Separation of duties for admins.** Admins verify credentials, grant, revoke and review access, and read the grant log. They no longer read clinical content: visits and bookings come back in an operational view (status, dates, amounts; no address, reports or messages), and triage content, messages and patient records are refused. **This departs from the owner's first message**, which listed system admins among those with access. The later message moved authorisation to SANC and HPCSA clinicians, and standing admin access to clinical content is what the standards above advise against. An admin who needs a record can only grant access to a verified clinician; admins can't grant access to themselves.
+
+5. **Admin-granted access, break-glass, and the patient's view** (`routes/accessGrants.ts`):
+   - `GET /access-grants/mine` for clinicians.
+   - `POST /access-grants/break-glass`.
+   - `GET /access-grants/my-record` for patients (s23 transparency: who, which registration, why, when).
+   - Admin list, grant, revoke and break-glass review.
+   - Justifications are encrypted at rest under their own AAD label.
+   - Frontend pages: `/clinician/patients` (active access, break-glass form), `/clinician/patients/[patientId]` (record), `/patient/access-log`, `/admin/access`.
+
+6. **Written clinical notes encrypted at rest** (`lib/clinicalFieldEncryption.ts`). A Prisma client extension, so no route can forget it:
+   - Writes are AES-256-GCM encrypted (existing `utils/encryption.ts`, key rotation supported) under the AAD `phi:clinical-text`.
+   - Every read result, including nested `include`s, is decrypted in place.
+   - Other ciphertext (addresses, TOTP, dispatch location) fails authentication under this AAD and is left to its own code path.
+   - Fields covered:
+     - `TriageCase`: symptoms, AI reasoning and possible conditions, doctor notes, diagnosis, recommendations, final diagnosis, override reason, follow-up message and questions, requested investigations, the patient's follow-up response
+     - `Visit`: nurse report, doctor review, treatment
+     - `Prescription`: diagnosis, notes, medications
+     - `Referral`: provisional diagnosis, clinical notes
+     - `Message`: content
+   - Nothing filters or searches on these fields in SQL; this was checked before enabling.
+   - Legacy plaintext still reads correctly. `pnpm --filter backend encrypt:clinical-notes [--apply]` backfills it: dry run by default, idempotent, and it keeps `updatedAt` unchanged.
+
+### Where the plan was changed, and why: stored vitals are not field-encrypted
+
+The owner asked that stored vitals be encrypted and readable once recalled by an authorised party. I recommend against field-level encryption for vitals, and did not apply it:
+- The early-warning engine (the ML service's TimescaleDB `biometric_time_series`), the monitoring worklist, the BP validation report and baselines all filter and aggregate vitals in SQL. Ciphertext can't be queried, so those features would stop working or need rebuilding around full decrypt-in-memory scans.
+- The standards call for encryption at rest, which storage-level encryption of the database and its backups satisfies, together with access control and audit. They don't call for application-level encryption of every column.
+- "Readable once an authorised party recalls it" is delivered by the grants in item 2: only a verified clinician with current access to that patient gets the data back.
+
+Written notes, where most identifying and sensitive narrative lives, are field-encrypted as requested. Live vitals are shown in plaintext on the dashboard as requested.
+
+**Needs confirming outside the codebase:** that the production Postgres volume and its backups are encrypted at rest by the host (Railway). I could not verify this from here.
+
+### Not done / recommended next
+
+- **Run the backfill in production** after deploying: `encrypt:clinical-notes`, then `--apply`, with the production `ENCRYPTION_KEY`.
+- **MFA for clinicians and admins:** TOTP exists but is optional. Remote access to health records normally requires it.
+- **Key management:** `ENCRYPTION_KEY` is an environment variable. A KMS or HSM, with a rotation schedule, is the stronger setup; the `v3` ciphertext format already carries a key ID.
+- **Least-privilege database roles:** the ML service connects with full database credentials but needs only its own table and `users.riskProfile`.
+- **Break-glass notification:** break-glass shows in the patient's access log, but the patient isn't emailed or sent a push notification.
+- **Audit log:** retention and tamper-evidence. It has a checksum, but that hasn't been reviewed against a retention policy.
+- **Monitoring-claim race:** two doctors taking on the same alert at the same instant can both get a grant. Low impact (both are verified doctors), but not atomic.
+- **Redis dispatch events:** cross-replica dispatch events carry the patient's coordinates over Redis pub/sub. They should be encrypted in transit (`rediss://`).
+
+**Tests:**
+- `services/careAccess.integration.test.ts` (16 cases): credentials, expiry and audit, documentation window, cross-patient scope, minimum-necessary queues, claim rules, admin operational view, admin grant and revoke (including refusing unverified clinicians and self-grants), break-glass review, the patient access log, the patient record, message recipients.
+- `lib/clinicalFieldEncryption.integration.test.ts` (3 cases): raw columns are ciphertext, API reads are plaintext, nested includes are decrypted, legacy rows are still readable.
+- 3 new WebSocket cases: an unverified nurse can't go online, accepting creates the grant, offers use "First L.".
+- Existing suites were updated where they relied on the old behaviour (unverified test clinicians, approve without claim).
+
+Totals: backend integration 16 suites / 181 tests, unit 188, frontend 12. `tsc` is clean on both. A full `next build` could not complete in the build container because `next/font` could not download Google Fonts there; typecheck and lint pass on every new page.
+

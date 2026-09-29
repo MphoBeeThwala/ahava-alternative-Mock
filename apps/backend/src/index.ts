@@ -33,6 +33,8 @@ import consentRoutes from "./routes/consent";
 import healthConnectRoutes from "./routes/healthConnect";
 import doctorMonitoringRoutes from "./routes/doctorMonitoring";
 import bpValidationRoutes from "./routes/bpValidation";
+import accessGrantRoutes from "./routes/accessGrants";
+import patientRecordRoutes from "./routes/patientRecord";
 
 // Import middleware
 import { errorHandler } from "./middleware/errorHandler";
@@ -226,6 +228,8 @@ app.use(`${API_V1}/terra`, terraRoutes);
 app.use(`${API_V1}/rook`, rookRoutes);
 app.use(`${API_V1}/consent`, authMiddleware, consentRoutes); // moved from /api/patient/consent to avoid prefix conflict
 app.use(`${API_V1}/doctor/monitoring`, authMiddleware, doctorMonitoringRoutes);
+app.use(`${API_V1}/access-grants`, authMiddleware, accessGrantRoutes);
+app.use(`${API_V1}/patient-records`, authMiddleware, patientRecordRoutes);
 app.use(`${API_V1}/biometrics/health-connect`, healthConnectRoutes);
 app.use("/webhooks", webhookRoutes);
 
