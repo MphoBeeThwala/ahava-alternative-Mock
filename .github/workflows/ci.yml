@@ -36,6 +36,16 @@ jobs:
           node-version: 20
           cache: pnpm
 
+      # The Railway backend image installs with `npm ci` from
+      # apps/backend/package-lock.json (apps/backend/Dockerfile), not with
+      # pnpm. A dependency added with pnpm alone passes every other step here
+      # and then fails the production build — which is exactly what happened
+      # when PR #30 added @aws-sdk/client-kms. Runs before `pnpm install` so
+      # there is no node_modules to confuse npm.
+      - name: Backend package-lock.json in sync with package.json (Railway uses npm ci)
+        working-directory: apps/backend
+        run: npm ci --dry-run --ignore-scripts --no-audit --no-fund
+
       # pnpm-lock.yaml was regenerated after the root Vite/Capacitor app was
       # removed (AH-16/AH-17), so this is safe to pin: CI now catches real
       # dependency drift instead of silently re-resolving it (AH-39).
