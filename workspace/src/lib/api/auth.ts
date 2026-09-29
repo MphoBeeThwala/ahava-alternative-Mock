@@ -67,8 +67,9 @@ export const authApi = {
     });
     return res.data;
   },
-  setupTwoFactor: async (): Promise<{ success: boolean; secret: string; otpauthUrl: string }> => {
-    const res = await apiClient.post('/auth/2fa/setup', {});
+  /** Returns the pending key (the same one until setup is confirmed) unless `regenerate` is set. */
+  setupTwoFactor: async (regenerate = false): Promise<{ success: boolean; secret: string; otpauthUrl: string }> => {
+    const res = await apiClient.post('/auth/2fa/setup', regenerate ? { regenerate: true } : {});
     return res.data;
   },
   verifyTwoFactorSetup: async (code: string): Promise<{ success: boolean; backupCodes: string[] }> => {

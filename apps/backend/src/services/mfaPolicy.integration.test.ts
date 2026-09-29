@@ -95,6 +95,29 @@ describe("mandatory two-factor authentication for staff", () => {
     expect(JSON.stringify(unknown!.metadata)).not.toContain("nobody-");
   });
 
+  it("keeps the same key when setup is opened again, so the app already holding it still works", async () => {
+    const nurse = await register("NURSE", "mfa-reopen-nurse");
+    const first = await nurse.agent.post("/api/v1/auth/2fa/setup").send({});
+    // User adds this key to their authenticator app, then cancels and reopens setup.
+    const second = await nurse.agent.post("/api/v1/auth/2fa/setup").send({});
+    expect(second.body.secret).toBe(first.body.secret);
+
+    const verify = await nurse.agent.post("/api/v1/auth/2fa/verify-setup").send({ code: authenticator.generate(first.body.secret) });
+    expect(verify.status).toBe(200);
+  });
+
+  it("issues a new key only when asked, and the old one then stops working", async () => {
+    const nurse = await register("NURSE", "mfa-regenerate-nurse");
+    const first = await nurse.agent.post("/api/v1/auth/2fa/setup").send({});
+    const fresh = await nurse.agent.post("/api/v1/auth/2fa/setup").send({ regenerate: true });
+    expect(fresh.body.secret).not.toBe(first.body.secret);
+
+    const stale = await nurse.agent.post("/api/v1/auth/2fa/verify-setup").send({ code: authenticator.generate(first.body.secret) });
+    expect(stale.status).toBe(400);
+    const ok = await nurse.agent.post("/api/v1/auth/2fa/verify-setup").send({ code: authenticator.generate(fresh.body.secret) });
+    expect(ok.status).toBe(200);
+  });
+
   it("does not let staff turn 2FA off", async () => {
     const nurse = await register("NURSE", "mfa-disable-nurse");
     const secret = await enrol(nurse.agent);
