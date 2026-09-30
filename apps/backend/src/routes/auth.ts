@@ -1,7 +1,7 @@
 import { Request, Router } from "express";
 import * as bcrypt from "@node-rs/bcrypt";
 import crypto from "crypto";
-import { Prisma } from "@prisma/client";
+import { Prisma, StaffInvite } from "@prisma/client";
 import { authRateLimiter } from "../middleware/rateLimiter";
 import {
   authMiddleware,
@@ -15,6 +15,7 @@ import { addEmailJob } from "../services/queue";
 import { isMfaRequired } from "../services/mfaPolicy";
 import { auditSignIn } from "../services/signInAudit";
 import { revokeAllSessions } from "../services/sessions";
+import { consumeInvite, findUsableInvite, isStaffInviteRequired } from "../services/staffInvites";
 import { writeRequestAudit } from "../services/clinicalAudit";
 import prisma, { TransactionClient } from "../lib/prisma";
 import { getRedis } from "../services/redis";
@@ -110,12 +111,23 @@ const registerSchema = Joi.object({
   dateOfBirth: Joi.date().optional(),
   gender: Joi.string().optional(),
   preferredLanguage: Joi.string().default("en-ZA"),
-  sancRegistrationNumber: Joi.string().when("role", {
+  sancRegistrationNumber: Joi.string().trim().max(40).when("role", {
     is: "NURSE",
     then: Joi.optional(),
     otherwise: Joi.forbidden(),
   }),
-  adminSecret: Joi.string().allow("").optional(), // allow empty string — patient forms send '' by default
+  hpcsaNumber: Joi.string().trim().max(40).when("role", {
+    is: "DOCTOR",
+    then: Joi.optional(),
+    otherwise: Joi.forbidden(),
+  }),
+  // Staff (nurse, doctor, admin) accounts need an admin-issued invite
+  // (services/staffInvites.ts).
+  inviteToken: Joi.string().max(200).optional(),
+  // The shared registration secrets were retired for invites. Older cached
+  // sign-up pages still send this field (often as ''), so it is accepted
+  // and dropped rather than failing their patient sign-ups.
+  adminSecret: Joi.any().strip(),
 });
 
 const loginSchema = Joi.object({
@@ -278,6 +290,8 @@ async function rotateRefreshToken(
   });
 }
 
+class InviteAlreadyUsedError extends Error {}
+
 // Register new user
 router.post("/register", authRateLimiter, async (req, res, next) => {
   try {
@@ -297,38 +311,36 @@ router.post("/register", authRateLimiter, async (req, res, next) => {
       gender,
       preferredLanguage,
       sancRegistrationNumber,
-      adminSecret,
+      hpcsaNumber,
+      inviteToken,
     } = value;
-    const email = rawEmail.toLowerCase();
+    let email = rawEmail.toLowerCase();
 
-    // Security: Restrict ADMIN and DOCTOR/NURSE registration
-    if (role === "ADMIN") {
-      if (
-        !adminSecret ||
-        adminSecret !== process.env.ADMIN_REGISTRATION_SECRET
-      ) {
-        return res
-          .status(403)
-          .json({ error: "Unauthorized role registration" });
+    // Staff accounts are created only through a single-use invite an admin
+    // sent to this person (services/staffInvites.ts). Patients sign up freely.
+    let invite: StaffInvite | null = null;
+    if (role !== "PATIENT" && (inviteToken || isStaffInviteRequired())) {
+      if (!inviteToken) {
+        return res.status(403).json({
+          error: "Staff accounts are created by invitation. Ask your administrator to send you an invite link.",
+          code: "INVITE_REQUIRED",
+        });
       }
-    }
-
-    // For staff, we restrict signup in production mode
-    if (
-      (role === "DOCTOR" || role === "NURSE") &&
-      process.env.NODE_ENV === "production"
-    ) {
-      if (
-        !adminSecret ||
-        adminSecret !== process.env.STAFF_REGISTRATION_SECRET
-      ) {
-        return res
-          .status(403)
-          .json({ error: "Staff registration requires a secret token" });
+      invite = await findUsableInvite(inviteToken);
+      if (!invite) {
+        return res.status(400).json({
+          error: "This invite link is invalid, has expired, or was already used. Ask your administrator for a new one.",
+          code: "INVITE_INVALID",
+        });
       }
+      if (invite.role !== role) {
+        return res.status(400).json({ error: "This invite is for a different role.", code: "INVITE_MISMATCH" });
+      }
+      if (invite.email !== email) {
+        return res.status(400).json({ error: "Use the email address the invite was sent to.", code: "INVITE_MISMATCH" });
+      }
+      email = invite.email;
     }
-
-    // NOTE: PATIENT role registration is always allowed without a secret.
 
     // Check if user already exists
     const existingUser = await prisma.user.findUnique({
@@ -344,29 +356,60 @@ router.post("/register", authRateLimiter, async (req, res, next) => {
     const saltRounds = parseInt(process.env.BCRYPT_ROUNDS || "10", 10);
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
-    // Create user
-    const user = await prisma.user.create({
-      data: {
-        email,
-        passwordHash,
-        firstName,
-        lastName,
-        role,
-        phone,
-        dateOfBirth,
-        gender,
-        preferredLanguage,
-      },
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        role: true,
-        isActive: true,
-        isVerified: true,
-      },
+    // Create user (and use up the invite in the same transaction)
+    const user = await prisma.$transaction(async (tx) => {
+      const created = await tx.user.create({
+        data: {
+          email,
+          passwordHash,
+          firstName,
+          lastName,
+          role,
+          phone,
+          dateOfBirth,
+          gender,
+          preferredLanguage,
+          // Entered by the doctor; unverified until an admin checks it.
+          ...(role === "DOCTOR" && hpcsaNumber ? { hcpsaNumber: hpcsaNumber } : {}),
+          // Opening the emailed invite link proves the address.
+          ...(invite ? { isVerified: true } : {}),
+        },
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          role: true,
+          isActive: true,
+          isVerified: true,
+        },
+      });
+      if (invite && !(await consumeInvite(tx, invite.id, created.id))) {
+        throw new InviteAlreadyUsedError();
+      }
+      return created;
+    }).catch((err) => {
+      if (err instanceof InviteAlreadyUsedError) return null;
+      throw err;
     });
+    if (!user) {
+      return res.status(400).json({
+        error: "This invite link is invalid, has expired, or was already used. Ask your administrator for a new one.",
+        code: "INVITE_INVALID",
+      });
+    }
+    if (invite) {
+      await writeRequestAudit({
+        userId: user.id,
+        userRole: user.role,
+        action: "CREATE",
+        resource: "StaffInvite",
+        resourceId: invite.id,
+        metadata: { event: "INVITE_ACCEPTED", role: user.role, invitedById: invite.createdById },
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent"),
+      });
+    }
 
     // Generate tokens
     const { accessToken, refreshToken } = await generateTokens(
@@ -374,21 +417,23 @@ router.post("/register", authRateLimiter, async (req, res, next) => {
       user.role,
     );
 
-    // Send email verification (non-fatal — requires DB migration to be applied)
-    try {
-      const verificationToken = crypto.randomBytes(32).toString("hex");
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { emailVerificationToken: verificationToken },
-      });
-      const frontendBase = (
-        process.env.FRONTEND_URL ?? "https://app.ahavaon88.co.za"
-      ).replace(/\/$/, "");
-      const verifyUrl = `${frontendBase}/auth/verify-email?token=${verificationToken}`;
-      addEmailJob({
-        to: email,
-        subject: "Verify your Ahava Healthcare email",
-        html: `<!DOCTYPE html>
+    // Send email verification (non-fatal — requires DB migration to be applied).
+    // Not needed when the account came from an emailed invite.
+    if (!invite) {
+      try {
+        const verificationToken = crypto.randomBytes(32).toString("hex");
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { emailVerificationToken: verificationToken },
+        });
+        const frontendBase = (
+          process.env.FRONTEND_URL ?? "https://app.ahavaon88.co.za"
+        ).replace(/\/$/, "");
+        const verifyUrl = `${frontendBase}/auth/verify-email?token=${verificationToken}`;
+        addEmailJob({
+          to: email,
+          subject: "Verify your Ahava Healthcare email",
+          html: `<!DOCTYPE html>
 <html lang="en">
 <body style="margin:0;padding:0;font-family:Arial,sans-serif;background:#f1f5f9;">
   <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 16px;">
@@ -421,13 +466,14 @@ router.post("/register", authRateLimiter, async (req, res, next) => {
   </table>
 </body>
 </html>`,
-        text: `Hi ${firstName},\n\nWelcome to Ahava Healthcare! Please verify your email by visiting:\n${verifyUrl}\n\nThis link expires in 24 hours.\n\nIf you did not create an account, ignore this email.`,
-      }).catch(() => {});
-    } catch (verifyErr) {
-      console.warn(
-        "[auth/register] Could not set email verification token (migration pending?):",
-        verifyErr,
-      );
+          text: `Hi ${firstName},\n\nWelcome to Ahava Healthcare! Please verify your email by visiting:\n${verifyUrl}\n\nThis link expires in 24 hours.\n\nIf you did not create an account, ignore this email.`,
+        }).catch(() => {});
+      } catch (verifyErr) {
+        console.warn(
+          "[auth/register] Could not set email verification token (migration pending?):",
+          verifyErr,
+        );
+      }
     }
 
     // Post-registration async hooks (non-blocking)
@@ -463,6 +509,32 @@ router.post("/register", authRateLimiter, async (req, res, next) => {
         { accessToken, refreshToken },
       ),
     );
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// What a staff invite link is for, so the sign-up page can fill in and
+// lock the email and role. The token is 256 bits of randomness, so this
+// can't be used to discover invites.
+router.get("/invites/:token", authRateLimiter, async (req, res, next) => {
+  try {
+    const invite = await findUsableInvite(req.params.token);
+    if (!invite) {
+      return res.status(404).json({
+        error: "This invite link is invalid, has expired, or was already used. Ask your administrator for a new one.",
+        code: "INVITE_INVALID",
+      });
+    }
+    return res.json({
+      invite: {
+        email: invite.email,
+        role: invite.role,
+        firstName: invite.firstName,
+        lastName: invite.lastName,
+        expiresAt: invite.expiresAt,
+      },
+    });
   } catch (error) {
     return next(error);
   }

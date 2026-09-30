@@ -703,3 +703,31 @@ model PatientAccessGrant {
   @@index([reason, reviewedAt])
   @@map("patient_access_grants")
 }
+
+// Staff accounts (nurses, doctors, admins) are created only through a
+// single-use invite an admin sends to one email address
+// (services/staffInvites.ts). Only a SHA-256 hash of the link's token is
+// stored. createdById / revokedById / acceptedUserId are plain ids, not
+// relations, so the history survives the user it names being removed.
+model StaffInvite {
+  id             String    @id @default(cuid())
+  email          String
+  role           UserRole
+  firstName      String?
+  lastName       String?
+  tokenHash      String    @unique
+  expiresAt      DateTime
+  createdById    String
+  acceptedAt     DateTime?
+  acceptedUserId String?
+  revokedAt      DateTime?
+  revokedById    String?
+  sentCount      Int       @default(1)
+
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([email])
+  @@index([createdAt])
+  @@map("staff_invites")
+}

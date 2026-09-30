@@ -8,6 +8,7 @@ import { useToast } from '../../../contexts/ToastContext';
 import DashboardLayout from '../../../components/DashboardLayout';
 import { Card, CardHeader, CardTitle } from '../../../components/ui/Card';
 import { StatusBadge } from '../../../components/ui/StatusBadge';
+import StaffInvites, { InviteLinkNotice } from '../../../components/StaffInvites';
 
 type RoleFilter = 'ALL' | User['role'];
 type StatusFilter = 'ALL' | 'ACTIVE' | 'INACTIVE';
@@ -28,18 +29,34 @@ export default function AdminDashboard() {
         password: '',
         firstName: '',
         lastName: '',
-        role: 'PATIENT' as User['role'],
+        role: 'NURSE' as User['role'],
     });
     const [adding, setAdding] = useState(false);
+    // Staff get an invite link instead of an account with a password we chose.
+    const isStaffInvite = newUser.role !== 'PATIENT';
+    const [sentInvite, setSentInvite] = useState<{ email: string; link: string } | null>(null);
+    const [invitesRefreshKey, setInvitesRefreshKey] = useState(0);
+
+    const closeAddModal = () => {
+        setShowAddModal(false);
+        setSentInvite(null);
+        setNewUser({ email: '', password: '', firstName: '', lastName: '', role: 'NURSE' });
+    };
 
     const handleAddUser = async (e: React.FormEvent) => {
         e.preventDefault();
         try {
             setAdding(true);
-            await adminApi.createUser(newUser);
+            if (newUser.role !== 'PATIENT') {
+                const { firstName, lastName, email, role } = newUser;
+                const res = await adminApi.sendInvite({ email, role, firstName, lastName });
+                setSentInvite({ email: res.invite.email, link: res.inviteLink });
+                setInvitesRefreshKey((k) => k + 1);
+                return;
+            }
+            await adminApi.createUser({ ...newUser, role: 'PATIENT' });
             toast.success(`User ${newUser.email} created successfully!`);
-            setShowAddModal(false);
-            setNewUser({ email: '', password: '', firstName: '', lastName: '', role: 'PATIENT' });
+            closeAddModal();
             loadUsers();
             loadStats();
         } catch (error: unknown) {
@@ -245,7 +262,7 @@ export default function AdminDashboard() {
                                 className="rounded-lg px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
                                 style={{ backgroundColor: '#10b981' }}
                             >
-                                + Add User
+                                + Invite staff / add patient
                             </button>
                             <button
                                 onClick={loadUsers}
@@ -371,6 +388,8 @@ export default function AdminDashboard() {
                         <div className="p-12 text-center font-medium text-[var(--muted)]">No users found.</div>
                     )}
                 </Card>
+
+                <StaffInvites refreshKey={invitesRefreshKey} />
                 </div>{/* p-6 */}
                 </div>{/* outer bg */}
 
@@ -379,11 +398,31 @@ export default function AdminDashboard() {
                     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}>
                         <div style={{ background: 'white', borderRadius: 20, width: '100%', maxWidth: 500, overflow: 'hidden', boxShadow: '0 20px 50px rgba(0,0,0,0.2)' }}>
                             <div style={{ background: 'linear-gradient(135deg,#0d9488,#059669)', padding: '24px 30px', color: 'white' }}>
-                                <h3 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>Add New User</h3>
-                                <p style={{ margin: '4px 0 0', opacity: 0.8, fontSize: 13 }}>Create a patient, doctor, nurse, or admin account.</p>
+                                <h3 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{isStaffInvite ? 'Invite staff member' : 'Add patient'}</h3>
+                                <p style={{ margin: '4px 0 0', opacity: 0.8, fontSize: 13 }}>
+                                    {isStaffInvite
+                                        ? 'They get a single-use link by email, choose their own password, and set up two-factor authentication.'
+                                        : 'Create a patient account with a temporary password.'}
+                                </p>
                             </div>
-                            
+
+                            {sentInvite ? (
+                                <div style={{ padding: 30 }}>
+                                    <InviteLinkNotice email={sentInvite.email} link={sentInvite.link} />
+                                    <button type="button" onClick={closeAddModal} style={{ marginTop: 20, width: '100%', padding: '12px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg,#0d9488,#059669)', color: 'white', fontWeight: 700, cursor: 'pointer' }}>Done</button>
+                                </div>
+                            ) : (
                             <form onSubmit={handleAddUser} style={{ padding: 30 }}>
+                                <div style={{ marginBottom: 16 }}>
+                                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 6, textTransform: 'uppercase' }}>Role</label>
+                                    <select value={newUser.role} onChange={e => setNewUser({...newUser, role: e.target.value as User['role']})} style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1.5px solid #e2e8f0', outline: 'none', background: 'white' }}>
+                                        <option value="NURSE">Nurse (invite)</option>
+                                        <option value="DOCTOR">Doctor (invite)</option>
+                                        <option value="ADMIN">Admin (invite)</option>
+                                        <option value="PATIENT">Patient</option>
+                                    </select>
+                                </div>
+
                                 <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: 16, marginBottom: 16 }}>
                                     <div>
                                         <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 6, textTransform: 'uppercase' }}>First Name</label>
@@ -400,28 +439,21 @@ export default function AdminDashboard() {
                                     <input type="email" required value={newUser.email} onChange={e => setNewUser({...newUser, email: e.target.value})} style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1.5px solid #e2e8f0', outline: 'none' }} placeholder="jane.doe@example.com" />
                                 </div>
 
+                                {!isStaffInvite && (
                                 <div style={{ marginBottom: 16 }}>
                                     <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 6, textTransform: 'uppercase' }}>Temporary Password</label>
                                     <input type="password" required value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value})} style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1.5px solid #e2e8f0', outline: 'none' }} placeholder="••••••••" minLength={8} />
                                 </div>
+                                )}
 
-                                <div style={{ marginBottom: 24 }}>
-                                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#64748b', marginBottom: 6, textTransform: 'uppercase' }}>Assigned Role</label>
-                                    <select value={newUser.role} onChange={e => setNewUser({...newUser, role: e.target.value as User['role']})} style={{ width: '100%', padding: '10px 14px', borderRadius: 8, border: '1.5px solid #e2e8f0', outline: 'none', background: 'white' }}>
-                                        <option value="PATIENT">Patient</option>
-                                        <option value="NURSE">Nurse</option>
-                                        <option value="DOCTOR">Doctor</option>
-                                        <option value="ADMIN">Admin</option>
-                                    </select>
-                                </div>
-
-                                <div style={{ display: 'flex', gap: 12 }}>
-                                    <button type="button" onClick={() => setShowAddModal(false)} style={{ flex: 1, padding: '12px', borderRadius: 10, border: '1.5px solid #e2e8f0', background: 'white', color: '#64748b', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+                                <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
+                                    <button type="button" onClick={closeAddModal} style={{ flex: 1, padding: '12px', borderRadius: 10, border: '1.5px solid #e2e8f0', background: 'white', color: '#64748b', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
                                     <button type="submit" disabled={adding} style={{ flex: 2, padding: '12px', borderRadius: 10, border: 'none', background: adding ? '#94a3b8' : 'linear-gradient(135deg,#0d9488,#059669)', color: 'white', fontWeight: 700, cursor: adding ? 'not-allowed' : 'pointer' }}>
-                                        {adding ? 'Creating...' : 'Create Account'}
+                                        {adding ? (isStaffInvite ? 'Sending…' : 'Creating...') : (isStaffInvite ? 'Send invite' : 'Create Account')}
                                     </button>
                                 </div>
                             </form>
+                            )}
                         </div>
                     </div>
                 )}

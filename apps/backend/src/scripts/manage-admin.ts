@@ -6,6 +6,12 @@
  *
  *   ADMIN_EMAIL=... ADMIN_PASSWORD='<new strong password>' pnpm tsx src/scripts/manage-admin.ts
  *   ADMIN_EMAIL=... pnpm tsx src/scripts/manage-admin.ts --reset-2fa
+ *   ADMIN_EMAIL=... pnpm tsx src/scripts/manage-admin.ts --invite
+ *
+ * --invite is for when there is no admin account to recover (a new
+ * deployment, or every admin has left): it issues a single-use admin invite
+ * for ADMIN_EMAIL and prints the link. Admins invite everyone else from the
+ * dashboard (services/staffInvites.ts).
  *
  * There are deliberately no default credentials: this file previously held
  * a real-looking admin email and password as fallbacks, committed to the
@@ -16,12 +22,32 @@ import 'dotenv/config';
 import prisma from '../lib/prisma';
 import { writeRequestAudit } from '../services/clinicalAudit';
 import { revokeAllSessions } from '../services/sessions';
+import { createStaffInvite, INVITE_TTL_HOURS, inviteLink, sendStaffInviteEmail } from '../services/staffInvites';
+
+async function inviteAdmin(adminEmail: string) {
+  if (await prisma.user.findUnique({ where: { email: adminEmail }, select: { id: true } })) {
+    throw new Error(`An account with email ${adminEmail} already exists; recover it instead of inviting.`);
+  }
+  const { invite, token } = await createStaffInvite({ email: adminEmail, role: 'ADMIN', createdById: 'infrastructure:manage-admin' });
+  await writeRequestAudit({
+    userId: null,
+    userRole: 'SYSTEM',
+    action: 'CREATE',
+    resource: 'StaffInvite',
+    resourceId: invite.id,
+    metadata: { event: 'INVITE_SENT', role: 'ADMIN', email: adminEmail, via: 'manage-admin' },
+  });
+  await sendStaffInviteEmail(invite, token, 'The Ahava Healthcare platform team').catch(() => {});
+  console.log(`Admin invite issued for ${adminEmail} (expires in ${INVITE_TTL_HOURS} hours). It was also emailed if email is configured.`);
+  console.log(`Link (single use; give it only to that person): ${inviteLink(token)}`);
+}
 
 async function manageAdmin() {
   const resetTwoFactor = process.argv.includes('--reset-2fa');
   const adminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
   const adminPassword = process.env.ADMIN_PASSWORD;
   if (!adminEmail) throw new Error('Set ADMIN_EMAIL to the admin account to recover.');
+  if (process.argv.includes('--invite')) return inviteAdmin(adminEmail);
   if (!resetTwoFactor && (!adminPassword || adminPassword.length < 12)) {
     throw new Error('Set ADMIN_PASSWORD to a new password of at least 12 characters (or pass --reset-2fa).');
   }

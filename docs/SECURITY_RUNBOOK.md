@@ -1,6 +1,6 @@
 # Security runbook
 
-Step-by-step operations for the security controls in `docs/ENGINEERING_PLAN.md` §38–§39. Written for the person running production, not for developers.
+Step-by-step operations for the security controls in `docs/ENGINEERING_PLAN.md` §38–§41. Written for the person running production, not for developers.
 
 **Contents**
 0. [Before anything else: the leaked admin password](#0-before-anything-else-the-leaked-admin-password)
@@ -10,6 +10,7 @@ Step-by-step operations for the security controls in `docs/ENGINEERING_PLAN.md` 
 4. [Encrypting existing clinical notes](#4-encrypting-existing-clinical-notes)
 5. [Emergency-access emails to patients](#5-emergency-access-emails-to-patients)
 6. [Rollout order](#6-rollout-order)
+7. [Adding staff: invites](#7-adding-staff-invites)
 
 **Running the one-off commands.** Each command below runs from your own computer against production, using the Railway CLI to load the service's variables:
 
@@ -350,3 +351,33 @@ Without `RESEND_API_KEY` the email is skipped, and the access still shows in the
 4. Run the notes backfill (section 4).
 5. Create the ML login and switch the ML service over (section 2).
 6. Move the key into KMS and create the two escrow shares at the same sitting (section 1, steps 4–6). You can do this independently of the steps above, in a quiet period.
+7. Once staff invites are deployed, delete the old registration-secret variables from Railway (section 7).
+
+---
+
+## 7. Adding staff: invites
+
+Nurses, doctors and admins can't sign themselves up. The shared "Staff Registration Secret" and "Admin Registration Secret" codes are gone.
+
+**To add a staff member:**
+1. *Admin dashboard → Invite staff / add patient*, choose Nurse, Doctor or Admin, and enter their name and email.
+2. They get an email with a link. It works once, only for that email address and role, and expires after 48 hours.
+3. Through the link they choose their own password, enter their SANC or HPCSA number, and set up 2FA at first sign-in.
+4. You verify their SANC/HPCSA registration in the dashboard. Until then they can sign in but can't open patient records.
+
+**If the email doesn't arrive:** the dashboard shows the link once, right after sending. Send it to that person yourself, privately (not in a group chat). Or use *Staff invites → Resend*, which issues a new link and kills the old one.
+
+**Invite sent to the wrong address, or the person isn't joining:** *Staff invites → Cancel*.
+
+The *Staff invites* list shows every invite, who sent it, and whether it was accepted, expired or cancelled. Sending, resending, cancelling and accepting are all in the audit log.
+
+**No admin can sign in at all** (new deployment, or every admin has left). Issue an admin invite from the server:
+
+```bash
+ADMIN_EMAIL='<new admin email>' FRONTEND_URL='https://<web app URL>' DATABASE_URL="$DB_PUBLIC" POOLED_DATABASE_URL="$DB_PUBLIC" \
+  pnpm --filter backend exec tsx src/scripts/manage-admin.ts --invite
+```
+
+It prints the link. Give it only to that person.
+
+**Clean-up after deploying:** delete `STAFF_REGISTRATION_SECRET` and `ADMIN_REGISTRATION_SECRET` from the backend service's Railway variables. Nothing reads them any more. Check that `FRONTEND_URL` on the backend is the real web app address, because invite links use it.

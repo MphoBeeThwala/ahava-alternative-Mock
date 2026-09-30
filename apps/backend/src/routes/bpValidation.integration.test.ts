@@ -20,18 +20,13 @@ function uniqueEmail(label: string): string {
 }
 
 const STRONG_PASSWORD = "Str0ng!Passw0rd";
-const ADMIN_SECRET = "test-admin-registration-secret-bpval";
-
-beforeAll(() => {
-  process.env.ADMIN_REGISTRATION_SECRET = ADMIN_SECRET;
-});
 
 async function registerAdmin(label: string) {
   const agent = request.agent(app);
   const email = uniqueEmail(label);
   const res = await agent.post("/api/v1/auth/register").send({
     email, password: STRONG_PASSWORD, firstName: label, lastName: "Admin",
-    role: "ADMIN", adminSecret: ADMIN_SECRET,
+    role: "ADMIN",
   });
   expect(res.status).toBe(201);
   return { agent, email, userId: res.body.user.id as string };

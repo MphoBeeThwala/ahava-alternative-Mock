@@ -10,6 +10,18 @@ export interface RegisterData {
   dateOfBirth?: string;
   gender?: string;
   preferredLanguage?: string;
+  // Staff only: the token from the invite link an admin sent them.
+  inviteToken?: string;
+  sancRegistrationNumber?: string;
+  hpcsaNumber?: string;
+}
+
+export interface StaffInviteDetails {
+  email: string;
+  role: 'NURSE' | 'DOCTOR' | 'ADMIN';
+  firstName: string | null;
+  lastName: string | null;
+  expiresAt: string;
 }
 
 export interface LoginData {
@@ -53,6 +65,10 @@ export const authApi = {
       headers: COOKIE_AUTH_HEADERS,
     });
     return res.data;
+  },
+  getInvite: async (token: string): Promise<StaffInviteDetails> => {
+    const res = await apiClient.get(`/auth/invites/${encodeURIComponent(token)}`);
+    return res.data.invite;
   },
   login: async (data: LoginData): Promise<AuthResponse | TwoFactorRequiredResponse> => {
     const res = await apiClient.post('/auth/login', data, {

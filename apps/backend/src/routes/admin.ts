@@ -1,13 +1,14 @@
 import { Router } from 'express';
 import * as bcrypt from '@node-rs/bcrypt';
 import Joi from 'joi';
-import { UserRole } from '@prisma/client';
+import { StaffInvite, UserRole } from '@prisma/client';
 import { AuthenticatedRequest, requireAdmin, invalidateCachedUser } from '../middleware/auth';
 import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 import { emailSchema, passwordComplexitySchema } from './auth';
 import { adminOverrideVerification, SancVerificationStatus } from '../services/sancVerification';
 import prisma from '../lib/prisma';
 import { revokeAllSessions } from '../services/sessions';
+import { createStaffInvite, INVITABLE_ROLES, inviteLink, inviteStatus, reissueStaffInvite, sendStaffInviteEmail } from '../services/staffInvites';
 
 const router: Router = Router();
 
@@ -27,19 +28,23 @@ router.get('/users', requireAdmin, async (req: AuthenticatedRequest, res, next) 
   } catch (error) { next(error); }
 });
 
-// Create a user directly (Admin only) — for onboarding staff whose identity
-// the admin has already vetted, so this skips the self-registration email-
-// verification flow: isVerified/isActive are true immediately.
+// Create a patient account directly (Admin only), e.g. for assisted
+// onboarding, so this skips the email-verification flow. Staff accounts are
+// not created here: they come from an invite (POST /admin/invites), so the
+// staff member chooses their own password and nobody else ever knows it.
 const createUserSchema = Joi.object({
   email: emailSchema,
   password: passwordComplexitySchema,
   firstName: Joi.string().min(2).required(),
   lastName: Joi.string().min(2).required(),
-  role: Joi.string().valid('PATIENT', 'NURSE', 'DOCTOR', 'ADMIN').required(),
+  role: Joi.string().valid('PATIENT').required(),
 });
 
 router.post('/users', requireAdmin, async (req: AuthenticatedRequest, res, next) => {
   try {
+    if ((INVITABLE_ROLES as readonly string[]).includes(req.body?.role)) {
+      return res.status(400).json({ error: 'Staff accounts are created by invitation. Send an invite instead.', code: 'USE_INVITE' });
+    }
     const { error, value } = createUserSchema.validate(req.body);
     if (error) return res.status(400).json({ error: error.details[0].message });
 
@@ -65,6 +70,90 @@ router.post('/users', requireAdmin, async (req: AuthenticatedRequest, res, next)
 
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'CREATE', resource: 'AdminAction', resourceId: user.id, metadata: { entity: 'User', role: user.role, email: user.email }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
     return res.status(201).json({ success: true, user });
+  } catch (error) { return next(error); }
+});
+
+// ── Staff invites (services/staffInvites.ts) ─────────────────────────────
+const createInviteSchema = Joi.object({
+  email: emailSchema,
+  role: Joi.string().valid(...INVITABLE_ROLES).required(),
+  firstName: Joi.string().trim().min(2).max(80).allow('').optional(),
+  lastName: Joi.string().trim().min(2).max(80).allow('').optional(),
+});
+
+function inviteView(invite: StaffInvite, inviters: Map<string, string>) {
+  return {
+    id: invite.id,
+    email: invite.email,
+    role: invite.role,
+    firstName: invite.firstName,
+    lastName: invite.lastName,
+    status: inviteStatus(invite),
+    expiresAt: invite.expiresAt,
+    createdAt: invite.createdAt,
+    invitedBy: inviters.get(invite.createdById) ?? null,
+    acceptedAt: invite.acceptedAt,
+    revokedAt: invite.revokedAt,
+    sentCount: invite.sentCount,
+  };
+}
+
+async function inviterNames(ids: string[]): Promise<Map<string, string>> {
+  const users = await prisma.user.findMany({ where: { id: { in: [...new Set(ids)] } }, select: { id: true, firstName: true, lastName: true } });
+  return new Map(users.map((u) => [u.id, `${u.firstName} ${u.lastName}`]));
+}
+
+// Invite one person, by email, to create a nurse, doctor or admin account.
+// The response includes the link once, for when email isn't getting through;
+// share it only with that person, over a private channel.
+router.post('/invites', requireAdmin, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { error, value } = createInviteSchema.validate(req.body);
+    if (error) return res.status(400).json({ error: error.details[0].message });
+    const email = value.email.toLowerCase();
+    if (await prisma.user.findUnique({ where: { email }, select: { id: true } })) {
+      return res.status(409).json({ error: 'An account with this email already exists.' });
+    }
+
+    const { invite, token } = await createStaffInvite({ email, role: value.role, firstName: value.firstName, lastName: value.lastName, createdById: req.user!.id });
+    const inviters = await inviterNames([req.user!.id]);
+    await sendStaffInviteEmail(invite, token, inviters.get(req.user!.id) ?? 'An administrator').catch((e) => console.error('[admin/invites] email failed', e));
+    await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'CREATE', resource: 'StaffInvite', resourceId: invite.id, metadata: { event: 'INVITE_SENT', role: invite.role, email: invite.email }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
+    return res.status(201).json({ success: true, invite: inviteView(invite, inviters), inviteLink: inviteLink(token) });
+  } catch (error) { return next(error); }
+});
+
+router.get('/invites', requireAdmin, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const invites = await prisma.staffInvite.findMany({ orderBy: { createdAt: 'desc' }, take: 200 });
+    const inviters = await inviterNames(invites.map((i) => i.createdById));
+    await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'LIST', resource: 'StaffInvite', metadata: { count: invites.length }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
+    return res.json({ success: true, invites: invites.map((i) => inviteView(i, inviters)) });
+  } catch (error) { return next(error); }
+});
+
+// New link and a fresh expiry for an invite that hasn't been used or revoked
+// (including one that expired); the previous link stops working.
+router.post('/invites/:id/resend', requireAdmin, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const reissued = await reissueStaffInvite(req.params.id);
+    if (!reissued) return res.status(404).json({ error: 'No unused invite with that id (it may have been accepted or revoked).' });
+    const inviters = await inviterNames([reissued.invite.createdById, req.user!.id]);
+    await sendStaffInviteEmail(reissued.invite, reissued.token, inviters.get(req.user!.id) ?? 'An administrator').catch((e) => console.error('[admin/invites] email failed', e));
+    await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'UPDATE', resource: 'StaffInvite', resourceId: reissued.invite.id, metadata: { event: 'INVITE_RESENT', role: reissued.invite.role, email: reissued.invite.email }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
+    return res.json({ success: true, invite: inviteView(reissued.invite, inviters), inviteLink: inviteLink(reissued.token) });
+  } catch (error) { return next(error); }
+});
+
+router.post('/invites/:id/revoke', requireAdmin, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const revoked = await prisma.staffInvite.updateMany({
+      where: { id: req.params.id, acceptedAt: null, revokedAt: null },
+      data: { revokedAt: new Date(), revokedById: req.user!.id },
+    });
+    if (revoked.count === 0) return res.status(404).json({ error: 'No unused invite with that id (it may have been accepted or already revoked).' });
+    await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'UPDATE', resource: 'StaffInvite', resourceId: req.params.id, metadata: { event: 'INVITE_REVOKED' }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
+    return res.json({ success: true });
   } catch (error) { return next(error); }
 });
 
