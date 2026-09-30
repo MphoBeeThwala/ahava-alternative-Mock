@@ -37,6 +37,10 @@ function ensureAppSecrets() {
   // suite (mfaPolicy.integration.test.ts), which switches this back off.
   // Only honoured under NODE_ENV=test.
   process.env.MFA_ENFORCEMENT_DISABLED_FOR_TESTS = "true";
+  // Staff sign-up by invite only (services/staffInvites.ts) is exercised by
+  // staffInvites.integration.test.ts; other suites register staff directly.
+  // Only honoured under NODE_ENV=test.
+  process.env.STAFF_INVITES_DISABLED_FOR_TESTS = "true";
 }
 
 module.exports = async function globalSetup() {

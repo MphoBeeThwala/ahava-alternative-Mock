@@ -15,11 +15,6 @@ function uniqueEmail(label: string): string {
 }
 
 const STRONG_PASSWORD = "Str0ng!Passw0rd";
-const ADMIN_SECRET = "test-admin-registration-secret";
-
-beforeAll(() => {
-  process.env.ADMIN_REGISTRATION_SECRET = ADMIN_SECRET;
-});
 
 async function registerAdmin(label: string) {
   const agent = request.agent(app);
@@ -30,7 +25,6 @@ async function registerAdmin(label: string) {
     firstName: label,
     lastName: "Admin",
     role: "ADMIN",
-    adminSecret: ADMIN_SECRET,
   });
   expect(res.status).toBe(201);
   return { agent, email, userId: res.body.user.id as string };
@@ -50,20 +44,6 @@ async function registerRole(role: "PATIENT" | "NURSE" | "DOCTOR", label: string)
   return { agent, email, userId: res.body.user.id as string };
 }
 
-describe("admin: registration is gated by ADMIN_REGISTRATION_SECRET", () => {
-  it("rejects ADMIN registration with a wrong or missing secret", async () => {
-    const res = await request(app).post("/api/v1/auth/register").send({
-      email: uniqueEmail("admin-bad-secret"),
-      password: STRONG_PASSWORD,
-      firstName: "Bad",
-      lastName: "Secret",
-      role: "ADMIN",
-      adminSecret: "wrong",
-    });
-    expect(res.status).toBe(403);
-  });
-});
-
 describe("admin: RBAC — non-admin roles are denied", () => {
   it.each(["PATIENT", "NURSE", "DOCTOR"] as const)("%s cannot list users", async (role) => {
     const { agent } = await registerRole(role, `admin-deny-${role.toLowerCase()}`);
@@ -77,7 +57,7 @@ describe("admin: RBAC — non-admin roles are denied", () => {
   });
 });
 
-describe("admin: user listing and creation", () => {
+describe("admin: user listing and patient creation", () => {
   it("lists users, including one just created directly by an admin", async () => {
     const admin = await registerAdmin("admin-list");
     const email = uniqueEmail("admin-created-user");
@@ -85,9 +65,9 @@ describe("admin: user listing and creation", () => {
     const createRes = await admin.agent.post("/api/v1/admin/users").send({
       email,
       password: STRONG_PASSWORD,
-      firstName: "Staff",
-      lastName: "Onboarded",
-      role: "NURSE",
+      firstName: "Assisted",
+      lastName: "Patient",
+      role: "PATIENT",
     });
     expect(createRes.status).toBe(201);
     expect(createRes.body.user.isActive).toBe(true);
@@ -110,6 +90,19 @@ describe("admin: user listing and creation", () => {
     });
 
     expect(res.status).toBe(400);
+  });
+
+  it.each(["NURSE", "DOCTOR", "ADMIN"] as const)("won't create a %s account directly: staff come from an invite", async (role) => {
+    const admin = await registerAdmin(`admin-direct-${role.toLowerCase()}`);
+    const email = uniqueEmail("admin-direct-staff");
+
+    const res = await admin.agent.post("/api/v1/admin/users").send({
+      email, password: STRONG_PASSWORD, firstName: "Direct", lastName: "Staff", role,
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("USE_INVITE");
+    expect(await prisma.user.findUnique({ where: { email } })).toBeNull();
   });
 
   it("rejects a weak password on admin-created users too", async () => {

@@ -1,9 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "../../../contexts/AuthContext";
+import { authApi, type StaffInviteDetails } from "../../../lib/api/auth";
+
+const ROLE_LABEL: Record<StaffInviteDetails["role"], string> = {
+  NURSE: "Nurse",
+  DOCTOR: "Doctor",
+  ADMIN: "Administrator",
+};
 
 export default function SignupPage() {
   const router = useRouter();
@@ -14,12 +21,44 @@ export default function SignupPage() {
     email: "",
     password: "",
     role: "PATIENT" as "PATIENT" | "NURSE" | "DOCTOR" | "ADMIN",
-    adminSecret: "",
+    registrationNumber: "",
   });
 
-  const isStaffOrAdmin = formData.role !== "PATIENT";
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  // Staff (nurses, doctors, admins) join only through a single-use invite
+  // link an administrator sends them: /auth/signup?invite=<token>.
+  const [inviteToken, setInviteToken] = useState<string | null>(null);
+  const [invite, setInvite] = useState<StaffInviteDetails | null>(null);
+  const [inviteChecking, setInviteChecking] = useState(false);
+
+  useEffect(() => {
+    const token = new URLSearchParams(window.location.search).get("invite");
+    if (!token) return;
+    setInviteToken(token);
+    setInviteChecking(true);
+    // Keep the single-use token out of the address bar and browser history.
+    window.history.replaceState(null, "", window.location.pathname);
+    authApi
+      .getInvite(token)
+      .then((details) => {
+        setInvite(details);
+        setFormData((f) => ({
+          ...f,
+          email: details.email,
+          role: details.role,
+          firstName: details.firstName || f.firstName,
+          lastName: details.lastName || f.lastName,
+        }));
+      })
+      .catch((err: { response?: { data?: { error?: string } } }) => {
+        setError(
+          err.response?.data?.error ||
+            "This invite link couldn't be checked. Ask your administrator for a new one.",
+        );
+      })
+      .finally(() => setInviteChecking(false));
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,14 +66,20 @@ export default function SignupPage() {
     setError("");
 
     try {
-      // Build payload — omit adminSecret when empty so Joi doesn't reject it
+      const registrationNumber = formData.registrationNumber.trim();
       const payload = {
         firstName: formData.firstName,
         lastName: formData.lastName,
         email: formData.email,
         password: formData.password,
-        role: formData.role,
-        ...(formData.adminSecret ? { adminSecret: formData.adminSecret } : {}),
+        role: invite ? invite.role : ("PATIENT" as const),
+        ...(invite && inviteToken ? { inviteToken } : {}),
+        ...(invite?.role === "NURSE" && registrationNumber
+          ? { sancRegistrationNumber: registrationNumber }
+          : {}),
+        ...(invite?.role === "DOCTOR" && registrationNumber
+          ? { hpcsaNumber: registrationNumber }
+          : {}),
       };
       await register(payload);
 
@@ -265,10 +310,14 @@ export default function SignupPage() {
                 marginBottom: 6,
               }}
             >
-              Create your account
+              {invite ? "Create your staff account" : "Create your account"}
             </h1>
             <p style={{ fontSize: 14, color: "#57534e" }}>
-              Free forever · No credit card required
+              {invite
+                ? `You've been invited to join as ${ROLE_LABEL[invite.role].toLowerCase()}. You'll set up two-factor authentication after this step.`
+                : inviteChecking
+                  ? "Checking your invite…"
+                  : "Free forever · No credit card required"}
             </p>
           </div>
 
@@ -385,10 +434,11 @@ export default function SignupPage() {
                 autoComplete="email"
                 placeholder="you@example.com"
                 value={formData.email}
+                readOnly={!!invite}
                 onChange={(e) =>
                   setFormData({ ...formData, email: e.target.value })
                 }
-                style={inp}
+                style={invite ? { ...inp, background: "#f5f5f4", color: "#57534e" } : inp}
                 onFocus={(e) => (e.currentTarget.style.borderColor = "#0d9488")}
                 onBlur={(e) => (e.currentTarget.style.borderColor = "#e7e5e4")}
               />
@@ -424,86 +474,79 @@ export default function SignupPage() {
               />
             </div>
 
-            {/* Role */}
-            <div>
-              <label
-                htmlFor="signup-role"
-                style={{
-                  display: "block",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: "#374151",
-                  marginBottom: 6,
-                }}
-              >
-                I am a
-              </label>
-              <select
-                id="signup-role"
-                value={formData.role}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    role: e.target.value as typeof formData.role,
-                  })
-                }
-                style={{ ...inp, background: "white" }}
-                onFocus={(e) => (e.currentTarget.style.borderColor = "#0d9488")}
-                onBlur={(e) => (e.currentTarget.style.borderColor = "#e7e5e4")}
-              >
-                <option value="PATIENT">Patient</option>
-                <option value="DOCTOR">Doctor</option>
-                <option value="NURSE">Nurse</option>
-                <option value="ADMIN">Admin</option>
-              </select>
-            </div>
-
-            {isStaffOrAdmin && (
+            {/* Role: staff roles come only from an invite */}
+            {invite ? (
               <div>
-                <label
-                  htmlFor="signup-secret"
+                <div
                   style={{
                     display: "block",
                     fontSize: 13,
                     fontWeight: 600,
-                    color: "#0d9488",
+                    color: "#374151",
                     marginBottom: 6,
                   }}
                 >
-                  {formData.role === "ADMIN"
-                    ? "Admin Registration Secret"
-                    : "Staff Registration Secret"}
-                </label>
-                <input
-                  id="signup-secret"
-                  type="password"
-                  required
-                  placeholder="Enter the secret key provided by your administrator"
-                  value={formData.adminSecret}
-                  onChange={(e) =>
-                    setFormData({ ...formData, adminSecret: e.target.value })
-                  }
+                  Joining as
+                </div>
+                <div
                   style={{
                     ...inp,
-                    border: "1.5px solid #0d9488",
                     background: "#f0fdfa",
+                    border: "1.5px solid #0d9488",
+                    color: "#0f766e",
+                    fontWeight: 700,
                   }}
-                  onFocus={(e) =>
-                    (e.currentTarget.style.borderColor = "#059669")
+                >
+                  {ROLE_LABEL[invite.role]}
+                </div>
+              </div>
+            ) : (
+              <p style={{ fontSize: 12, color: "#64748b", margin: 0 }}>
+                Signing up as a patient. Nurses, doctors and administrators
+                join through the invite link an administrator emails them.
+              </p>
+            )}
+
+            {(invite?.role === "NURSE" || invite?.role === "DOCTOR") && (
+              <div>
+                <label
+                  htmlFor="signup-registration"
+                  style={{
+                    display: "block",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: "#374151",
+                    marginBottom: 6,
+                  }}
+                >
+                  {invite.role === "NURSE"
+                    ? "SANC registration number"
+                    : "HPCSA registration number"}
+                </label>
+                <input
+                  id="signup-registration"
+                  type="text"
+                  autoComplete="off"
+                  maxLength={40}
+                  placeholder={invite.role === "NURSE" ? "e.g. 12345678" : "e.g. MP0123456"}
+                  value={formData.registrationNumber}
+                  onChange={(e) =>
+                    setFormData({ ...formData, registrationNumber: e.target.value })
                   }
-                  onBlur={(e) =>
-                    (e.currentTarget.style.borderColor = "#0d9488")
-                  }
+                  style={inp}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = "#0d9488")}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = "#e7e5e4")}
                 />
                 <p style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>
-                  Required for {formData.role.toLowerCase()} registration.
+                  You can open patient records once an administrator has
+                  verified this number. You can also add it later.
                 </p>
               </div>
             )}
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || inviteChecking || (!!inviteToken && !invite)}
               style={{
                 width: "100%",
                 background: loading
@@ -521,7 +564,11 @@ export default function SignupPage() {
                 marginTop: 4,
               }}
             >
-              {loading ? "Creating account…" : "Create Free Account →"}
+              {loading
+                ? "Creating account…"
+                : invite
+                  ? "Create my account →"
+                  : "Create Free Account →"}
             </button>
           </form>
 

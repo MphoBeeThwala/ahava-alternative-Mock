@@ -12,11 +12,6 @@ import { grantTestAccess, verifyClinician } from "../testSetup/clinicians";
 import * as notifications from "./notifications";
 
 const STRONG_PASSWORD = "Str0ng!Passw0rd";
-const ADMIN_SECRET = "test-admin-registration-secret-care-access";
-
-beforeAll(() => {
-  process.env.ADMIN_REGISTRATION_SECRET = ADMIN_SECRET;
-});
 
 type Role = "PATIENT" | "NURSE" | "DOCTOR" | "ADMIN";
 
@@ -28,7 +23,6 @@ async function register(role: Role, label: string, { verified = true } = {}) {
     firstName: label,
     lastName: "Tester",
     role,
-    ...(role === "ADMIN" ? { adminSecret: ADMIN_SECRET } : {}),
   });
   expect(res.status).toBe(201);
   const userId = res.body.user.id as string;

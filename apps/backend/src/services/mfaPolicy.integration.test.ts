@@ -9,12 +9,10 @@ import { app } from "../index";
 import prisma from "../lib/prisma";
 
 const STRONG_PASSWORD = "Str0ng!Passw0rd";
-const ADMIN_SECRET = "test-admin-registration-secret-mfa";
 const previous = process.env.MFA_ENFORCEMENT_DISABLED_FOR_TESTS;
 
 beforeAll(() => {
   process.env.MFA_ENFORCEMENT_DISABLED_FOR_TESTS = "false";
-  process.env.ADMIN_REGISTRATION_SECRET = ADMIN_SECRET;
 });
 afterAll(() => {
   process.env.MFA_ENFORCEMENT_DISABLED_FOR_TESTS = previous;
@@ -25,7 +23,6 @@ async function register(role: "PATIENT" | "NURSE" | "DOCTOR" | "ADMIN", label: s
   const email = `${label}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`;
   const res = await agent.post("/api/v1/auth/register").send({
     email, password: STRONG_PASSWORD, firstName: label, lastName: "Tester", role,
-    ...(role === "ADMIN" ? { adminSecret: ADMIN_SECRET } : {}),
   });
   expect(res.status).toBe(201);
   return { agent, email, userId: res.body.user.id as string };

@@ -16,6 +16,23 @@ export interface User {
   sancCategory?: string | null;
 }
 
+export type InvitableRole = 'NURSE' | 'DOCTOR' | 'ADMIN';
+
+export interface StaffInvite {
+  id: string;
+  email: string;
+  role: InvitableRole;
+  firstName: string | null;
+  lastName: string | null;
+  status: 'PENDING' | 'ACCEPTED' | 'EXPIRED' | 'REVOKED';
+  expiresAt: string;
+  createdAt: string;
+  invitedBy: string | null;
+  acceptedAt: string | null;
+  revokedAt: string | null;
+  sentCount: number;
+}
+
 export interface BpFlagValidationReport {
   sampleSize: number;
   totalCalibrationReadings?: number;
@@ -66,14 +83,32 @@ export const adminApi = {
     const res = await apiClient.post('/admin/reset-trial-data', { keepUsers, confirm: 'RESET' });
     return res.data;
   },
+  // Patients only: staff accounts come from an invite (sendInvite).
   createUser: async (data: {
     email: string;
     password: string;
     firstName: string;
     lastName: string;
-    role: 'PATIENT' | 'NURSE' | 'DOCTOR' | 'ADMIN';
+    role: 'PATIENT';
   }) => {
     const res = await apiClient.post('/admin/users', data);
+    return res.data;
+  },
+  // The returned link is shown once, for when the email doesn't arrive.
+  sendInvite: async (data: { email: string; role: InvitableRole; firstName?: string; lastName?: string }): Promise<{ invite: StaffInvite; inviteLink: string }> => {
+    const res = await apiClient.post('/admin/invites', data);
+    return res.data;
+  },
+  listInvites: async (): Promise<StaffInvite[]> => {
+    const res = await apiClient.get('/admin/invites');
+    return res.data.invites || [];
+  },
+  resendInvite: async (id: string): Promise<{ invite: StaffInvite; inviteLink: string }> => {
+    const res = await apiClient.post(`/admin/invites/${id}/resend`, {});
+    return res.data;
+  },
+  revokeInvite: async (id: string) => {
+    const res = await apiClient.post(`/admin/invites/${id}/revoke`, {});
     return res.data;
   },
   // hcpsaNumber is omitted (not sent as '') when only the verified flag is
