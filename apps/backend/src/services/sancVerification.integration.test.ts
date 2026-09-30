@@ -9,7 +9,7 @@
  * hook comment.
  */
 import prisma from "../lib/prisma";
-import { verifySancRegistration, adminOverrideVerification } from "./sancVerification";
+import { verifySancRegistration, submitSancNumber, recordSancCheck, SancRegistrationBlockedError } from "./sancVerification";
 import { UserRole } from "@prisma/client";
 
 function uniqueEmail(label: string): string {
@@ -59,7 +59,6 @@ describe("verifySancRegistration", () => {
     expect(result.autoVerified).toBe(true);
 
     const updated = await prisma.user.findUnique({ where: { id: nurse.id } });
-    expect((updated as any).isVerified).toBe(true);
     expect((updated as any).sancVerificationStatus).toBe("Active");
   });
 
@@ -72,7 +71,16 @@ describe("verifySancRegistration", () => {
     expect(result.autoVerified).toBe(false);
 
     const updated = await prisma.user.findUnique({ where: { id: nurse.id } });
-    expect((updated as any).isVerified).toBe(false);
+    expect((updated as any).sancVerificationStatus).toBe("NOT_FOUND");
+  });
+
+  it("leaves isVerified (the email-confirmed flag) alone", async () => {
+    const nurse = await createNurseUser("sanc-email-flag");
+    await prisma.user.update({ where: { id: nurse.id }, data: { isVerified: true } });
+
+    await verifySancRegistration(nurse.id, "SANC-DOES-NOT-EXIST-998", "Test", "Nurse");
+
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: nurse.id } })).isVerified).toBe(true);
   });
 
   it("flags NAME_MISMATCH when the submitted name doesn't match the register, even if the reg number is valid and active", async () => {
@@ -83,8 +91,6 @@ describe("verifySancRegistration", () => {
 
     expect(result.status).toBe("NAME_MISMATCH");
     expect(result.autoVerified).toBe(false);
-    const updated = await prisma.user.findUnique({ where: { id: nurse.id } });
-    expect((updated as any).isVerified).toBe(false);
   });
 
   it("allows a first-initial match (e.g. 'J Smith' registered, 'John Smith' submitted)", async () => {
@@ -180,33 +186,55 @@ describe("verifySancRegistration", () => {
   });
 });
 
-describe("adminOverrideVerification", () => {
-  it("forces a nurse to verified/Active regardless of their prior flagged status", async () => {
-    const nurse = await createNurseUser("sanc-override");
-    const admin = await prisma.user.create({
-      data: {
-        email: uniqueEmail("sanc-override-admin"),
-        passwordHash: "not-a-real-hash",
-        firstName: "Admin",
-        lastName: "User",
-        role: UserRole.ADMIN,
-      },
-    });
-    await prisma.user.update({
-      where: { id: nurse.id },
-      data: { sancVerificationStatus: "NOT_FOUND" as any, isVerified: false },
-    });
+describe("submitSancNumber (a nurse entering their own number)", () => {
+  it("keeps an already-verified number verified when it's re-entered", async () => {
+    const nurse = await createNurseUser("sanc-resubmit-active");
+    await prisma.user.update({ where: { id: nurse.id }, data: { sancId: "12345678", sancVerificationStatus: "Active" } });
 
-    await adminOverrideVerification(nurse.id, admin.id, "Confirmed via SANC phone line");
+    const res = await submitSancNumber(nurse.id, " 12345678 ");
 
-    const updated = await prisma.user.findUnique({ where: { id: nurse.id } });
-    expect((updated as any).isVerified).toBe(true);
-    expect((updated as any).sancVerificationStatus).toBe("Active");
+    expect(res).toEqual({ status: "Active", changed: false });
+  });
 
-    const auditEntries = await prisma.auditLog.findMany({
-      where: { userId: admin.id, action: "SANC_MANUAL_OVERRIDE" },
-    });
-    expect(auditEntries.length).toBeGreaterThanOrEqual(1);
-    expect((auditEntries[0].metadata as any).reason).toBe("Confirmed via SANC phone line");
+  it("re-checks a changed number, which takes verification away until it's checked", async () => {
+    const nurse = await createNurseUser("sanc-change");
+    await prisma.user.update({ where: { id: nurse.id }, data: { sancId: "12345678", sancVerificationStatus: "Active" } });
+
+    const res = await submitSancNumber(nurse.id, `NEW-${Date.now()}`);
+
+    expect(res.status).toBe("NOT_FOUND");
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: nurse.id } })).sancVerificationStatus).toBe("NOT_FOUND");
+  });
+
+  it.each(["SUSPENDED", "CANCELLED"])("won't let a %s flag be shed by re-entering or changing the number", async (status) => {
+    const nurse = await createNurseUser(`sanc-resubmit-${status}`);
+    await prisma.user.update({ where: { id: nurse.id }, data: { sancId: "87654321", sancVerificationStatus: status } });
+
+    await expect(submitSancNumber(nurse.id, "87654321")).rejects.toBeInstanceOf(SancRegistrationBlockedError);
+    await expect(submitSancNumber(nurse.id, "11110000")).rejects.toBeInstanceOf(SancRegistrationBlockedError);
+    const row = await prisma.user.findUniqueOrThrow({ where: { id: nurse.id } });
+    expect(row.sancVerificationStatus).toBe(status);
+    expect(row.sancId).toBe("87654321");
+  });
+});
+
+describe("recordSancCheck (an admin recording what SANC's register showed)", () => {
+  it("verifies on ACTIVE and flags on anything else", async () => {
+    const nurse = await createNurseUser("sanc-check");
+    await prisma.user.update({ where: { id: nurse.id }, data: { sancId: "11112222", sancVerificationStatus: "NOT_FOUND" } });
+
+    expect(await recordSancCheck({ nurseId: nurse.id, finding: "ACTIVE" })).toBe("Active");
+    expect(await recordSancCheck({ nurseId: nurse.id, finding: "EXPIRED" })).toBe("EXPIRED");
+    expect(await recordSancCheck({ nurseId: nurse.id, finding: "ACTIVE" })).toBe("Active");
+  });
+
+  it.each(["SUSPENDED", "CANCELLED"])("clears a %s flag only with an explicit confirmation", async (status) => {
+    const nurse = await createNurseUser(`sanc-check-${status}`);
+    await prisma.user.update({ where: { id: nurse.id }, data: { sancId: "33334444", sancVerificationStatus: status } });
+
+    await expect(recordSancCheck({ nurseId: nurse.id, finding: "ACTIVE" })).rejects.toBeInstanceOf(SancRegistrationBlockedError);
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: nurse.id } })).sancVerificationStatus).toBe(status);
+
+    expect(await recordSancCheck({ nurseId: nurse.id, finding: "ACTIVE", confirmStatusChange: true })).toBe("Active");
   });
 });

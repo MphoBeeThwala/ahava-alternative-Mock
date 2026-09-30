@@ -9,6 +9,7 @@ import DashboardLayout from '../../../components/DashboardLayout';
 import { Card, CardHeader, CardTitle } from '../../../components/ui/Card';
 import { StatusBadge } from '../../../components/ui/StatusBadge';
 import StaffInvites, { InviteLinkNotice } from '../../../components/StaffInvites';
+import RegistrationCheckModal from '../../../components/RegistrationCheckModal';
 
 type RoleFilter = 'ALL' | User['role'];
 type StatusFilter = 'ALL' | 'ACTIVE' | 'INACTIVE';
@@ -143,41 +144,9 @@ export default function AdminDashboard() {
         }
     };
 
-    const [verifyingHcpsa, setVerifyingHcpsa] = useState<string | null>(null);
-
-    const handleVerifyHcpsa = async (userId: string) => {
-        setVerifyingHcpsa(userId);
-        try {
-            await adminApi.setDoctorHpcsa(userId, true);
-            toast.success('HPCSA practice number verified.');
-            loadUsers();
-        } catch (error: unknown) {
-            const err = error as { response?: { data?: { error?: string } } };
-            toast.error(err.response?.data?.error || 'Failed to verify HPCSA number.');
-        } finally {
-            setVerifyingHcpsa(null);
-        }
-    };
-
-    const SANC_FLAGGED_STATUSES = ['NOT_FOUND', 'NAME_MISMATCH', 'EXPIRED', 'SUSPENDED'];
-    const [overridingSanc, setOverridingSanc] = useState<string | null>(null);
-
-    const handleOverrideSanc = async (userId: string) => {
-        const reason = prompt('Reason for manually clearing this nurse\'s SANC verification (checked out of band):');
-        if (!reason || reason.trim().length < 3) return;
-
-        setOverridingSanc(userId);
-        try {
-            await adminApi.overrideSancVerification(userId, reason.trim());
-            toast.success('SANC registration manually verified.');
-            loadUsers();
-        } catch (error: unknown) {
-            const err = error as { response?: { data?: { error?: string } } };
-            toast.error(err.response?.data?.error || 'Failed to override SANC verification.');
-        } finally {
-            setOverridingSanc(null);
-        }
-    };
+    // Nurse (SANC) or doctor (HPCSA) whose register check is being recorded.
+    const [checkingUser, setCheckingUser] = useState<User | null>(null);
+    const SANC_BLOCKING = ['SUSPENDED', 'CANCELLED'];
 
     const filteredUsers = useMemo(() => {
         return users.filter((u) => {
@@ -287,7 +256,7 @@ export default function AdminDashboard() {
                                         <th className="p-4">Role</th>
                                         <th className="p-4">Email</th>
                                         <th className="p-4">Status</th>
-                                        <th className="p-4">Verified</th>
+                                        <th className="p-4">Email</th>
                                         <th className="p-4">HPCSA</th>
                                         <th className="p-4">SANC</th>
                                         <th className="p-4">Actions</th>
@@ -326,37 +295,26 @@ export default function AdminDashboard() {
                                                         <StatusBadge variant={u.hcpsaVerified ? 'success' : 'warning'} className="text-xs">
                                                             {u.hcpsaVerified ? 'Verified' : 'Pending'}
                                                         </StatusBadge>
-                                                        {!u.hcpsaVerified && (
-                                                            <button
-                                                                onClick={() => handleVerifyHcpsa(u.id)}
-                                                                disabled={verifyingHcpsa === u.id}
-                                                                className="text-xs font-medium text-[var(--primary)] hover:underline disabled:opacity-50"
-                                                            >
-                                                                {verifyingHcpsa === u.id ? 'Verifying…' : 'Verify'}
-                                                            </button>
-                                                        )}
+                                                        <button onClick={() => setCheckingUser(u)} className="text-xs font-medium text-[var(--primary)] hover:underline">
+                                                            {u.hcpsaVerified ? 'Re-check' : 'Check & verify'}
+                                                        </button>
                                                     </div>
                                                 )}
                                             </td>
                                             <td className="p-4">
                                                 {u.role !== 'NURSE' ? (
                                                     <span className="text-xs text-[var(--muted)]">—</span>
-                                                ) : !u.sancVerificationStatus ? (
+                                                ) : !u.sancId ? (
                                                     <span className="text-xs text-[var(--muted)]">Not submitted</span>
                                                 ) : (
                                                     <div className="flex items-center gap-2">
-                                                        <StatusBadge variant={u.sancVerificationStatus === 'Active' ? 'success' : 'warning'} className="text-xs">
-                                                            {u.sancVerificationStatus === 'Active' ? 'Verified' : u.sancVerificationStatus.replace('_', ' ')}
+                                                        <span className="text-xs font-mono text-[var(--foreground)]">{u.sancId}</span>
+                                                        <StatusBadge variant={u.sancVerificationStatus === 'Active' ? 'success' : SANC_BLOCKING.includes(u.sancVerificationStatus ?? '') ? 'danger' : 'warning'} className="text-xs">
+                                                            {u.sancVerificationStatus === 'Active' ? 'Verified' : (u.sancVerificationStatus ?? 'Pending').replace('_', ' ')}
                                                         </StatusBadge>
-                                                        {SANC_FLAGGED_STATUSES.includes(u.sancVerificationStatus) && (
-                                                            <button
-                                                                onClick={() => handleOverrideSanc(u.id)}
-                                                                disabled={overridingSanc === u.id}
-                                                                className="text-xs font-medium text-[var(--primary)] hover:underline disabled:opacity-50"
-                                                            >
-                                                                {overridingSanc === u.id ? 'Verifying…' : 'Override'}
-                                                            </button>
-                                                        )}
+                                                        <button onClick={() => setCheckingUser(u)} className="text-xs font-medium text-[var(--primary)] hover:underline">
+                                                            {u.sancVerificationStatus === 'Active' ? 'Re-check' : 'Check & verify'}
+                                                        </button>
                                                     </div>
                                                 )}
                                             </td>
@@ -392,6 +350,10 @@ export default function AdminDashboard() {
                 <StaffInvites refreshKey={invitesRefreshKey} />
                 </div>{/* p-6 */}
                 </div>{/* outer bg */}
+
+                {checkingUser && (
+                    <RegistrationCheckModal user={checkingUser} onClose={() => setCheckingUser(null)} onSaved={loadUsers} />
+                )}
 
                 {/* ADD USER MODAL */}
                 {showAddModal && (

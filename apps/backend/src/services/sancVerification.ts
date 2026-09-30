@@ -1,18 +1,29 @@
 /**
  * sancVerification.ts
  *
- * SANC (South African Nursing Council) registration verification service.
+ * SANC (South African Nursing Council) registration checks for nurses
+ * (docs/ENGINEERING_PLAN.md §42). A nurse can open patient records and go
+ * online only while sancVerificationStatus is 'Active' (services/careAccess.ts).
  *
- * Flow:
- *  1. Nurse submits their SANC registration number during sign-up
- *  2. We look it up in the SancRegister table (imported from SANC public dataset)
- *  3. If found & Active: auto-verify and mark isVerified = true
- *  4. If name mismatch / expired / suspended: flag for manual admin review
- *  5. All lookups are written to AuditLog for HPCSA compliance
+ *  1. The nurse enters their SANC registration number, at sign-up or later
+ *     on their dashboard (PATCH /nurse/profile/sanc).
+ *  2. It is looked up in the sanc_register table. If an entry is there,
+ *     Active and the name matches, the nurse is verified automatically;
+ *     otherwise they are flagged (NOT_FOUND, NAME_MISMATCH, EXPIRED,
+ *     SUSPENDED, CANCELLED).
+ *  3. An admin checks the flagged number on SANC's own online register and
+ *     records what it showed, with a note (recordSancCheck). That is how
+ *     nurses are verified in practice today: SANC does not publish its
+ *     register as a download, so sanc_register is empty unless a data
+ *     source is arranged with SANC.
  *
- * SANC register import:
- *  Download the register CSV from https://www.sanc.co.za/registers/
- *  Then run: ts-node scripts/importSancRegister.ts --file sanc_register.csv
+ * SUSPENDED and CANCELLED are disciplinary. The nurse can't change their
+ * number while flagged, and an admin can only clear the flag by
+ * recording that the register now shows the registration as active,
+ * with an explicit confirmation.
+ *
+ * Lookups and admin checks are written to the audit log. This service
+ * leaves isVerified alone: that flag means the email address is confirmed.
  */
 
 import crypto from 'crypto';
@@ -149,7 +160,6 @@ export async function verifySancRegistration(
       sancVerificationStatus: result.status,
       sancVerificationDate:   new Date(),
       sancCategory:           result.category ?? null,
-      isVerified:             result.autoVerified,
     } as any,
   });
 
@@ -181,41 +191,59 @@ export async function verifySancRegistration(
   return result;
 }
 
+/** Disciplinary statuses: never cleared without an explicit admin confirmation. */
+export const SANC_BLOCKING_STATUSES: SancVerificationStatus[] = ['SUSPENDED', 'CANCELLED'];
+
+/** What an admin can record after checking SANC's online register. */
+export const SANC_REGISTER_FINDINGS = ['ACTIVE', 'NOT_FOUND', 'NAME_MISMATCH', 'EXPIRED', 'SUSPENDED', 'CANCELLED'] as const;
+export type SancRegisterFinding = (typeof SANC_REGISTER_FINDINGS)[number];
+
+export class SancRegistrationBlockedError extends Error {}
+
 /**
- * Admin override: manually verify a nurse after out-of-band check.
- * Records who approved and why.
+ * A nurse entering or changing their own number. Re-entering the number
+ * that is already verified changes nothing (an empty register would
+ * otherwise turn a checked registration back into NOT_FOUND). While a
+ * registration is flagged SUSPENDED or CANCELLED the nurse can't change it
+ * at all, so a new number can't be used to shed the flag; an admin
+ * handles it.
  */
-export async function adminOverrideVerification(
-  nurseUserId: string,
-  adminUserId: string,
-  reason: string
-): Promise<void> {
+export async function submitSancNumber(nurseId: string, registrationNumber: string): Promise<{ status: SancVerificationStatus; changed: boolean }> {
+  const clean = registrationNumber.trim().toUpperCase();
+  const nurse = await prisma.user.findUniqueOrThrow({
+    where: { id: nurseId },
+    select: { firstName: true, lastName: true, sancId: true, sancVerificationStatus: true },
+  });
+  const current = nurse.sancVerificationStatus as SancVerificationStatus | null;
+  if (current && SANC_BLOCKING_STATUSES.includes(current)) throw new SancRegistrationBlockedError();
+  if (nurse.sancId === clean && current === 'Active') return { status: current, changed: false };
+  const result = await verifySancRegistration(nurseId, clean, nurse.firstName, nurse.lastName);
+  return { status: result.status, changed: true };
+}
+
+/**
+ * An admin records what SANC's online register showed for this nurse's
+ * number. ACTIVE verifies them; anything else flags them. Clearing a
+ * SUSPENDED or CANCELLED flag needs confirmStatusChange: the admin is
+ * saying the register itself now shows the registration as active.
+ */
+export async function recordSancCheck(params: {
+  nurseId: string;
+  finding: SancRegisterFinding;
+  confirmStatusChange?: boolean;
+}): Promise<SancVerificationStatus> {
+  const nurse = await prisma.user.findUniqueOrThrow({
+    where: { id: params.nurseId },
+    select: { sancId: true, sancVerificationStatus: true },
+  });
+  const previous = nurse.sancVerificationStatus as SancVerificationStatus | null;
+  const status: SancVerificationStatus = params.finding === 'ACTIVE' ? 'Active' : params.finding;
+  if (status === 'Active' && previous && SANC_BLOCKING_STATUSES.includes(previous) && !params.confirmStatusChange) {
+    throw new SancRegistrationBlockedError();
+  }
   await prisma.user.update({
-    where: { id: nurseUserId },
-    data: {
-      isVerified: true,
-      sancVerificationStatus: 'Active',
-      sancVerificationDate: new Date(),
-    } as any,
+    where: { id: params.nurseId },
+    data: { sancVerificationStatus: status, sancVerificationDate: new Date() },
   });
-
-  const metadata = { adminUserId, reason, nurseUserId };
-  const checksum = crypto
-    .createHash('sha256')
-    .update(JSON.stringify(metadata))
-    .digest('hex');
-
-  await prisma.auditLog.create({
-    data: {
-      userId: adminUserId,
-      userRole: 'ADMIN',
-      action: 'SANC_MANUAL_OVERRIDE',
-      resource: 'users',
-      resourceId: nurseUserId,
-      metadata,
-      checksum,
-    },
-  });
-
-  console.log(`[sancVerification] Admin ${adminUserId} manually verified nurse ${nurseUserId}`);
+  return status;
 }

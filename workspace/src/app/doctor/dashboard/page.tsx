@@ -286,11 +286,11 @@ export default function DoctorDashboard() {
                                 </p>
                             ) : hcpsaStatus.hcpsaNumber ? (
                                 <p className="text-sm font-semibold text-amber-800">
-                                    Practice No. <span className="font-mono">{hcpsaStatus.hcpsaNumber}</span> submitted — pending admin verification. Scripts will show this number once verified.
+                                    Practice No. <span className="font-mono">{hcpsaStatus.hcpsaNumber}</span> submitted — waiting for an administrator to check it on the HPCSA register. You can open patient cases once it&apos;s verified.
                                 </p>
                             ) : (
                                 <p className="text-sm font-semibold text-amber-800">
-                                    HPCSA practice number not set. Prescriptions and referrals will not include a verified practice number until you add one.
+                                    Add your HPCSA registration number. You can open patient cases once an administrator has checked it on the HPCSA register.
                                 </p>
                             )}
                         </div>

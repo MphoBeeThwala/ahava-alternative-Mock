@@ -1,6 +1,6 @@
 # Security runbook
 
-Step-by-step operations for the security controls in `docs/ENGINEERING_PLAN.md` §38–§41. Written for the person running production, not for developers.
+Step-by-step operations for the security controls in `docs/ENGINEERING_PLAN.md` §38–§42. Written for the person running production, not for developers.
 
 **Contents**
 0. [Before anything else: the leaked admin password](#0-before-anything-else-the-leaked-admin-password)
@@ -11,6 +11,7 @@ Step-by-step operations for the security controls in `docs/ENGINEERING_PLAN.md` 
 5. [Emergency-access emails to patients](#5-emergency-access-emails-to-patients)
 6. [Rollout order](#6-rollout-order)
 7. [Adding staff: invites](#7-adding-staff-invites)
+8. [Verifying SANC and HPCSA registrations](#8-verifying-sanc-and-hpcsa-registrations)
 
 **Running the one-off commands.** Each command below runs from your own computer against production, using the Railway CLI to load the service's variables:
 
@@ -381,3 +382,29 @@ ADMIN_EMAIL='<new admin email>' FRONTEND_URL='https://<web app URL>' DATABASE_UR
 It prints the link. Give it only to that person.
 
 **Clean-up after deploying:** delete `STAFF_REGISTRATION_SECRET` and `ADMIN_REGISTRATION_SECRET` from the backend service's Railway variables. Nothing reads them any more. Check that `FRONTEND_URL` on the backend is the real web app address, because invite links use it.
+
+---
+
+## 8. Verifying SANC and HPCSA registrations
+
+A nurse can't go online or open visits, and a doctor can't open patient cases, until an admin has verified their registration.
+
+**Where staff enter their number:**
+- **Nurses:** at sign-up, or later on the "SANC registration" card on their dashboard.
+- **Doctors:** at sign-up, or later in the banner at the top of their dashboard.
+
+**How to verify:**
+1. In the admin dashboard, find the person. The SANC or HPCSA column shows their number and status.
+2. Click **Check & verify**. The form links to the council's register:
+   - Doctors: HPCSA iRegister.
+   - Nurses: SANC's website (use their registration check).
+3. Look the number up. Check that the **name matches** the account and the **status is active**. For nurses, note the category (Professional Nurse, Enrolled Nurse, ...).
+4. Record what the register showed, with a note. For example: "SANC register checked 30 Sep: Professional Nurse, active, name matches." The note goes to the audit log with your name and the time.
+
+**If the register shows a problem** (not found, a different name, expired, suspended, cancelled), record that instead. The person stays unverified, and a nurse is taken offline.
+
+**Suspended or cancelled nurses** can't be approved with one click. If SANC lifts the suspension, re-check the register and tick the confirmation that it now shows the registration as active.
+
+**Re-check periodically.** Registrations lapse every year. Re-check each clinician at least once a year, and straight away if you hear of disciplinary action. Use **Re-check** on anyone already verified.
+
+**If a nurse changes their number,** they become unverified and go offline until you check the new one.

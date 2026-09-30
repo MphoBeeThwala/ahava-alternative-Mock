@@ -1,6 +1,6 @@
 /**
- * Admin routes: RBAC gate, user management, HPCSA/SANC manual-override
- * flows. Deliberately does NOT exercise POST /admin/reset-trial-data's
+ * Admin routes: RBAC gate, user management, recording HPCSA/SANC register
+ * checks. Deliberately does NOT exercise POST /admin/reset-trial-data's
  * actual deletion path — this suite shares one database with every other
  * integration test file in the same run, and that endpoint truncates
  * bookings/visits/messages/etc. platform-wide, so only its validation and
@@ -194,11 +194,24 @@ describe("admin: HPCSA verification (doctors)", () => {
 
     const res = await admin.agent
       .patch(`/api/v1/admin/users/${doctor.userId}/hpcsa`)
-      .send({ verify: true });
+      .send({ verify: true, note: "iRegister shows MP1234567 active, name matches" });
 
     expect(res.status).toBe(200);
     expect(res.body.hcpsa.hcpsaVerified).toBe(true);
     expect(res.body.hcpsa.hcpsaVerifiedAt).not.toBeNull();
+    const audit = await prisma.auditLog.findFirst({ where: { resource: "ProfessionalRegistration", resourceId: doctor.userId }, orderBy: { createdAt: "desc" } });
+    expect(audit!.metadata).toMatchObject({ body: "HPCSA", number: "MP1234567", outcome: "VERIFIED", note: "iRegister shows MP1234567 active, name matches" });
+  });
+
+  it("requires a note of what was checked", async () => {
+    const admin = await registerAdmin("admin-hpcsa-nonote");
+    const doctor = await registerRole("DOCTOR", "admin-hpcsa-nonote-doctor");
+    await prisma.user.update({ where: { id: doctor.userId }, data: { hcpsaNumber: "MP7654321" } });
+
+    const res = await admin.agent.patch(`/api/v1/admin/users/${doctor.userId}/hpcsa`).send({ verify: true });
+
+    expect(res.status).toBe(400);
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: doctor.userId } })).hcpsaVerified).toBe(false);
   });
 
   it("refuses to verify a doctor who has not submitted a number yet", async () => {
@@ -207,7 +220,7 @@ describe("admin: HPCSA verification (doctors)", () => {
 
     const res = await admin.agent
       .patch(`/api/v1/admin/users/${doctor.userId}/hpcsa`)
-      .send({ verify: true });
+      .send({ verify: true, note: "Nothing to check, no number submitted" });
 
     expect(res.status).toBe(400);
   });
@@ -222,48 +235,93 @@ describe("admin: HPCSA verification (doctors)", () => {
   });
 });
 
-describe("admin: SANC manual override (nurses)", () => {
-  it("overrides a nurse flagged NOT_FOUND back to verified with a reason", async () => {
-    const admin = await registerAdmin("admin-sanc");
-    const nurse = await registerRole("NURSE", "admin-sanc-nurse");
-    await prisma.user.update({
-      where: { id: nurse.userId },
-      data: { sancVerificationStatus: "NOT_FOUND" },
-    });
+describe("admin: recording SANC register checks (nurses)", () => {
+  const NOTE = "Checked SANC online register today: active, name matches";
 
-    const res = await admin.agent
-      .patch(`/api/v1/admin/users/${nurse.userId}/sanc`)
-      .send({ reason: "Manually confirmed registration via SANC phone line" });
+  async function nurseWith(label: string, sancVerificationStatus: string | null, sancId: string | null = "12345678") {
+    const nurse = await registerRole("NURSE", label);
+    await prisma.user.update({ where: { id: nurse.userId }, data: { sancId, sancVerificationStatus } });
+    return nurse;
+  }
+
+  it("verifies a flagged nurse when the admin records the register shows them active", async () => {
+    const admin = await registerAdmin("admin-sanc");
+    const nurse = await nurseWith("admin-sanc-nurse", "NOT_FOUND");
+
+    const res = await admin.agent.patch(`/api/v1/admin/users/${nurse.userId}/sanc`).send({ finding: "ACTIVE", note: NOTE });
 
     expect(res.status).toBe(200);
+    expect(res.body.sanc.sancVerificationStatus).toBe("Active");
+    const audit = await prisma.auditLog.findFirst({ where: { resource: "ProfessionalRegistration", resourceId: nurse.userId }, orderBy: { createdAt: "desc" } });
+    expect(audit!.metadata).toMatchObject({ body: "SANC", number: "12345678", outcome: "VERIFIED", previousStatus: "NOT_FOUND", note: NOTE });
   });
 
-  it("refuses to override a nurse who isn't flagged for review", async () => {
-    const admin = await registerAdmin("admin-sanc-notflagged");
-    const nurse = await registerRole("NURSE", "admin-sanc-notflagged-nurse");
-    await prisma.user.update({
-      where: { id: nurse.userId },
-      data: { sancVerificationStatus: "Active" },
-    });
+  it("takes verification away and the nurse offline when the register shows a problem", async () => {
+    const admin = await registerAdmin("admin-sanc-revoke");
+    const nurse = await nurseWith("admin-sanc-revoke-nurse", "Active");
+    await prisma.user.update({ where: { id: nurse.userId }, data: { isAvailable: true } });
 
-    const res = await admin.agent
-      .patch(`/api/v1/admin/users/${nurse.userId}/sanc`)
-      .send({ reason: "Trying to override an already-active nurse" });
+    const res = await admin.agent.patch(`/api/v1/admin/users/${nurse.userId}/sanc`).send({ finding: "SUSPENDED", note: "SANC register lists this registration as suspended" });
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
+    const row = await prisma.user.findUniqueOrThrow({ where: { id: nurse.userId } });
+    expect(row.sancVerificationStatus).toBe("SUSPENDED");
+    expect(row.isAvailable).toBe(false);
   });
 
-  it("requires a reason of at least 3 characters", async () => {
-    const admin = await registerAdmin("admin-sanc-noreason");
-    const nurse = await registerRole("NURSE", "admin-sanc-noreason-nurse");
-    await prisma.user.update({
-      where: { id: nurse.userId },
-      data: { sancVerificationStatus: "EXPIRED" },
-    });
+  it("won't mark a suspended registration active without confirming the register now shows it active", async () => {
+    const admin = await registerAdmin("admin-sanc-suspended");
+    const nurse = await nurseWith("admin-sanc-suspended-nurse", "SUSPENDED");
 
-    const res = await admin.agent.patch(`/api/v1/admin/users/${nurse.userId}/sanc`).send({ reason: "x" });
+    const blocked = await admin.agent.patch(`/api/v1/admin/users/${nurse.userId}/sanc`).send({ finding: "ACTIVE", note: NOTE });
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.code).toBe("SANC_STATUS_CHANGE_UNCONFIRMED");
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: nurse.userId } })).sancVerificationStatus).toBe("SUSPENDED");
 
-    expect(res.status).toBe(400);
+    const confirmed = await admin.agent.patch(`/api/v1/admin/users/${nurse.userId}/sanc`).send({ finding: "ACTIVE", note: "Suspension lifted: SANC register shows active as of today", confirmStatusChange: true });
+    expect(confirmed.status).toBe(200);
+  });
+
+  it("needs a number to check, and a note of what was checked", async () => {
+    const admin = await registerAdmin("admin-sanc-validation");
+    const noNumber = await nurseWith("admin-sanc-nonumber", null, null);
+    const flagged = await nurseWith("admin-sanc-nonote", "EXPIRED");
+
+    expect((await admin.agent.patch(`/api/v1/admin/users/${noNumber.userId}/sanc`).send({ finding: "ACTIVE", note: NOTE })).status).toBe(400);
+    expect((await admin.agent.patch(`/api/v1/admin/users/${flagged.userId}/sanc`).send({ finding: "ACTIVE", note: "ok" })).status).toBe(400);
+  });
+});
+
+describe("nurse: entering their own SANC number", () => {
+  it("lets an unverified nurse submit a number, which flags them for an admin check", async () => {
+    const nurse = await registerRole("NURSE", "nurse-sanc-self");
+
+    const res = await nurse.agent.patch("/api/v1/nurse/profile/sanc").send({ sancRegistrationNumber: `SELF-${Date.now()}` });
+
+    expect(res.status).toBe(200);
+    expect(res.body.sanc.sancVerificationStatus).toBe("NOT_FOUND");
+    // No other register entry's name ever comes back to the nurse.
+    expect(JSON.stringify(res.body)).not.toMatch(/register \(/);
+  });
+
+  it("takes a verified nurse offline when they change to an unchecked number", async () => {
+    const nurse = await registerRole("NURSE", "nurse-sanc-change");
+    await prisma.user.update({ where: { id: nurse.userId }, data: { sancId: "12345678", sancVerificationStatus: "Active", isAvailable: true } });
+
+    const res = await nurse.agent.patch("/api/v1/nurse/profile/sanc").send({ sancRegistrationNumber: `CHG-${Date.now()}` });
+
+    expect(res.status).toBe(200);
+    const row = await prisma.user.findUniqueOrThrow({ where: { id: nurse.userId } });
+    expect(row.sancVerificationStatus).toBe("NOT_FOUND");
+    expect(row.isAvailable).toBe(false);
+  });
+
+  it("refuses to clear a suspension by re-entering the same number, and rejects junk", async () => {
+    const nurse = await registerRole("NURSE", "nurse-sanc-suspended");
+    await prisma.user.update({ where: { id: nurse.userId }, data: { sancId: "99998888", sancVerificationStatus: "SUSPENDED" } });
+
+    expect((await nurse.agent.patch("/api/v1/nurse/profile/sanc").send({ sancRegistrationNumber: "99998888" })).status).toBe(409);
+    expect((await nurse.agent.patch("/api/v1/nurse/profile/sanc").send({ sancRegistrationNumber: "<script>" })).status).toBe(400);
   });
 });
 

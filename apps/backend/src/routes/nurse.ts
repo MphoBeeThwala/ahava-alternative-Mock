@@ -1,6 +1,7 @@
 import { NextFunction, Response, Router } from 'express';
 import { UserRole } from '@prisma/client';
-import { AuthenticatedRequest, authMiddleware, requireNurse } from '../middleware/auth';
+import { AuthenticatedRequest, authMiddleware, invalidateCachedUser, requireNurse } from '../middleware/auth';
+import { SancRegistrationBlockedError, submitSancNumber } from '../services/sancVerification';
 import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 import { safeDecrypt } from '../utils/encryption';
 import prisma from '../lib/prisma';
@@ -18,11 +19,49 @@ router.get('/profile', requireNurse, async (req: AuthenticatedRequest, res, next
   try {
     const nurse = await prisma.user.findUnique({
       where: { id: req.user!.id },
-      select: { id: true, email: true, firstName: true, lastName: true, phone: true, isAvailable: true, lastKnownLat: true, lastKnownLng: true, sancId: true, sancVerificationStatus: true, sancCategory: true, createdAt: true }
+      select: { id: true, email: true, firstName: true, lastName: true, phone: true, isAvailable: true, lastKnownLat: true, lastKnownLng: true, sancId: true, sancVerificationStatus: true, sancCategory: true, sancVerificationDate: true, createdAt: true }
     });
     if (!nurse) return res.status(404).json({ error: 'Nurse not found' });
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'READ', resource: 'Nurse', resourceId: nurse.id, metadata: { fields: Object.keys(nurse) }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
     return res.json({ success: true, nurse });
+  } catch (error) { return next(error); }
+});
+
+// A nurse enters or changes their own SANC registration number. Allowed
+// before they are verified (that's how they get verified). It is looked up
+// in the imported register; if it isn't auto-verified, an admin checks it on
+// SANC's register (PATCH /admin/users/:id/sanc). Changing a verified number
+// makes them unverified again, so they are taken offline.
+router.patch('/profile/sanc', requireNurse, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const raw = typeof req.body?.sancRegistrationNumber === 'string' ? req.body.sancRegistrationNumber.trim() : '';
+    if (!/^[A-Za-z0-9/-]{4,40}$/.test(raw)) {
+      return res.status(400).json({ error: 'Enter your SANC registration number (letters, digits, / or -).' });
+    }
+    const before = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { sancId: true, sancVerificationStatus: true } });
+
+    let result: { status: string; changed: boolean };
+    try {
+      result = await submitSancNumber(req.user!.id, raw);
+    } catch (err) {
+      if (err instanceof SancRegistrationBlockedError) {
+        return res.status(409).json({ error: 'This registration is flagged as suspended or cancelled. Contact an administrator.', code: 'SANC_BLOCKED' });
+      }
+      throw err;
+    }
+    if (result.changed && result.status !== 'Active') {
+      await prisma.user.update({ where: { id: req.user!.id }, data: { isAvailable: false } });
+      markNurseOffline(req.user!.id);
+    }
+    await invalidateCachedUser(req.user!.id);
+    await createAuditLog({
+      userId: req.user!.id, userRole: req.user!.role, action: 'UPDATE', resource: 'ProfessionalRegistration', resourceId: req.user!.id,
+      metadata: { body: 'SANC', event: 'NUMBER_SUBMITTED', number: raw.toUpperCase(), previousNumber: before?.sancId ?? null, previousStatus: before?.sancVerificationStatus ?? null, status: result.status },
+      ipAddress: req.ip, userAgent: req.get('User-Agent'),
+    });
+
+    const nurse = await prisma.user.findUniqueOrThrow({ where: { id: req.user!.id }, select: { sancId: true, sancVerificationStatus: true, sancCategory: true, sancVerificationDate: true } });
+    return res.json({ success: true, sanc: nurse });
   } catch (error) { return next(error); }
 });
 

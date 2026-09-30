@@ -12,6 +12,7 @@ import { PageHeader } from '../../../components/ui/PageHeader';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { Icon } from '../../../components/ui/Icon';
 import { useVisitWebSocket } from '../../../hooks/useVisitWebSocket';
+import SancRegistrationCard from '../../../components/SancRegistrationCard';
 
 type VisitStatusFilter = 'ALL' | Visit['status'];
 
@@ -431,6 +432,8 @@ export default function NurseDashboard() {
                             </div>
                         </Card>
                     )}
+
+                    <SancRegistrationCard />
 
                     {/* Availability toggle — full-width, large tap target, mobile-first */}
                     <Card padding="sm">

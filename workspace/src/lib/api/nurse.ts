@@ -6,7 +6,23 @@ export type NurseAvailability =
   | { isAvailable: true; lat: number; lng: number }
   | { isAvailable: false; lat?: number; lng?: number };
 
+export interface NurseSanc {
+  sancId: string | null;
+  sancVerificationStatus: string | null;
+  sancCategory: string | null;
+  sancVerificationDate: string | null;
+}
+
 export const nurseApi = {
+  getSanc: async (): Promise<NurseSanc> => {
+    const res = await apiClient.get('/nurse/profile');
+    const n = res.data.nurse ?? {};
+    return { sancId: n.sancId ?? null, sancVerificationStatus: n.sancVerificationStatus ?? null, sancCategory: n.sancCategory ?? null, sancVerificationDate: n.sancVerificationDate ?? null };
+  },
+  submitSanc: async (sancRegistrationNumber: string): Promise<NurseSanc> => {
+    const res = await apiClient.patch('/nurse/profile/sanc', { sancRegistrationNumber });
+    return res.data.sanc;
+  },
   updateAvailability: async (data: NurseAvailability) => {
     // The backend route is PATCH; this used to POST, which 404'd ("Route not found").
     const res = await apiClient.patch('/nurse/availability', data);

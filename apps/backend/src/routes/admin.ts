@@ -5,7 +5,8 @@ import { StaffInvite, UserRole } from '@prisma/client';
 import { AuthenticatedRequest, requireAdmin, invalidateCachedUser } from '../middleware/auth';
 import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 import { emailSchema, passwordComplexitySchema } from './auth';
-import { adminOverrideVerification, SancVerificationStatus } from '../services/sancVerification';
+import { recordSancCheck, SANC_REGISTER_FINDINGS, SancRegistrationBlockedError, SancVerificationStatus } from '../services/sancVerification';
+import { markNurseOffline } from '../services/websocket';
 import prisma from '../lib/prisma';
 import { revokeAllSessions } from '../services/sessions';
 import { createStaffInvite, INVITABLE_ROLES, inviteLink, inviteStatus, reissueStaffInvite, sendStaffInviteEmail } from '../services/staffInvites';
@@ -223,9 +224,24 @@ router.get('/users/:id/hpcsa', requireAdmin, async (req: AuthenticatedRequest, r
   } catch (error) { return next(error); }
 });
 
+// Both professions are verified the same way: an admin looks the number up
+// on the council's own online register (HPCSA iRegister, SANC's
+// registration check) and records what it showed, with a note of what was
+// checked. Every check is audited as resource 'ProfessionalRegistration'.
+// Taking verification away also takes a nurse off the dispatch radar.
+const REGISTRATION_NOTE = Joi.string().trim().min(10).max(1000).required().messages({
+  'string.min': 'Add a note of what you checked on the register (at least 10 characters).',
+  'any.required': 'Add a note of what you checked on the register.',
+});
+
+async function auditRegistrationCheck(req: AuthenticatedRequest, subjectId: string, metadata: Record<string, unknown>) {
+  await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'UPDATE', resource: 'ProfessionalRegistration', resourceId: subjectId, metadata, ipAddress: req.ip, userAgent: req.get('User-Agent') });
+}
+
 const hpcsaSchema = Joi.object({
-  hcpsaNumber: Joi.string().trim().min(1).optional(),
+  hcpsaNumber: Joi.string().trim().min(1).max(40).optional(),
   verify: Joi.boolean().required(),
+  note: REGISTRATION_NOTE,
 });
 
 router.patch('/users/:id/hpcsa', requireAdmin, async (req: AuthenticatedRequest, res, next) => {
@@ -252,20 +268,10 @@ router.patch('/users/:id/hpcsa', requireAdmin, async (req: AuthenticatedRequest,
       select: { id: true, hcpsaNumber: true, hcpsaVerified: true, hcpsaVerifiedAt: true },
     });
     await invalidateCachedUser(id);
-    await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'UPDATE', resource: 'AdminAction', resourceId: id, metadata: { entity: 'HpcsaVerification', hcpsaNumber: updated.hcpsaNumber, verified: updated.hcpsaVerified }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
+    await auditRegistrationCheck(req, id, { body: 'HPCSA', number: updated.hcpsaNumber, outcome: value.verify ? 'VERIFIED' : 'NOT_VERIFIED', note: value.note });
     return res.json({ success: true, hcpsa: updated });
   } catch (error) { return next(error); }
 });
-
-// Get / manually override a nurse's SANC registration verification (Admin only).
-// `verifySancRegistration` (services/sancVerification.ts) already flags a
-// nurse NAME_MISMATCH / EXPIRED / SUSPENDED / NOT_FOUND during sign-up, and
-// `adminOverrideVerification` already existed to clear that flag out of
-// band — but it was never wired to a route or any admin UI, so a flagged
-// nurse had no path back to verified. Same pattern as the HPCSA fix above.
-const SANC_OVERRIDABLE_STATUSES: SancVerificationStatus[] = [
-  'NOT_FOUND', 'NAME_MISMATCH', 'EXPIRED', 'SUSPENDED',
-];
 
 router.get('/users/:id/sanc', requireAdmin, async (req: AuthenticatedRequest, res, next) => {
   try {
@@ -274,7 +280,7 @@ router.get('/users/:id/sanc', requireAdmin, async (req: AuthenticatedRequest, re
       where: { id },
       select: {
         id: true, role: true, sancId: true, sancVerificationStatus: true,
-        sancVerificationDate: true, sancCategory: true, isVerified: true,
+        sancVerificationDate: true, sancCategory: true,
       },
     });
     if (!user || user.role !== UserRole.NURSE) {
@@ -284,39 +290,56 @@ router.get('/users/:id/sanc', requireAdmin, async (req: AuthenticatedRequest, re
   } catch (error) { return next(error); }
 });
 
-const sancOverrideSchema = Joi.object({
-  reason: Joi.string().trim().min(3).required(),
+const sancCheckSchema = Joi.object({
+  finding: Joi.string().valid(...SANC_REGISTER_FINDINGS).required(),
+  note: REGISTRATION_NOTE,
+  confirmStatusChange: Joi.boolean().default(false),
 });
 
 router.patch('/users/:id/sanc', requireAdmin, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
-    const { error, value } = sancOverrideSchema.validate(req.body);
+    const { error, value } = sancCheckSchema.validate(req.body);
     if (error) return res.status(400).json({ error: error.details[0].message });
 
     const user = await prisma.user.findUnique({
       where: { id },
-      select: { id: true, role: true, sancVerificationStatus: true },
+      select: { id: true, role: true, sancId: true, sancVerificationStatus: true },
     });
     if (!user || user.role !== UserRole.NURSE) {
       return res.status(404).json({ error: 'Nurse not found' });
     }
-    const status = user.sancVerificationStatus as SancVerificationStatus | null;
-    if (!status || !SANC_OVERRIDABLE_STATUSES.includes(status)) {
-      return res.status(400).json({ error: 'This nurse is not flagged for manual SANC review' });
+    if (!user.sancId) {
+      return res.status(400).json({ error: 'This nurse has not entered a SANC registration number yet.' });
     }
 
-    await adminOverrideVerification(id, req.user!.id, value.reason);
+    let status: SancVerificationStatus;
+    try {
+      status = await recordSancCheck({ nurseId: id, finding: value.finding, confirmStatusChange: value.confirmStatusChange });
+    } catch (err) {
+      if (err instanceof SancRegistrationBlockedError) {
+        return res.status(409).json({
+          error: `This registration is flagged ${user.sancVerificationStatus}. Only record it as active if SANC's register now shows it active, and confirm that you have checked.`,
+          code: 'SANC_STATUS_CHANGE_UNCONFIRMED',
+        });
+      }
+      throw err;
+    }
+    if (status !== 'Active') {
+      await prisma.user.update({ where: { id }, data: { isAvailable: false } });
+      markNurseOffline(id);
+    }
 
     const updated = await prisma.user.findUnique({
       where: { id },
-      select: {
-        id: true, sancId: true, sancVerificationStatus: true,
-        sancVerificationDate: true, sancCategory: true, isVerified: true,
-      },
+      select: { id: true, sancId: true, sancVerificationStatus: true, sancVerificationDate: true, sancCategory: true },
     });
     await invalidateCachedUser(id);
-    await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'UPDATE', resource: 'AdminAction', resourceId: id, metadata: { entity: 'SancVerification', reason: value.reason, status: updated?.sancVerificationStatus }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
+    await auditRegistrationCheck(req, id, {
+      body: 'SANC', number: user.sancId, outcome: status === 'Active' ? 'VERIFIED' : 'NOT_VERIFIED', registerFinding: value.finding,
+      previousStatus: user.sancVerificationStatus, note: value.note,
+      ...(value.confirmStatusChange ? { confirmedStatusChange: true } : {}),
+    });
     return res.json({ success: true, sanc: updated });
   } catch (error) { return next(error); }
 });

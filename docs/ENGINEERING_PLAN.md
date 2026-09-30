@@ -2975,3 +2975,37 @@ The admin dashboard's "Add user" also created staff accounts with a password the
 `admin.integration.test.ts` checks that staff can't be created directly.
 
 Operations: `docs/SECURITY_RUNBOOK.md` §7. After deploying, delete the two old variables from Railway.
+
+## 42. How SANC and HPCSA registrations are verified, and the gaps fixed, 2026-09-30
+
+**Why.** The owner asked how nurses' SANC numbers and doctors' HPCSA numbers are verified and where they are entered. Reviewing the code found four gaps:
+1. **Nurses had nowhere to enter a number** except the sign-up page, which only gained the field with invites (§41). A nurse without a number showed "Not submitted", and the admin override only worked on a nurse who had one. So no nurse from before §41 could ever be verified.
+2. **Suspended registrations could be overridden.** The one-click SANC override accepted a nurse flagged SUSPENDED. That flag is a disciplinary finding.
+3. **Doctor approvals left no record of what was checked.** HPCSA "Verify" took no note.
+4. **The SANC register lookup has no data.** It reads `sanc_register`, which a `scripts/importSancRegister.ts` was meant to fill from a SANC CSV download. That script never existed, and as far as we know SANC does not publish its register as a download, only as an online lookup. So every nurse comes back NOT_FOUND and is verified by an admin in practice.
+
+The lookup also set `isVerified` (the email-confirmed flag) to false whenever it didn't auto-verify. No access check uses that flag, so this only confused the admin table.
+
+**Now.**
+- **Nurses enter their own number.** `PATCH /nurse/profile/sanc` works before they are verified, and the nurse dashboard has a "SANC registration" card.
+  - A changed number is looked up again, so the nurse is unverified and offline until it's checked.
+  - Re-entering an already-verified number changes nothing; an empty register would otherwise turn it back into NOT_FOUND.
+  - While flagged SUSPENDED or CANCELLED, the nurse can't change their number at all, so the flag can't be shed with a new number; an admin handles it.
+  - The response never includes the register's name for the number.
+- **Admins record a register check, the same way for both professions.**
+  - SANC: `PATCH /admin/users/:id/sanc` with `finding` (ACTIVE, NOT_FOUND, NAME_MISMATCH, EXPIRED, SUSPENDED or CANCELLED) and a `note` of at least 10 characters.
+  - HPCSA: `PATCH /admin/users/:id/hpcsa` with `verify` and `note`.
+  - ACTIVE / verify=true verifies. Anything else unverifies, and a nurse is taken offline.
+  - Each check is audited as resource `ProfessionalRegistration`, with the profession, number, outcome, note and previous status.
+  - The admin dashboard has a "Check & verify" / "Re-check" form linking to the council's online register (HPCSA iRegister; SANC's website).
+- **Suspended and cancelled registrations need an explicit confirmation.** Recording ACTIVE for a nurse flagged SUSPENDED or CANCELLED needs `confirmStatusChange: true`, meaning the admin states the register itself now shows the registration as active. The UI makes them tick that. Without it the API returns 409.
+- **Other changes.**
+  - The SANC lookup no longer touches `isVerified`. The admin table's column is renamed "Email".
+  - The comment pointing at the missing import script now describes what actually happens.
+  - The doctor dashboard and sign-up page wording matches: unverified clinicians can't open patient records.
+
+**Tests:**
+- `sancVerification.integration.test.ts`: 6 new cases covering self-submission and admin checks, including the suspended and cancelled confirmations, and that `isVerified` is left alone.
+- `admin.integration.test.ts`: recording checks for both professions, the note requirement, taking a nurse offline, and the nurse self-service route.
+
+**Open question for the business.** Automatic checks need a data source from the councils. Ask SANC and HPCSA whether they offer organisations a verification API or bulk register extract. If SANC does, filling `sanc_register` from it turns on the automatic path that already exists.

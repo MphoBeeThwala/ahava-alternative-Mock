@@ -16,6 +16,8 @@ export interface User {
   sancCategory?: string | null;
 }
 
+export type SancRegisterFinding = 'ACTIVE' | 'NOT_FOUND' | 'NAME_MISMATCH' | 'EXPIRED' | 'SUSPENDED' | 'CANCELLED';
+
 export type InvitableRole = 'NURSE' | 'DOCTOR' | 'ADMIN';
 
 export interface StaffInvite {
@@ -111,12 +113,13 @@ export const adminApi = {
     const res = await apiClient.post(`/admin/invites/${id}/revoke`, {});
     return res.data;
   },
-  // hcpsaNumber is omitted (not sent as '') when only the verified flag is
-  // changing — the backend requires a non-empty string when this field is
-  // present at all.
-  setDoctorHpcsa: async (userId: string, verify: boolean, hcpsaNumber?: string) => {
+  // Recording a check of the council's own register. `note` says what was
+  // checked (required); it goes to the audit log. hcpsaNumber is omitted
+  // (not sent as '') unless the admin is correcting the number.
+  setDoctorHpcsa: async (userId: string, verify: boolean, note: string, hcpsaNumber?: string) => {
     const res = await apiClient.patch(`/admin/users/${userId}/hpcsa`, {
       verify,
+      note,
       ...(hcpsaNumber ? { hcpsaNumber } : {}),
     });
     return res.data;
@@ -129,8 +132,10 @@ export const adminApi = {
     const res = await apiClient.get(`/admin/users/${userId}/sanc`);
     return res.data;
   },
-  overrideSancVerification: async (userId: string, reason: string) => {
-    const res = await apiClient.patch(`/admin/users/${userId}/sanc`, { reason });
+  // What SANC's online register showed. ACTIVE verifies; anything else flags.
+  // Marking a SUSPENDED/CANCELLED registration active needs confirmStatusChange.
+  recordSancCheck: async (userId: string, check: { finding: SancRegisterFinding; note: string; confirmStatusChange?: boolean }) => {
+    const res = await apiClient.patch(`/admin/users/${userId}/sanc`, check);
     return res.data;
   },
 };

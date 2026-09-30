@@ -539,7 +539,9 @@ export default function SignupPage() {
                 />
                 <p style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>
                   You can open patient records once an administrator has
-                  verified this number. You can also add it later.
+                  checked this number on the{" "}
+                  {invite.role === "NURSE" ? "SANC" : "HPCSA"} register. You
+                  can also add it later from your dashboard.
                 </p>
               </div>
             )}
