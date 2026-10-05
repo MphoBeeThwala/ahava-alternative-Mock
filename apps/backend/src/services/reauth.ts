@@ -24,7 +24,7 @@ export async function verifyReauthentication(
     return { ok: false, status: 403, code: 'REAUTH_FAILED', error: 'Password sign-in isn’t set up for this account' };
   }
   if (!input.currentPassword) {
-    return { ok: false, status: 403, code: 'REAUTH_REQUIRED', error: 'Enter your current password to change your email address.' };
+    return { ok: false, status: 403, code: 'REAUTH_REQUIRED', error: 'Enter your current password to continue.' };
   }
   if (!(await bcrypt.compare(input.currentPassword, user.passwordHash))) {
     return { ok: false, status: 401, code: 'REAUTH_FAILED', error: 'Current password is incorrect' };
@@ -32,7 +32,7 @@ export async function verifyReauthentication(
 
   if (user.totpEnabled && user.totpSecret) {
     if (!input.code) {
-      return { ok: false, status: 403, code: 'REAUTH_CODE_REQUIRED', error: 'Enter a code from your authenticator app to change your email address.' };
+      return { ok: false, status: 403, code: 'REAUTH_CODE_REQUIRED', error: 'Enter a code from your authenticator app to continue.' };
     }
     const validTotp = verifyTotpCode(decryptTotpSecret(user.totpSecret, user.id), input.code);
     if (!validTotp) {

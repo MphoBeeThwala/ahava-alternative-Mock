@@ -54,9 +54,25 @@ export interface TwoFactorRequiredResponse {
 }
 
 export function isTwoFactorRequired(
-  response: AuthResponse | TwoFactorRequiredResponse,
+  response: AuthResponse | TwoFactorRequiredResponse | GoogleLinkRequiredResponse,
 ): response is TwoFactorRequiredResponse {
   return (response as TwoFactorRequiredResponse).twoFactorRequired === true;
+}
+
+// Sign in with Google (patients only). Either a session (AuthResponse), the 2FA
+// step, or "this email already has a password account: confirm it to link".
+export interface GoogleLinkRequiredResponse {
+  success: false;
+  linkRequired: true;
+  linkToken: string;
+  email: string;
+  needsTwoFactorCode: boolean;
+}
+
+export function isGoogleLinkRequired(
+  response: AuthResponse | TwoFactorRequiredResponse | GoogleLinkRequiredResponse,
+): response is GoogleLinkRequiredResponse {
+  return (response as GoogleLinkRequiredResponse).linkRequired === true;
 }
 
 export const authApi = {
@@ -135,6 +151,36 @@ export const authApi = {
   /** Prove a fresh second factor for a sensitive action (backend middleware/stepUp.ts). */
   stepUp: async (code: string): Promise<{ success: boolean; validForSeconds: number }> => {
     const res = await apiClient.post('/auth/2fa/step-up', { code });
+    return res.data;
+  },
+  googleConfig: async (): Promise<{ enabled: boolean; clientId: string | null }> => {
+    const res = await apiClient.get('/auth/google/config');
+    return res.data;
+  },
+  googleNonce: async (): Promise<string> => {
+    const res = await apiClient.post('/auth/google/nonce', {});
+    return res.data.nonce;
+  },
+  googleSignIn: async (
+    credential: string,
+  ): Promise<AuthResponse | TwoFactorRequiredResponse | GoogleLinkRequiredResponse> => {
+    const res = await apiClient.post('/auth/google', { credential }, { headers: COOKIE_AUTH_HEADERS });
+    return res.data;
+  },
+  googleLink: async (linkToken: string, password: string, code?: string): Promise<AuthResponse> => {
+    const res = await apiClient.post(
+      '/auth/google/link',
+      { linkToken, password, ...(code ? { code } : {}) },
+      { headers: COOKIE_AUTH_HEADERS },
+    );
+    return res.data;
+  },
+  googleStatus: async (): Promise<{ enabled: boolean; linked: boolean; googleEmail: string | null; hasPassword: boolean }> => {
+    const res = await apiClient.get('/auth/google/status');
+    return res.data;
+  },
+  googleUnlink: async (password: string, code?: string) => {
+    const res = await apiClient.delete('/auth/google', { data: { password, ...(code ? { code } : {}) } });
     return res.data;
   },
   getWebSocketTicket: async (): Promise<{ success: boolean; ticket: string }> => {

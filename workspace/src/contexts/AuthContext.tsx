@@ -2,11 +2,21 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { authApi, AuthResponse, RegisterData, isTwoFactorRequired } from '../lib/api';
+import { authApi, AuthResponse, RegisterData, isTwoFactorRequired, isGoogleLinkRequired } from '../lib/api';
 
 // AH-29: thrown by login() when the account has opt-in 2FA enabled. The
 // login page catches this specifically and shows a code-entry step; no
 // session exists yet at this point.
+// Thrown by loginWithGoogle() when the Google account's email already belongs
+// to a password account. Nothing is linked yet: the patient has to confirm
+// that account's password (and 2FA code, if they use one) first.
+export class GoogleLinkRequiredError extends Error {
+  constructor(public linkToken: string, public email: string, public needsTwoFactorCode: boolean) {
+    super('Confirm your password to link Google sign-in');
+    this.name = 'GoogleLinkRequiredError';
+  }
+}
+
 export class TwoFactorRequiredError extends Error {
   constructor(public pendingToken: string) {
     super('Two-factor authentication code required');
@@ -36,6 +46,8 @@ interface AuthContextType {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   completeTwoFactorLogin: (pendingToken: string, code: string) => Promise<void>;
+  loginWithGoogle: (credential: string) => Promise<void>;
+  completeGoogleLink: (linkToken: string, password: string, code?: string) => Promise<void>;
   register: (data: RegisterData) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -256,6 +268,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await finalizeSession(response.user as User);
   };
 
+  const loginWithGoogle = async (credential: string) => {
+    const response = await authApi.googleSignIn(credential);
+    if (isTwoFactorRequired(response)) {
+      throw new TwoFactorRequiredError(response.pendingToken);
+    }
+    if (isGoogleLinkRequired(response)) {
+      throw new GoogleLinkRequiredError(response.linkToken, response.email, response.needsTwoFactorCode);
+    }
+    await finalizeSession(response.user as User);
+  };
+
+  const completeGoogleLink = async (linkToken: string, password: string, code?: string) => {
+    const response: AuthResponse = await authApi.googleLink(linkToken, password, code);
+    await finalizeSession(response.user as User);
+  };
+
   const register = async (data: RegisterData) => {
     const response: AuthResponse = await authApi.register(data);
     
@@ -334,6 +362,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loading,
         login,
         completeTwoFactorLogin,
+        loginWithGoogle,
+        completeGoogleLink,
         register,
         logout,
         refreshUser,

@@ -17,7 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Staff session limits**: 5-minute access tokens, 15-minute idle timeout and 12-hour absolute lifetime for nurses, doctors and admins; patients unchanged. Staff are told why they were signed out.
 - **Login throttling**: failures counted per account+IP (5) and per account (25) instead of per email alone, so a stranger can no longer lock a named user out with five guesses. Falls back to in-process counters if Redis is down rather than failing open.
 
+- **Sign in with Google (patients only)**: off until `GOOGLE_CLIENT_ID` is set. Verified ID token + nonce cookie; identities matched on Google's `sub`; staff accounts are refused; an existing password account is linked only after its password (and 2FA code) is confirmed; unlink needs the password. See `docs/ENGINEERING_PLAN.md` §43 for setup.
+
 ### Deployment notes
+- Run migration `20261005140000_add_auth_identities` (new `auth_identities` table).
 - Run migrations `20261005120000_hash_one_time_tokens` and `20261005130000_add_step_up_verified_at`. Staff are signed out once on deploy.
 - Run migration `20261005120000_hash_one_time_tokens`. It clears any outstanding reset / verification tokens (they were stored in clear and can no longer match); affected users use "Forgot password" / "Resend verification".
 - Reset and verification emails already in inboxes stop working after deploy.

@@ -2995,3 +2995,31 @@ Follows a review of how roles and sign-in work. Two phases.
 **Not done (decision needed):** splitting the admin role (credential verifier vs access administrator) or requiring a second admin's approval for 2FA resets and long grants; per-code replay protection for TOTP; device / IP allowlisting for admins.
 
 **Operations:** run migrations `20261005120000_hash_one_time_tokens` (clears outstanding reset/verification tokens) and `20261005130000_add_step_up_verified_at`. Staff are signed out on deploy: the new refresh token carries `authTime`; old ones without it are treated as having started when issued. Tests: `accountSecurity`, `stepUp` (integration), `sessionPolicy`, `loginThrottle` (unit).
+
+
+## 43. Sign in with Google for patients, 2026-10-05
+
+Patients can sign in or sign up with Google. Staff cannot, ever. The feature is **off until `GOOGLE_CLIENT_ID` is set**: the endpoints answer 404 and the sign-in page shows no button.
+
+**Flow.** The page loads Google's sign-in button, asks `POST /auth/google/nonce` for a nonce (also set as an httpOnly cookie) and passes it to Google. Google returns an ID token; the page POSTs it to `POST /auth/google`. The server verifies it with Google's library (`services/googleIdentity.ts`: signature, expiry, issuer, audience = our client id) and checks the token's nonce equals the cookie's, so a token can't be injected into someone else's browser. No client secret is needed.
+
+**Rules (`routes/googleAuth.ts`).**
+1. Identities are matched on Google's stable `sub`, stored in `auth_identities`, never on email. The email must be verified by Google.
+2. **Staff are excluded.** A Google email belonging to a nurse, doctor or admin is refused (`GOOGLE_NOT_AVAILABLE`), and an identity pointing at a non-patient is refused too. New accounts are always `PATIENT`; the role never comes from the client.
+3. **No silent merge.** If the email already has a patient account, the server answers `linkRequired` with a 10-minute link token. Nothing is linked and no session starts until the patient proves that account's password (and a 2FA code if they've turned 2FA on) at `POST /auth/google/link`. That blocks pre-hijacking (someone registering a victim's email beforehand) and email-claim tricks. Password guessing there shares the login throttle.
+4. A patient who has opted into 2FA still gets the 2FA step after Google.
+5. A new Google-only patient has no password (`passwordHash` null); they're verified because Google verified the email. Unlinking needs the password and is refused when none exists, so nobody locks themselves out. Linking and unlinking are audited and emailed to the account.
+6. Sign-ins are audited with `method: google`.
+
+**Setup (when you have the credential).**
+1. Google Cloud console → create/choose a project → *APIs & Services → OAuth consent screen* (External, add app name, support email, privacy-policy and terms links, authorised domain).
+2. *Credentials → Create credentials → OAuth client ID → Web application*. Under **Authorised JavaScript origins** add every frontend origin (e.g. `https://app.ahavaon88.co.za`, and `http://localhost:3000` for development). No redirect URI is needed for the button flow.
+3. Set `GOOGLE_CLIENT_ID=<the client id>` on the **backend** service (comma-separate extra ids for Android/iOS). Redeploy. The button appears on sign-in and sign-up.
+4. Run migration `20261005140000_add_auth_identities`.
+
+**Known limits / next steps.**
+- Linking starts from the sign-in page (same email). The profile page shows status and unlinks, but doesn't start a link, so a signed-in patient can't be switched onto a different account by pressing the button.
+- The Capacitor mobile apps: Google refuses its sign-in inside embedded web views, so the button won't work in the app shell. The backend already accepts native ID tokens (add the Android/iOS client ids to `GOOGLE_CLIENT_ID`), but the app needs a native Google plugin and a way to pass the nonce; not built.
+- Sign in with Apple is not built (required on iOS if Google is offered in the iOS app).
+- Phone verification before a first booking is not built (no SMS provider yet).
+- New Google patients don't tick the terms checkbox; the sign-in page links the terms and privacy policy, but confirm with your information officer that this is enough consent for POPIA.

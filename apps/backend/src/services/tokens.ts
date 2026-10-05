@@ -22,7 +22,7 @@ export const TOKEN_ISSUER = "ahava-api";
 export const TOKEN_AUDIENCE = "ahava-app";
 export const TOKEN_ALGORITHM = "HS256" as const;
 
-export type TokenType = "access" | "refresh" | "websocket" | "twofa_pending";
+export type TokenType = "access" | "refresh" | "websocket" | "twofa_pending" | "google_link";
 
 /** How long a user has to complete AH-29's second login step. */
 export const TWOFA_PENDING_TTL_SECONDS = 300;
@@ -40,6 +40,8 @@ export interface AhavaTokenPayload {
    * (services/sessionPolicy.ts) no matter how often the session refreshes.
    */
   authTime?: number;
+  /** google_link tokens only: the Google account (`sub`) waiting to be linked. */
+  idpSubject?: string;
 }
 
 /** Raised when a token verifies cryptographically but is the wrong kind. */
@@ -62,7 +64,7 @@ export function getJwtSecret(): string {
 }
 
 export function signToken(
-  payload: { userId: string; role: string; typ: TokenType; authTime?: number },
+  payload: { userId: string; role: string; typ: TokenType; authTime?: number; idpSubject?: string },
   options: { expiresInSeconds: number; jwtid?: string },
 ): string {
   return jwt.sign(
@@ -71,6 +73,7 @@ export function signToken(
       role: payload.role,
       typ: payload.typ,
       ...(payload.authTime !== undefined ? { authTime: payload.authTime } : {}),
+      ...(payload.idpSubject !== undefined ? { idpSubject: payload.idpSubject } : {}),
     },
     getJwtSecret(),
     {
@@ -113,5 +116,6 @@ export function verifyToken(token: string, expected: TokenType): AhavaTokenPaylo
     typ: expected,
     iat: typeof decoded.iat === "number" ? decoded.iat : undefined,
     authTime: typeof decoded.authTime === "number" ? decoded.authTime : undefined,
+    idpSubject: typeof decoded.idpSubject === "string" ? decoded.idpSubject : undefined,
   };
 }

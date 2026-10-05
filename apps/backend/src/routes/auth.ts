@@ -116,7 +116,7 @@ function shouldExposeTokens(req: Request): boolean {
   return req.get("X-Ahava-Auth-Mode") !== "cookie";
 }
 
-function buildAuthResponse<
+export function buildAuthResponse<
   TPayload extends Record<string, unknown>,
 >(
   req: Request,

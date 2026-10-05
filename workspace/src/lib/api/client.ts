@@ -16,7 +16,10 @@ function isRefreshExcludedRequest(url?: string): boolean {
     '/auth/register',
     // A wrong code answers 401; that is not an expired session, so don't refresh.
     '/auth/2fa/step-up',
-  ].some((path) => url.includes(path));
+    // Wrong password / bad token answer 401; neither means an expired session.
+    '/auth/google/link',
+    '/auth/google/nonce',
+  ].some((path) => url.includes(path)) || url.split('?')[0].endsWith('/auth/google');
 }
 
 export const MFA_ENROLLMENT_REQUIRED_CODE = 'MFA_ENROLLMENT_REQUIRED';

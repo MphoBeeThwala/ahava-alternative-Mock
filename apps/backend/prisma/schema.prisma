@@ -140,6 +140,7 @@ model User {
   // (middleware/stepUp.ts). Not a session: it only opens a short window.
   stepUpVerifiedAt          DateTime?
   refreshTokens             RefreshToken[]
+  authIdentities            AuthIdentity[]
 
   // Two-factor auth (opt-in, AH-29). totpSecret is encrypted at rest via
   // utils/encryption.ts — it is a login credential, not just a setting.
@@ -185,6 +186,25 @@ model RefreshToken {
   
   @@index([userId])
   @@map("refresh_tokens")
+}
+
+// A sign-in identity from an external provider (Google), linked to one user.
+// Matched on the provider's stable `subject`, never on email. Patients only:
+// staff accounts are never linked to an external provider.
+model AuthIdentity {
+  id         String    @id @default(cuid())
+  userId     String
+  provider   String
+  subject    String
+  email      String
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, subject])
+  @@index([userId])
+  @@map("auth_identities")
 }
 
 model Booking {
