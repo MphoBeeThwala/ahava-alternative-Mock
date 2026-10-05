@@ -365,6 +365,16 @@ const resetTrialDataSchema = Joi.object({
 
 router.post('/reset-trial-data', requireAdmin, async (req: AuthenticatedRequest, res, next) => {
   try {
+    // This irreversibly deletes patient, visit, payment and consent data. A
+    // production database must never be one compromised admin session (or one
+    // mis-click) away from losing it, so it is off in production unless
+    // someone with deploy access has deliberately set ALLOW_TRIAL_DATA_RESET=true
+    // for a trial environment. Refused attempts are audited.
+    if (process.env.NODE_ENV === 'production' && process.env.ALLOW_TRIAL_DATA_RESET !== 'true') {
+      await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'ACCESS_DENIED', resource: 'AdminAction', metadata: { entity: 'ResetTrialData', reason: 'disabled_in_production' }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
+      return res.status(403).json({ error: 'Trial data reset is disabled in this environment.', code: 'RESET_DISABLED' });
+    }
+
     const { error, value } = resetTrialDataSchema.validate(req.body);
     if (error) return res.status(400).json({ error: error.details[0].message });
 

@@ -167,7 +167,11 @@ export const requireRole = (roles: UserRole[]) => {
   };
 };
 
+// Each role gate admits exactly one role. Admins administer (see
+// services/careAccess.ts, separation of duties); they are not folded into the
+// patient, nurse or doctor gates, so an admin account can't act as a patient
+// (book, cancel, answer triage follow-ups) or as a clinician.
 export const requireAdmin = requireRole([UserRole.ADMIN]);
-export const requireDoctor = requireRole([UserRole.DOCTOR, UserRole.ADMIN]);
-export const requireNurse = requireRole([UserRole.NURSE, UserRole.ADMIN]);
-export const requirePatient = requireRole([UserRole.PATIENT, UserRole.ADMIN]);
+export const requireDoctor = requireRole([UserRole.DOCTOR]);
+export const requireNurse = requireRole([UserRole.NURSE]);
+export const requirePatient = requireRole([UserRole.PATIENT]);

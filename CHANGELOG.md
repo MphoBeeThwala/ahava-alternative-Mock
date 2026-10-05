@@ -5,6 +5,18 @@ All notable changes to Ahava Healthcare will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+- **Role gates**: `requirePatient`, `requireNurse` and `requireDoctor` now admit only their own role. Admin accounts were previously let through all three, contradicting the separation-of-duties model in `services/careAccess.ts`.
+- **Email changes need re-authentication**: `PUT /auth/profile` requires the current password (plus a TOTP or backup code when 2FA is on) to change the sign-in email. A successful change signs out other devices, un-verifies the address, notifies the old address and is audited (`EMAIL_CHANGED` / `EMAIL_CHANGE_FAILED`).
+- **Hashed one-time tokens**: password-reset and email-verification tokens are stored as SHA-256 hashes (`services/oneTimeTokens.ts`). Email verification links now actually expire after 24 hours (`emailVerificationExpiry`).
+- **Trial-data reset**: `POST /admin/reset-trial-data` is refused in production unless `ALLOW_TRIAL_DATA_RESET=true`; refused attempts are audited.
+
+### Deployment notes
+- Run migration `20261005120000_hash_one_time_tokens`. It clears any outstanding reset / verification tokens (they were stored in clear and can no longer match); affected users use "Forgot password" / "Resend verification".
+- Reset and verification emails already in inboxes stop working after deploy.
+
 ## [1.0.1] - 2024-09-29
 
 ### Added

@@ -131,9 +131,11 @@ model User {
 
   // Auth
   passwordHash              String?
+  // Both tokens are stored as SHA-256 hashes (services/oneTimeTokens.ts).
   passwordResetToken        String?   @unique
   passwordResetExpiry       DateTime?
   emailVerificationToken    String?   @unique
+  emailVerificationExpiry   DateTime?
   refreshTokens             RefreshToken[]
 
   // Two-factor auth (opt-in, AH-29). totpSecret is encrypted at rest via

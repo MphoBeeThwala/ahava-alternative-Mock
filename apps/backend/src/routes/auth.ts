@@ -15,6 +15,13 @@ import { addEmailJob } from "../services/queue";
 import { isMfaRequired } from "../services/mfaPolicy";
 import { auditSignIn } from "../services/signInAudit";
 import { revokeAllSessions } from "../services/sessions";
+import {
+  EMAIL_VERIFICATION_TTL_MS,
+  PASSWORD_RESET_TTL_MS,
+  hashOneTimeToken,
+  newOneTimeToken,
+} from "../services/oneTimeTokens";
+import { verifyReauthentication } from "../services/reauth";
 import { consumeInvite, findUsableInvite, isStaffInviteRequired } from "../services/staffInvites";
 import { writeRequestAudit } from "../services/clinicalAudit";
 import prisma, { TransactionClient } from "../lib/prisma";
@@ -421,10 +428,13 @@ router.post("/register", authRateLimiter, async (req, res, next) => {
     // Not needed when the account came from an emailed invite.
     if (!invite) {
       try {
-        const verificationToken = crypto.randomBytes(32).toString("hex");
+        const { token: verificationToken, tokenHash } = newOneTimeToken();
         await prisma.user.update({
           where: { id: user.id },
-          data: { emailVerificationToken: verificationToken },
+          data: {
+            emailVerificationToken: tokenHash,
+            emailVerificationExpiry: new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS),
+          },
         });
         const frontendBase = (
           process.env.FRONTEND_URL ?? "https://app.ahavaon88.co.za"
@@ -898,6 +908,11 @@ router.put(
           .allow(null),
         preferredLanguage: Joi.string().max(10).allow(null),
         email: emailSchema.optional(),
+        // Step-up proof, required only when the email address changes.
+        currentPassword: Joi.string().max(200).optional(),
+        code: Joi.alternatives()
+          .try(Joi.string().pattern(/^\d{6}$/), Joi.string().pattern(/^[0-9A-F]{5}-[0-9A-F]{5}$/i))
+          .optional(),
       }).validate(req.body);
       if (error)
         return res.status(400).json({ error: error.details[0].message });
@@ -922,6 +937,7 @@ router.put(
         updateData.preferredLanguage = value.preferredLanguage;
 
       let emailChanged = false;
+      let previousEmail: string | null = null;
       if (
         value.email &&
         value.email.toLowerCase() !== currentUser.email.toLowerCase()
@@ -929,16 +945,31 @@ router.put(
         const taken = await prisma.user.findUnique({
           where: { email: value.email.toLowerCase() },
         });
+        // The sign-in email is also where password-reset links go, so changing
+        // it is an account-takeover step: a stolen session alone isn't enough.
+        const reauth = await verifyReauthentication(userId, {
+          currentPassword: value.currentPassword,
+          code: value.code,
+        });
+        if (!reauth.ok) {
+          await writeRequestAudit({
+            userId, userRole: req.user!.role, action: "EMAIL_CHANGE_FAILED", resource: "Auth", resourceId: userId,
+            metadata: { reason: reauth.code }, ipAddress: req.ip, userAgent: req.get("User-Agent"),
+          });
+          return res.status(reauth.status).json({ error: reauth.error, code: reauth.code });
+        }
         if (taken)
           return res
             .status(409)
             .json({ error: "That email address is already in use." });
+        previousEmail = currentUser.email;
         updateData.email = value.email.toLowerCase();
         updateData.isVerified = false;
         emailChanged = true;
         try {
-          const verificationToken = crypto.randomBytes(32).toString("hex");
-          (updateData as any).emailVerificationToken = verificationToken;
+          const { token: verificationToken, tokenHash } = newOneTimeToken();
+          updateData.emailVerificationToken = tokenHash;
+          updateData.emailVerificationExpiry = new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS);
           const verifyUrl = `${process.env.FRONTEND_URL ?? ""}/auth/verify-email?token=${verificationToken}`;
           addEmailJob({
             to: value.email.toLowerCase(),
@@ -968,6 +999,20 @@ router.put(
       });
       await invalidateCachedUser(userId);
 
+      if (emailChanged && previousEmail) {
+        // Sign out every other device (this one gets fresh tokens), audit it,
+        // and tell the old address so an unexpected change is noticed.
+        await revokeAllSessions(userId);
+        const { accessToken, refreshToken } = await generateTokens(userId, updated.role);
+        setAuthCookies(res, req, { accessToken, refreshToken });
+        await writeRequestAudit({
+          userId, userRole: updated.role, action: "EMAIL_CHANGED", resource: "Auth", resourceId: userId,
+          metadata: { otherSessionsSignedOut: true }, ipAddress: req.ip, userAgent: req.get("User-Agent"),
+        });
+        notifyEmailChanged(previousEmail, updated.firstName, updated.email);
+        return res.json(buildAuthResponse(req, { success: true, user: updated, emailChanged }, { accessToken, refreshToken }));
+      }
+
       res.json({ success: true, user: updated, emailChanged });
     } catch (error) {
       return next(error);
@@ -995,12 +1040,12 @@ router.post("/forgot-password", authRateLimiter, async (req, res, next) => {
         message: "If that email exists, a reset link has been sent.",
       });
 
-    const token = crypto.randomBytes(32).toString("hex");
-    const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    const { token, tokenHash } = newOneTimeToken();
+    const expiry = new Date(Date.now() + PASSWORD_RESET_TTL_MS);
 
     await prisma.user.update({
       where: { id: user.id },
-      data: { passwordResetToken: token, passwordResetExpiry: expiry },
+      data: { passwordResetToken: tokenHash, passwordResetExpiry: expiry },
     });
 
     const resetUrl = `${process.env.FRONTEND_URL ?? ""}/auth/reset-password?token=${token}`;
@@ -1032,7 +1077,7 @@ router.post("/reset-password", authRateLimiter, async (req, res, next) => {
 
     const user = await prisma.user.findFirst({
       where: {
-        passwordResetToken: value.token,
+        passwordResetToken: hashOneTimeToken(value.token),
         passwordResetExpiry: { gt: new Date() },
       },
     });
@@ -1121,6 +1166,17 @@ router.post("/change-password", authMiddleware, authRateLimiter, async (req: Aut
   }
 });
 
+/** Best-effort notice to the OLD address that the sign-in email changed — the cue for someone who didn't do it. */
+function notifyEmailChanged(oldEmail: string, firstName: string, newEmail: string) {
+  const safeName = firstName.replace(/[<>&"]/g, "");
+  const masked = newEmail.replace(/^(.).*(@.*)$/, "$1***$2");
+  addEmailJob({
+    to: oldEmail,
+    subject: "Your Ahava Healthcare sign-in email was changed",
+    html: `<p>Hi ${safeName},</p><p>The sign-in email for your Ahava Healthcare account was just changed to <strong>${masked}</strong>, and all other devices were signed out.</p><p><strong>If this wasn't you</strong>, contact support immediately and reset your password.</p>`,
+  }).catch((err) => console.warn("[auth] email-changed notice failed:", (err as Error)?.message ?? err));
+}
+
 /** Best-effort "your password changed" email — the cue for someone who didn't do it. */
 function notifyPasswordChanged(email: string, firstName: string, kind: "change" | "reset") {
   const safeName = firstName.replace(/[<>&"]/g, "");
@@ -1141,7 +1197,10 @@ router.get("/verify-email", async (req, res, next) => {
       return res.status(400).json({ error: "Verification token missing." });
 
     const user = await prisma.user.findFirst({
-      where: { emailVerificationToken: token },
+      where: {
+        emailVerificationToken: hashOneTimeToken(token),
+        emailVerificationExpiry: { gt: new Date() },
+      },
     });
 
     if (!user)
@@ -1151,7 +1210,7 @@ router.get("/verify-email", async (req, res, next) => {
 
     await prisma.user.update({
       where: { id: user.id },
-      data: { isVerified: true, emailVerificationToken: null },
+      data: { isVerified: true, emailVerificationToken: null, emailVerificationExpiry: null },
     });
 
     res.json({ success: true, message: "Email verified successfully." });
@@ -1179,10 +1238,13 @@ router.post("/resend-verification", authRateLimiter, async (req, res, next) => {
         message: "If applicable, a verification email has been sent.",
       });
 
-    const token = crypto.randomBytes(32).toString("hex");
+    const { token, tokenHash } = newOneTimeToken();
     await prisma.user.update({
       where: { id: user.id },
-      data: { emailVerificationToken: token },
+      data: {
+        emailVerificationToken: tokenHash,
+        emailVerificationExpiry: new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS),
+      },
     });
 
     const verifyUrl = `${process.env.FRONTEND_URL ?? ""}/auth/verify-email?token=${token}`;
@@ -1221,7 +1283,7 @@ router.post(
       const userId = req.user!.id;
       await prisma.user.update({
         where: { id: userId },
-        data: { isVerified: true, emailVerificationToken: null },
+        data: { isVerified: true, emailVerificationToken: null, emailVerificationExpiry: null },
       });
       return res.json({ success: true, message: "Account manually verified." });
     } catch (error) {

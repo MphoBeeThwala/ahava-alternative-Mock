@@ -66,13 +66,13 @@ describe('RBAC: requireRole and role-specific gates', () => {
     expect(res.status).not.toHaveBeenCalled();
   });
 
-  // ADMIN is folded into every role-specific gate (requireDoctor,
-  // requireNurse, requirePatient) by construction in auth.ts — pin that
-  // down explicitly since it's easy to regress silently.
+  // Each role-specific gate admits exactly one role. ADMIN is deliberately
+  // not folded in: admins administer but don't act as patients or clinicians
+  // (separation of duties) — pin that down since it's easy to regress.
   describe.each([
-    ['requireDoctor', requireDoctor, [UserRole.DOCTOR, UserRole.ADMIN], [UserRole.PATIENT, UserRole.NURSE]],
-    ['requireNurse', requireNurse, [UserRole.NURSE, UserRole.ADMIN], [UserRole.PATIENT, UserRole.DOCTOR]],
-    ['requirePatient', requirePatient, [UserRole.PATIENT, UserRole.ADMIN], [UserRole.NURSE, UserRole.DOCTOR]],
+    ['requireDoctor', requireDoctor, [UserRole.DOCTOR], [UserRole.PATIENT, UserRole.NURSE, UserRole.ADMIN]],
+    ['requireNurse', requireNurse, [UserRole.NURSE], [UserRole.PATIENT, UserRole.DOCTOR, UserRole.ADMIN]],
+    ['requirePatient', requirePatient, [UserRole.PATIENT], [UserRole.NURSE, UserRole.DOCTOR, UserRole.ADMIN]],
   ] as const)('%s', (_name, gate, allowed, disallowed) => {
     it.each(allowed)('allows role %s', (role) => {
       const req = mockReq(role);

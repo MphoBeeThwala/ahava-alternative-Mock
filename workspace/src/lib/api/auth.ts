@@ -152,6 +152,9 @@ export const authApi = {
     gender?: string | null;
     preferredLanguage?: string | null;
     email?: string;
+    /** Required (with `code` when 2FA is on) only when `email` is being changed. */
+    currentPassword?: string;
+    code?: string;
   }) => {
     const res = await apiClient.put('/auth/profile', data);
     return res.data;

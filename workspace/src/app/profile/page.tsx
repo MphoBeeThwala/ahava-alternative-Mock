@@ -45,6 +45,8 @@ export default function ProfilePage() {
     gender: "",
     preferredLanguage: "",
   });
+  // Step-up proof, needed only when the email address is being changed.
+  const [reauth, setReauth] = useState({ currentPassword: "", code: "" });
   const [riskProfile, setRiskProfile] = useState<RiskProfile>({
     smoker: undefined,
     hypertension: undefined,
@@ -222,7 +224,16 @@ export default function ProfilePage() {
         preferredLanguage: form.preferredLanguage || null,
       };
       if (form.email && form.email !== user?.email) {
+        if (!reauth.currentPassword || (user?.totpEnabled && !reauth.code)) {
+          setError(user?.totpEnabled
+            ? "Enter your current password and an authenticator code to change your email address."
+            : "Enter your current password to change your email address.");
+          setSaving(false);
+          return;
+        }
         payload.email = form.email;
+        payload.currentPassword = reauth.currentPassword;
+        if (reauth.code) payload.code = reauth.code.trim();
       }
       const res = await authApi.updateProfile(payload as Parameters<typeof authApi.updateProfile>[0]);
       if (res?.user) {
@@ -238,6 +249,7 @@ export default function ProfilePage() {
         }));
       }
       setProfileDirty(false);
+      setReauth({ currentPassword: "", code: "" });
       if (user?.role === "PATIENT") {
         const riskRes = await patientApi.updateRiskProfile(buildMedicalPassportPayload());
         if (riskRes?.riskProfile) {
@@ -464,7 +476,33 @@ export default function ProfilePage() {
                     <label style={label}>Email</label>
                     <input name="email" type="email" value={form.email} onChange={handleChange} required style={inp} />
                     {user?.email && form.email !== user.email && (
-                      <p style={{ fontSize: 12, color: "#d97706", marginTop: 6, fontWeight: 600 }}>⚠ Saving will send a verification link to this new address.</p>
+                      <>
+                        <p style={{ fontSize: 12, color: "#d97706", marginTop: 6, fontWeight: 600 }}>⚠ Saving will send a verification link to this new address and sign you out on your other devices.</p>
+                        <div style={{ marginTop: 14 }}>
+                          <label style={label}>Current password (to confirm it&apos;s you)</label>
+                          <input
+                            type="password"
+                            autoComplete="current-password"
+                            value={reauth.currentPassword}
+                            onChange={(e) => setReauth((r) => ({ ...r, currentPassword: e.target.value }))}
+                            style={inp}
+                          />
+                        </div>
+                        {user.totpEnabled && (
+                          <div style={{ marginTop: 14 }}>
+                            <label style={label}>Authenticator code</label>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              autoComplete="one-time-code"
+                              value={reauth.code}
+                              onChange={(e) => setReauth((r) => ({ ...r, code: e.target.value }))}
+                              placeholder="6-digit code or backup code"
+                              style={inp}
+                            />
+                          </div>
+                        )}
+                      </>
                     )}
 
                     <button
