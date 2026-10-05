@@ -1,8 +1,9 @@
-import { Router } from 'express';
+import { NextFunction, Response, Router } from 'express';
 import * as bcrypt from '@node-rs/bcrypt';
 import Joi from 'joi';
 import { StaffInvite, UserRole } from '@prisma/client';
 import { AuthenticatedRequest, requireAdmin, invalidateCachedUser } from '../middleware/auth';
+import { checkStepUp, requireRecentStepUp } from '../middleware/stepUp';
 import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 import { emailSchema, passwordComplexitySchema } from './auth';
 import { adminOverrideVerification, SancVerificationStatus } from '../services/sancVerification';
@@ -106,7 +107,7 @@ async function inviterNames(ids: string[]): Promise<Map<string, string>> {
 // Invite one person, by email, to create a nurse, doctor or admin account.
 // The response includes the link once, for when email isn't getting through;
 // share it only with that person, over a private channel.
-router.post('/invites', requireAdmin, async (req: AuthenticatedRequest, res, next) => {
+router.post('/invites', requireAdmin, requireRecentStepUp, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { error, value } = createInviteSchema.validate(req.body);
     if (error) return res.status(400).json({ error: error.details[0].message });
@@ -134,7 +135,7 @@ router.get('/invites', requireAdmin, async (req: AuthenticatedRequest, res, next
 
 // New link and a fresh expiry for an invite that hasn't been used or revoked
 // (including one that expired); the previous link stops working.
-router.post('/invites/:id/resend', requireAdmin, async (req: AuthenticatedRequest, res, next) => {
+router.post('/invites/:id/resend', requireAdmin, requireRecentStepUp, async (req: AuthenticatedRequest, res, next) => {
   try {
     const reissued = await reissueStaffInvite(req.params.id);
     if (!reissued) return res.status(404).json({ error: 'No unused invite with that id (it may have been accepted or revoked).' });
@@ -191,6 +192,13 @@ router.patch('/users/:id', requireAdmin, async (req: AuthenticatedRequest, res, 
     if (id === req.user!.id && !value.isActive) {
       return res.status(400).json({ error: 'Cannot suspend your own account' });
     }
+    // Suspending is protective, so it stays one click. Bringing an account
+    // back is what an attacker with a stolen admin session would do, so
+    // reactivation needs a fresh second factor.
+    if (value.isActive && !user.isActive) {
+      const decision = await checkStepUp(req.user!);
+      if (!decision.ok) return res.status(403).json(decision.body);
+    }
 
     const updated = await prisma.user.update({ where: { id }, data: { isActive: value.isActive } });
     // AH-08: without this, a suspended user stayed authenticated on
@@ -228,7 +236,7 @@ const hpcsaSchema = Joi.object({
   verify: Joi.boolean().required(),
 });
 
-router.patch('/users/:id/hpcsa', requireAdmin, async (req: AuthenticatedRequest, res, next) => {
+router.patch('/users/:id/hpcsa', requireAdmin, requireRecentStepUp, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
     const { error, value } = hpcsaSchema.validate(req.body);
@@ -288,7 +296,7 @@ const sancOverrideSchema = Joi.object({
   reason: Joi.string().trim().min(3).required(),
 });
 
-router.patch('/users/:id/sanc', requireAdmin, async (req: AuthenticatedRequest, res, next) => {
+router.patch('/users/:id/sanc', requireAdmin, requireRecentStepUp, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
     const { error, value } = sancOverrideSchema.validate(req.body);
@@ -328,7 +336,7 @@ router.patch('/users/:id/sanc', requireAdmin, async (req: AuthenticatedRequest, 
 // compromised admin account can't strip its own second factor.
 const mfaResetSchema = Joi.object({ reason: Joi.string().trim().min(10).max(1000).required() });
 
-router.post('/users/:id/2fa/reset', requireAdmin, async (req: AuthenticatedRequest, res, next) => {
+router.post('/users/:id/2fa/reset', requireAdmin, requireRecentStepUp, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { error, value } = mfaResetSchema.validate(req.body);
     if (error) return res.status(400).json({ error: error.details[0].message });
@@ -363,7 +371,9 @@ const resetTrialDataSchema = Joi.object({
   confirm: Joi.string().valid('RESET').required(),
 });
 
-router.post('/reset-trial-data', requireAdmin, async (req: AuthenticatedRequest, res, next) => {
+// Checked before step-up: there is no point asking for a code for something
+// that is refused outright.
+const refuseResetInProduction = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     // This irreversibly deletes patient, visit, payment and consent data. A
     // production database must never be one compromised admin session (or one
@@ -374,7 +384,12 @@ router.post('/reset-trial-data', requireAdmin, async (req: AuthenticatedRequest,
       await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'ACCESS_DENIED', resource: 'AdminAction', metadata: { entity: 'ResetTrialData', reason: 'disabled_in_production' }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
       return res.status(403).json({ error: 'Trial data reset is disabled in this environment.', code: 'RESET_DISABLED' });
     }
+    return next();
+  } catch (error) { return next(error); }
+};
 
+router.post('/reset-trial-data', requireAdmin, refuseResetInProduction, requireRecentStepUp, async (req: AuthenticatedRequest, res, next) => {
+  try {
     const { error, value } = resetTrialDataSchema.validate(req.body);
     if (error) return res.status(400).json({ error: error.details[0].message });
 

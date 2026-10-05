@@ -13,7 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Hashed one-time tokens**: password-reset and email-verification tokens are stored as SHA-256 hashes (`services/oneTimeTokens.ts`). Email verification links now actually expire after 24 hours (`emailVerificationExpiry`).
 - **Trial-data reset**: `POST /admin/reset-trial-data` is refused in production unless `ALLOW_TRIAL_DATA_RESET=true`; refused attempts are audited.
 
+- **Step-up authentication**: invites, account reactivation, credential verification, 2FA resets, admin grants, break-glass, refunds and trial-data reset need a fresh authenticator code (5-minute window). The web app prompts and retries.
+- **Staff session limits**: 5-minute access tokens, 15-minute idle timeout and 12-hour absolute lifetime for nurses, doctors and admins; patients unchanged. Staff are told why they were signed out.
+- **Login throttling**: failures counted per account+IP (5) and per account (25) instead of per email alone, so a stranger can no longer lock a named user out with five guesses. Falls back to in-process counters if Redis is down rather than failing open.
+
 ### Deployment notes
+- Run migrations `20261005120000_hash_one_time_tokens` and `20261005130000_add_step_up_verified_at`. Staff are signed out once on deploy.
 - Run migration `20261005120000_hash_one_time_tokens`. It clears any outstanding reset / verification tokens (they were stored in clear and can no longer match); affected users use "Forgot password" / "Resend verification".
 - Reset and verification emails already in inboxes stop working after deploy.
 

@@ -132,6 +132,11 @@ export const authApi = {
     const res = await apiClient.post('/auth/logout', {});
     return res.data;
   },
+  /** Prove a fresh second factor for a sensitive action (backend middleware/stepUp.ts). */
+  stepUp: async (code: string): Promise<{ success: boolean; validForSeconds: number }> => {
+    const res = await apiClient.post('/auth/2fa/step-up', { code });
+    return res.data;
+  },
   getWebSocketTicket: async (): Promise<{ success: boolean; ticket: string }> => {
     const res = await apiClient.post('/auth/ws-ticket', {});
     return res.data;

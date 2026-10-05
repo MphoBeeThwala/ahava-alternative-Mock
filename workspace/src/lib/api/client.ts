@@ -1,4 +1,5 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
+import { requestStepUp } from '../stepUp';
 
 // Always use same-origin /api - Next.js rewrites handle the proxy to backend
 // This avoids CORS issues entirely and works in both dev and production
@@ -13,10 +14,13 @@ function isRefreshExcludedRequest(url?: string): boolean {
     '/auth/login',
     '/auth/logout',
     '/auth/register',
+    // A wrong code answers 401; that is not an expired session, so don't refresh.
+    '/auth/2fa/step-up',
   ].some((path) => url.includes(path));
 }
 
 export const MFA_ENROLLMENT_REQUIRED_CODE = 'MFA_ENROLLMENT_REQUIRED';
+export const STEP_UP_REQUIRED_CODE = 'STEP_UP_REQUIRED';
 export const TWO_FACTOR_SETUP_PATH = '/security/two-factor';
 
 export const COOKIE_AUTH_HEADERS = {
@@ -103,6 +107,22 @@ apiClient.interceptors.response.use(
       return Promise.reject(error);
     }
 
+    // A sensitive action needs a fresh authenticator code: prompt, then retry
+    // the original request once. Cancelling falls through to the error.
+    if (
+      error.response?.status === 403 &&
+      error.response?.data?.code === STEP_UP_REQUIRED_CODE &&
+      originalRequest &&
+      !originalRequest._stepUpTried &&
+      typeof window !== 'undefined'
+    ) {
+      originalRequest._stepUpTried = true;
+      if (await requestStepUp()) {
+        return apiClient(originalRequest);
+      }
+      return Promise.reject(error);
+    }
+
     if (error.response?.status === 401 && originalRequest && !originalRequest._retry && typeof window !== 'undefined') {
       if (isRefreshExcludedRequest(requestUrl)) {
         return Promise.reject(error);
@@ -152,7 +172,10 @@ apiClient.interceptors.response.use(
             return Promise.reject(refreshError);
           }
 
-          window.location.href = '/auth/login';
+          // Staff sessions end after inactivity or a time limit; say why.
+          const sessionCode = (refreshError as AxiosError<{ code?: string }>).response?.data?.code;
+          const reason = sessionCode === 'SESSION_IDLE_TIMEOUT' ? 'idle' : sessionCode === 'SESSION_MAX_AGE' ? 'expired' : '';
+          window.location.href = reason ? `/auth/login?reason=${reason}` : '/auth/login';
           return Promise.reject(refreshError);
         } finally {
           isRefreshing = false;

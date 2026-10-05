@@ -22,6 +22,8 @@ import {
   newOneTimeToken,
 } from "../services/oneTimeTokens";
 import { verifyReauthentication } from "../services/reauth";
+import { accessTokenSecondsFor, refreshRefusal } from "../services/sessionPolicy";
+import { checkLoginAllowed, clearLoginFailures, recordLoginFailure } from "../services/loginThrottle";
 import { consumeInvite, findUsableInvite, isStaffInviteRequired } from "../services/staffInvites";
 import { writeRequestAudit } from "../services/clinicalAudit";
 import prisma, { TransactionClient } from "../lib/prisma";
@@ -52,60 +54,6 @@ export const passwordComplexitySchema = Joi.string()
     "string.pattern.name": "Password must contain at least one {#name}",
     "string.min": "Password must be at least 8 characters",
   });
-
-// ---------------------------------------------------------------------------
-// Account lockout helpers (Redis-backed, graceful fallback if Redis is down)
-// ---------------------------------------------------------------------------
-const LOCKOUT_MAX_ATTEMPTS = parseInt(
-  process.env.AUTH_LOCKOUT_MAX_ATTEMPTS ?? "5",
-  10,
-);
-const LOCKOUT_TTL_SECONDS = parseInt(
-  process.env.AUTH_LOCKOUT_TTL_SECONDS ?? "900",
-  10,
-); // 15 min
-
-async function isAccountLocked(
-  email: string,
-): Promise<{ locked: boolean; remainingSeconds?: number }> {
-  try {
-    const redis = getRedis();
-    const ttl = await redis.ttl(`auth:locked:${email}`);
-    if (ttl > 0) return { locked: true, remainingSeconds: ttl };
-  } catch {
-    // Redis unavailable — fail open (do not block healthcare login)
-    console.warn("[auth] Redis unavailable for lockout check, failing open");
-  }
-  return { locked: false };
-}
-
-async function recordFailedAttempt(email: string): Promise<void> {
-  try {
-    const redis = getRedis();
-    const key = `auth:failures:${email}`;
-    const attempts = await redis.incr(key);
-    // Reset window on first attempt
-    if (attempts === 1) await redis.expire(key, LOCKOUT_TTL_SECONDS);
-    if (attempts >= LOCKOUT_MAX_ATTEMPTS) {
-      await redis.set(`auth:locked:${email}`, "1", "EX", LOCKOUT_TTL_SECONDS);
-      await redis.del(key);
-      console.warn(
-        `[auth] Account locked after ${LOCKOUT_MAX_ATTEMPTS} failed attempts: ${email}`,
-      );
-    }
-  } catch {
-    console.warn("[auth] Redis unavailable for failure tracking");
-  }
-}
-
-async function clearFailedAttempts(email: string): Promise<void> {
-  try {
-    const redis = getRedis();
-    await redis.del(`auth:failures:${email}`);
-  } catch {
-    // Non-fatal
-  }
-}
 
 // Validation schemas
 const registerSchema = Joi.object({
@@ -229,11 +177,15 @@ async function setRefreshReplayTokens(
   }
 }
 
-function createSignedTokens(userId: string, role: string): SignedTokens {
-  const accessExpiry = Math.max(
-    60,
-    process.env.JWT_EXPIRES_IN ? parseExpiry(process.env.JWT_EXPIRES_IN) : 900,
-  ); // 15m default
+function createSignedTokens(userId: string, role: string, authTime?: number): SignedTokens {
+  // Staff get a shorter access token (services/sessionPolicy.ts).
+  const accessExpiry = accessTokenSecondsFor(
+    role,
+    Math.max(60, process.env.JWT_EXPIRES_IN ? parseExpiry(process.env.JWT_EXPIRES_IN) : 900), // 15m default
+  );
+  // When the sign-in that started this session happened. A refresh passes the
+  // original value through, so the absolute staff session limit holds.
+  const sessionStart = authTime ?? Math.floor(Date.now() / 1000);
   const refreshExpiry = process.env.REFRESH_TOKEN_EXPIRES_IN
     ? parseExpiry(process.env.REFRESH_TOKEN_EXPIRES_IN)
     : 604800; // 7d
@@ -244,7 +196,7 @@ function createSignedTokens(userId: string, role: string): SignedTokens {
     { expiresInSeconds: accessExpiry },
   );
   const refreshToken = signToken(
-    { userId, role, typ: "refresh" },
+    { userId, role, typ: "refresh", authTime: sessionStart },
     { expiresInSeconds: refreshExpiry, jwtid: crypto.randomUUID() },
   );
   const refreshTokenHash = hashRefreshToken(refreshToken);
@@ -276,6 +228,7 @@ async function rotateRefreshToken(
   oldTokenHash: string,
   userId: string,
   role: string,
+  authTime?: number,
 ): Promise<SignedTokens | null> {
   return prisma.$transaction(async (tx) => {
     const deleted = await tx.refreshToken.deleteMany({
@@ -286,7 +239,7 @@ async function rotateRefreshToken(
       return null;
     }
 
-    const signedTokens = createSignedTokens(userId, role);
+    const signedTokens = createSignedTokens(userId, role, authTime);
     await storeRefreshToken(
       tx,
       userId,
@@ -560,14 +513,15 @@ router.post("/login", authRateLimiter, async (req, res, next) => {
 
     const { email, password } = value;
 
-    // Check account lockout before doing any DB work
-    const lockStatus = await isAccountLocked(email);
-    if (lockStatus.locked) {
-      const minutes = Math.ceil(
-        (lockStatus.remainingSeconds ?? LOCKOUT_TTL_SECONDS) / 60,
-      );
+    // Check throttling before doing any DB work
+    const ip = req.ip ?? "";
+    const block = await checkLoginAllowed(email, ip);
+    if (block.blocked) {
+      const minutes = Math.ceil(block.retryAfterSeconds / 60);
+      res.set("Retry-After", String(block.retryAfterSeconds));
       return res.status(429).json({
-        error: `Account temporarily locked due to too many failed login attempts. Try again in ${minutes} minute${minutes !== 1 ? "s" : ""}.`,
+        error: `Too many failed login attempts. Try again in ${minutes} minute${minutes !== 1 ? "s" : ""}.`,
+        code: "LOGIN_THROTTLED",
       });
     }
 
@@ -578,7 +532,7 @@ router.post("/login", authRateLimiter, async (req, res, next) => {
 
     if (!user || !user.passwordHash) {
       // Still record attempt to prevent email enumeration timing attacks
-      await recordFailedAttempt(email);
+      await recordLoginFailure(email, ip);
       await auditSignIn(req, "LOGIN_FAILED", null, { email, reason: "unknown_account" });
       return res.status(401).json({ error: "Invalid credentials" });
     }
@@ -586,7 +540,7 @@ router.post("/login", authRateLimiter, async (req, res, next) => {
     // Verify password
     const isValidPassword = await bcrypt.compare(password, user.passwordHash);
     if (!isValidPassword) {
-      await recordFailedAttempt(email);
+      await recordLoginFailure(email, ip);
       await auditSignIn(req, "LOGIN_FAILED", user, { reason: "bad_password" });
       return res.status(401).json({ error: "Invalid credentials" });
     }
@@ -597,7 +551,7 @@ router.post("/login", authRateLimiter, async (req, res, next) => {
     }
 
     // Successful login — clear any failure counter
-    await clearFailedAttempts(email);
+    await clearLoginFailures(email, ip);
 
     // AH-29: opt-in 2FA. Password alone is not enough for an account with it
     // enabled — issue a short-lived "twofa_pending" token (a distinct JWT
@@ -669,7 +623,7 @@ router.post("/refresh", async (req, res, next) => {
     // Verify refresh token. `verifyToken` rejects an access token or a
     // WebSocket ticket presented here, even though all three are signed
     // with the same secret.
-    let decoded: { userId: string; role: string };
+    let decoded: { userId: string; role: string; iat?: number; authTime?: number };
     try {
       decoded = verifyToken(refreshToken, "refresh");
     } catch (verifyError) {
@@ -732,10 +686,28 @@ router.post("/refresh", async (req, res, next) => {
       return res.status(401).json({ error: "Account is deactivated" });
     }
 
+    // Staff sessions end after a short idle period and after an absolute
+    // lifetime (services/sessionPolicy.ts). The role comes from the database,
+    // not the token, so a role change is not carried forward by a refresh.
+    const refusal = refreshRefusal(tokenRecord.user.role, decoded.iat, decoded.authTime);
+    if (refusal) {
+      await prisma.refreshToken.deleteMany({ where: { token: tokenHash } }).catch(() => {});
+      try { await getRedis().del(`refresh:${tokenHash}`); } catch { /* the database delete above is what revokes */ }
+      clearAuthCookies(res, req);
+      await auditSignIn(req, "SESSION_EXPIRED", tokenRecord.user, { reason: refusal });
+      return res.status(401).json({
+        error: refusal === "SESSION_IDLE_TIMEOUT"
+          ? "You were signed out after a period of inactivity. Please sign in again."
+          : "Your session has reached its time limit. Please sign in again.",
+        code: refusal,
+      });
+    }
+
     const rotatedTokens = await rotateRefreshToken(
       tokenHash,
       tokenRecord.user.id,
-      decoded.role || tokenRecord.user.role,
+      tokenRecord.user.role,
+      decoded.authTime ?? decoded.iat,
     );
 
     if (!rotatedTokens) {

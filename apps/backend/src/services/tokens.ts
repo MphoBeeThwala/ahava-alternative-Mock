@@ -31,6 +31,15 @@ export interface AhavaTokenPayload {
   userId: string;
   role: string;
   typ: TokenType;
+  /** Issued-at, seconds since the epoch (set by jsonwebtoken). */
+  iat?: number;
+  /**
+   * Refresh tokens only: when the sign-in that started this session
+   * happened, seconds since the epoch. It is carried unchanged through every
+   * rotation, so an absolute session lifetime can be enforced
+   * (services/sessionPolicy.ts) no matter how often the session refreshes.
+   */
+  authTime?: number;
 }
 
 /** Raised when a token verifies cryptographically but is the wrong kind. */
@@ -53,11 +62,16 @@ export function getJwtSecret(): string {
 }
 
 export function signToken(
-  payload: { userId: string; role: string; typ: TokenType },
+  payload: { userId: string; role: string; typ: TokenType; authTime?: number },
   options: { expiresInSeconds: number; jwtid?: string },
 ): string {
   return jwt.sign(
-    { userId: payload.userId, role: payload.role, typ: payload.typ },
+    {
+      userId: payload.userId,
+      role: payload.role,
+      typ: payload.typ,
+      ...(payload.authTime !== undefined ? { authTime: payload.authTime } : {}),
+    },
     getJwtSecret(),
     {
       algorithm: TOKEN_ALGORITHM,
@@ -97,5 +111,7 @@ export function verifyToken(token: string, expected: TokenType): AhavaTokenPaylo
     userId: decoded.userId,
     role: typeof decoded.role === "string" ? decoded.role : "",
     typ: expected,
+    iat: typeof decoded.iat === "number" ? decoded.iat : undefined,
+    authTime: typeof decoded.authTime === "number" ? decoded.authTime : undefined,
   };
 }

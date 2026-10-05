@@ -41,6 +41,10 @@ function ensureAppSecrets() {
   // staffInvites.integration.test.ts; other suites register staff directly.
   // Only honoured under NODE_ENV=test.
   process.env.STAFF_INVITES_DISABLED_FOR_TESTS = "true";
+  // Step-up authentication on sensitive actions (middleware/stepUp.ts) is
+  // exercised by stepUp.integration.test.ts; other suites skip it. Only
+  // honoured under NODE_ENV=test.
+  process.env.STEP_UP_DISABLED_FOR_TESTS = "true";
 }
 
 module.exports = async function globalSetup() {

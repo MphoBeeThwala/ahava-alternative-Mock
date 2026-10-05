@@ -15,6 +15,14 @@ export default function LoginPage() {
     // AH-29: set once the account turns out to have opt-in 2FA enabled.
     const [pendingToken, setPendingToken] = useState<string | null>(null);
     const [twoFactorCode, setTwoFactorCode] = useState('');
+    // Why the person landed here: staff sessions end after inactivity or a time limit.
+    const [notice, setNotice] = useState('');
+
+    React.useEffect(() => {
+        const reason = new URLSearchParams(window.location.search).get('reason');
+        if (reason === 'idle') setNotice('You were signed out after a period of inactivity. Please sign in again.');
+        else if (reason === 'expired') setNotice('Your session reached its time limit. Please sign in again.');
+    }, []);
 
     // Redirect if already authenticated
     React.useEffect(() => {
@@ -142,6 +150,12 @@ export default function LoginPage() {
                                 : 'Sign in to your Ahava account'}
                         </p>
                     </div>
+
+                    {notice && !error && (
+                        <div role="status" style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: '12px 16px', marginBottom: 20, color: '#1d4ed8', fontSize: 13 }}>
+                            {notice}
+                        </div>
+                    )}
 
                     {error && (
                         <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'flex-start', gap: 10 }}>

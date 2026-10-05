@@ -32,7 +32,17 @@ describe("tokens", () => {
 
   it("round-trips a token of the expected type", () => {
     const payload = verifyToken(sign("access"), "access");
-    expect(payload).toEqual({ userId: "user_1", role: "PATIENT", typ: "access" });
+    expect(payload).toMatchObject({ userId: "user_1", role: "PATIENT", typ: "access" });
+    expect(typeof payload.iat).toBe("number");
+    expect(payload.authTime).toBeUndefined();
+  });
+
+  it("carries the original sign-in time on a refresh token", () => {
+    const token = signToken(
+      { userId: "user_1", role: "NURSE", typ: "refresh", authTime: 1_700_000_000 },
+      { expiresInSeconds: 60 },
+    );
+    expect(verifyToken(token, "refresh").authTime).toBe(1_700_000_000);
   });
 
   it("rejects a refresh token presented as an access token", () => {

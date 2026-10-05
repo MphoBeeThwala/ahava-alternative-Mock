@@ -4,6 +4,7 @@ import "./globals.css";
 import { AuthProvider } from "../contexts/AuthContext";
 import { ToastProvider } from "../contexts/ToastContext";
 import { ServiceWorkerRegistration } from "../components/ServiceWorkerRegistration";
+import { StepUpProvider } from "../components/StepUpProvider";
 
 const plusJakarta = Plus_Jakarta_Sans({
   variable: "--font-jakarta",
@@ -39,7 +40,7 @@ export default function RootLayout({
         <ServiceWorkerRegistration />
         <AuthProvider>
           <ToastProvider>
-            {children}
+            <StepUpProvider>{children}</StepUpProvider>
           </ToastProvider>
         </AuthProvider>
       </body>

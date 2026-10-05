@@ -2975,3 +2975,23 @@ The admin dashboard's "Add user" also created staff accounts with a password the
 `admin.integration.test.ts` checks that staff can't be created directly.
 
 Operations: `docs/SECURITY_RUNBOOK.md` §7. After deploying, delete the two old variables from Railway.
+
+
+## 42. Account-security hardening: single-role gates, step-up, staff session limits, login throttling, 2026-10-05
+
+Follows a review of how roles and sign-in work. Two phases.
+
+**Phase A: small hardening**
+- `requirePatient` / `requireNurse` / `requireDoctor` admit only their own role. Admins used to pass all three, which contradicted §38's separation of duties.
+- Password-reset and email-verification tokens are stored as SHA-256 hashes (`services/oneTimeTokens.ts`); verification links now expire after 24 hours.
+- Changing the sign-in email needs the current password (and a 2FA code if enabled), signs out other devices, un-verifies the address and notifies the old one (`services/reauth.ts`).
+- `POST /admin/reset-trial-data` is refused in production unless `ALLOW_TRIAL_DATA_RESET=true`.
+
+**Phase B: staff sessions, step-up, throttling**
+- **Step-up (`middleware/stepUp.ts`).** Sensitive actions need an authenticator (or backup) code entered in the last `STEP_UP_WINDOW_MINUTES` (5), via `POST /auth/2fa/step-up`. Without it the route answers `403 STEP_UP_REQUIRED` and the web app prompts for the code, then retries. Covered: creating or resending staff invites, reactivating an account (suspending stays one click), verifying HPCSA / overriding SANC, resetting someone's 2FA, admin grants of patient access, break-glass access, refunds, trial-data reset. The window is stored on the user (`stepUpVerifiedAt`) and read from the database, never from the auth cache.
+- **Staff session limits (`services/sessionPolicy.ts`).** Staff access tokens last 5 minutes (`STAFF_ACCESS_TOKEN_MINUTES`); a session can't be refreshed after 15 idle minutes (`STAFF_SESSION_IDLE_MINUTES`) or 12 hours in total (`STAFF_SESSION_MAX_HOURS`). The refresh token carries the original sign-in time (`authTime`) through every rotation. Idle time is measured at refresh from the token's age, so there's no write on every request; effective idle limit is 10-15 minutes. Patients keep 15 minute / 7 day sessions. Refresh now takes the role from the database, not the old token.
+- **Login throttling (`services/loginThrottle.ts`).** Failures are counted per account + IP (5, then 15 minutes' block) and per account across all IPs (25). The owner on another IP isn't locked out by someone guessing, and tripping the account-wide lock takes five times the effort the old email-only counter did. The counters fall back to in-process memory with a 300 ms Redis deadline if Redis is down, instead of failing open. 2FA-code attempts use the same helper. A correct password clears only that IP's counter.
+
+**Not done (decision needed):** splitting the admin role (credential verifier vs access administrator) or requiring a second admin's approval for 2FA resets and long grants; per-code replay protection for TOTP; device / IP allowlisting for admins.
+
+**Operations:** run migrations `20261005120000_hash_one_time_tokens` (clears outstanding reset/verification tokens) and `20261005130000_add_step_up_verified_at`. Staff are signed out on deploy: the new refresh token carries `authTime`; old ones without it are treated as having started when issued. Tests: `accountSecurity`, `stepUp` (integration), `sessionPolicy`, `loginThrottle` (unit).

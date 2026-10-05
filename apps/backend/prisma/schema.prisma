@@ -136,6 +136,9 @@ model User {
   passwordResetExpiry       DateTime?
   emailVerificationToken    String?   @unique
   emailVerificationExpiry   DateTime?
+  // Last time this user proved a fresh second factor for a sensitive action
+  // (middleware/stepUp.ts). Not a session: it only opens a short window.
+  stepUpVerifiedAt          DateTime?
   refreshTokens             RefreshToken[]
 
   // Two-factor auth (opt-in, AH-29). totpSecret is encrypted at rest via
