@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { CLINICIAN_ENTERABLE, OUTCOME_TYPES, triageDetails, validateClinicianOutcome } from './researchOutcomes';
+import { CLINICIAN_ENTERABLE, OUTCOME_BASES, OUTCOME_TYPES, outcomeTypesForIcd10, parseOptionalIcd10, triageDetails, validateClinicianOutcome } from './researchOutcomes';
 
 const NOW = new Date('2026-10-06T12:00:00Z');
 const ok = (o: Record<string, unknown>) => validateClinicianOutcome({ outcomeType: 'CVD_EVENT', outcomeDay: '2026-09-01', ...o }, NOW);
@@ -62,6 +62,54 @@ describe('triageDetails', () => {
   });
   it('nulls out-of-range levels instead of storing them', () => {
     expect(triageDetails(9, 0, 'RELEASED')).toMatchObject({ aiLevel: null, finalLevel: null, overridden: false });
+  });
+});
+
+describe('parseOptionalIcd10', () => {
+  it('treats blank as "no code" and normalises a valid one', () => {
+    for (const blank of [undefined, null, '']) expect(parseOptionalIcd10(blank)).toEqual({ ok: true, value: null });
+    expect(parseOptionalIcd10(' i10 ')).toEqual({ ok: true, value: 'I10' });
+    expect(parseOptionalIcd10('e11.9')).toEqual({ ok: true, value: 'E11.9' });
+  });
+  it('rejects anything that is not a well-formed code', () => {
+    for (const bad of ['hypertension', 'I', '10', 'U07.1', 'I1000000', 'I10; DROP TABLE', 123]) {
+      expect(parseOptionalIcd10(bad).ok).toBe(false);
+    }
+  });
+});
+
+describe('outcomeTypesForIcd10 (conservative mapping)', () => {
+  it.each([
+    ['I10', ['HYPERTENSION_DIAGNOSED']],
+    ['I15.9', ['HYPERTENSION_DIAGNOSED']],
+    ['E11.9', ['DIABETES_DIAGNOSED']],
+    ['E14', ['DIABETES_DIAGNOSED']],
+    ['I21.0', ['CVD_EVENT']],
+    ['I63.9', ['CVD_EVENT']],
+    ['G45.9', ['CVD_EVENT']],
+    ['I50.0', ['CVD_EVENT']],
+    ['I46.9', ['CVD_EVENT']],
+    ['I48.0', ['ARRHYTHMIA_DIAGNOSED']],
+  ])('%s -> %j', (code, expected) => {
+    expect(outcomeTypesForIcd10(code)).toEqual(expected);
+  });
+  it('maps nothing for diagnoses that are not these outcomes', () => {
+    for (const code of ['J06.9', 'A09', 'I25.1', 'I16.0', 'O10.0', 'E15', 'I65.2', null]) {
+      expect(outcomeTypesForIcd10(code as string | null)).toEqual([]);
+    }
+  });
+  it('never infers admission or death from a diagnosis', () => {
+    const everything = ['I10', 'E11', 'I21', 'I46', 'I48', 'I63', 'G45', 'I50'].flatMap(outcomeTypesForIcd10);
+    expect(everything).not.toContain('HOSPITAL_ADMISSION');
+    expect(everything).not.toContain('DEATH');
+  });
+});
+
+describe('outcome bases', () => {
+  it('includes a weaker REMOTE_TRIAGE basis for diagnoses made without an examination or test', () => {
+    expect(OUTCOME_BASES).toContain('REMOTE_TRIAGE');
+    const r = validateClinicianOutcome({ outcomeType: 'DIABETES_DIAGNOSED', outcomeDay: '2026-09-01', basis: 'REMOTE_TRIAGE' }, NOW);
+    expect(r.ok && r.value.details).toEqual({ basis: 'REMOTE_TRIAGE' });
   });
 });
 

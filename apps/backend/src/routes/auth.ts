@@ -26,6 +26,7 @@ import { accessTokenSecondsFor, refreshRefusal } from "../services/sessionPolicy
 import { checkLoginAllowed, clearLoginFailures, recordLoginFailure } from "../services/loginThrottle";
 import { consumeInvite, findUsableInvite, isStaffInviteRequired } from "../services/staffInvites";
 import { writeRequestAudit } from "../services/clinicalAudit";
+import { RESEARCH_CONSENT_TYPE, RESEARCH_CONSENT_VERSION } from "../services/research/pseudonym";
 import prisma, { TransactionClient } from "../lib/prisma";
 import { getRedis } from "../services/redis";
 import {
@@ -66,6 +67,14 @@ const registerSchema = Joi.object({
   dateOfBirth: Joi.date().optional(),
   gender: Joi.string().optional(),
   preferredLanguage: Joi.string().default("en-ZA"),
+  // Optional, unticked-by-default research opt-in (services/research). Patients
+  // only: staff accounts are not research subjects. Absent or false records
+  // nothing. Anyone who skips it is asked again, once, after they sign in.
+  researchConsent: Joi.boolean().when("role", {
+    is: "PATIENT",
+    then: Joi.optional(),
+    otherwise: Joi.forbidden(),
+  }),
   sancRegistrationNumber: Joi.string().trim().max(40).when("role", {
     is: "NURSE",
     then: Joi.optional(),
@@ -273,6 +282,7 @@ router.post("/register", authRateLimiter, async (req, res, next) => {
       sancRegistrationNumber,
       hpcsaNumber,
       inviteToken,
+      researchConsent,
     } = value;
     let email = rawEmail.toLowerCase();
 
@@ -347,6 +357,20 @@ router.post("/register", authRateLimiter, async (req, res, next) => {
       if (invite && !(await consumeInvite(tx, invite.id, created.id))) {
         throw new InviteAlreadyUsedError();
       }
+      // The research opt-in is recorded with the account, so there is no window
+      // in which the account exists and a stated choice was lost. It starts now:
+      // only readings recorded from this moment are ever captured.
+      if (role === "PATIENT" && researchConsent === true) {
+        await tx.patientConsent.create({
+          data: {
+            userId: created.id,
+            consentType: RESEARCH_CONSENT_TYPE,
+            version: RESEARCH_CONSENT_VERSION,
+            ipAddress: req.ip ?? null,
+            userAgent: req.get("User-Agent") ?? null,
+          },
+        });
+      }
       return created;
     }).catch((err) => {
       if (err instanceof InviteAlreadyUsedError) return null;
@@ -366,6 +390,18 @@ router.post("/register", authRateLimiter, async (req, res, next) => {
         resource: "StaffInvite",
         resourceId: invite.id,
         metadata: { event: "INVITE_ACCEPTED", role: user.role, invitedById: invite.createdById },
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent"),
+      });
+    }
+
+    if (role === "PATIENT" && researchConsent === true) {
+      await writeRequestAudit({
+        userId: user.id,
+        userRole: user.role,
+        action: "CREATE",
+        resource: "Consent",
+        metadata: { consentType: RESEARCH_CONSENT_TYPE, version: RESEARCH_CONSENT_VERSION, via: "SIGNUP" },
         ipAddress: req.ip,
         userAgent: req.get("User-Agent"),
       });

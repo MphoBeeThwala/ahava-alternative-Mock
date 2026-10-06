@@ -12,11 +12,33 @@ import { Router } from 'express';
 import type { AuthenticatedRequest } from '../middleware/auth';
 import { auditAccessDenied, hasActiveAccess, NO_ACCESS_ERROR, requireVerifiedClinician } from '../services/careAccess';
 import { writeRequestAudit } from '../services/clinicalAudit';
-import { recordClinicianOutcome } from '../services/research/researchCapture';
+import { recordClinicianOutcome, researchDataFor } from '../services/research/researchCapture';
 import { CLINICIAN_ENTERABLE } from '../services/research/researchOutcomes';
 
 const router: Router = Router();
 const requireVerifiedDoctor = requireVerifiedClinician(['DOCTOR']);
+
+// "What have you shared?": a patient's own research data, for their eyes only.
+// Patients only; a clinician has no route to anyone's research rows.
+router.get('/my-data', async (req: AuthenticatedRequest, res, next) => {
+  try {
+    if (req.user?.role !== 'PATIENT') return res.status(403).json({ error: 'Patients only', code: 'PATIENT_ONLY' });
+    const data = await researchDataFor(req.user.id);
+    await writeRequestAudit({
+      userId: req.user.id,
+      userRole: req.user.role,
+      action: 'READ',
+      resource: 'ResearchData',
+      metadata: { event: 'PATIENT_VIEWED_OWN_RESEARCH_DATA', readings: data.readings.length, outcomes: data.outcomes.length },
+      ipAddress: req.ip,
+      userAgent: req.get('User-Agent'),
+    });
+    res.set('Cache-Control', 'no-store');
+    return res.json({ success: true, data });
+  } catch (error) {
+    return next(error);
+  }
+});
 
 // What a client may submit, for building the entry form.
 router.get('/outcome-types', requireVerifiedDoctor, (_req, res) => {

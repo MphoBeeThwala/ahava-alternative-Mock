@@ -757,6 +757,7 @@ model Prescription {
 
   medications     Json      // [{ name, dosage, frequency, duration, instructions }]
   diagnosis       String
+  icd10           String?   // optional coded diagnosis (format-checked); lets the diagnosis be used as a research label
   doctorNotes     String?
 
   // Auditable snapshot of prescriber identity at time of issuing
@@ -785,6 +786,7 @@ model Referral {
 
   referralType        String    // EMERGENCY | URGENT | ROUTINE | SPECIALIST
   provisionalDiagnosis String
+  icd10               String?   // optional coded provisional diagnosis (format-checked)
   clinicalNotes       String    // Doctor's preliminary assessment / referral narrative
   recommendedFacility String    // HOSPITAL | CLINIC | SPECIALIST | EMS
 

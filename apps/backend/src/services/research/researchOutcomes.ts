@@ -35,12 +35,46 @@ export const CLINICIAN_ENTERABLE: readonly OutcomeType[] = [
   'ALERT_DISMISSED',
 ];
 
-export const OUTCOME_BASES = ['CLINICAL', 'LAB', 'IMAGING', 'DISCHARGE_SUMMARY'] as const;
+// REMOTE_TRIAGE marks a diagnosis made remotely during a triage case, without
+// an examination or test: a weaker label than the others. Analyses can leave
+// these out (research `--strong-labels-only`).
+export const OUTCOME_BASES = ['CLINICAL', 'LAB', 'IMAGING', 'DISCHARGE_SUMMARY', 'REMOTE_TRIAGE'] as const;
 export type OutcomeBasis = (typeof OUTCOME_BASES)[number];
 
 // ICD-10: letter (not U), two digits, optional .1-4 alphanumerics. Format check
 // only; this does not assert the code exists.
 const ICD10_RE = /^[A-TV-Z][0-9][0-9AB](\.[0-9A-Z]{1,4})?$/;
+
+/** Optional ICD-10 from a form: blank is fine, anything else must be a well-formed code. */
+export function parseOptionalIcd10(value: unknown): { ok: true; value: string | null } | { ok: false; error: string } {
+  if (value === undefined || value === null || value === '') return { ok: true, value: null };
+  const code = String(value).trim().toUpperCase();
+  if (!ICD10_RE.test(code)) return { ok: false, error: 'icd10 is not a valid ICD-10 code format (for example I10 or E11.9)' };
+  return { ok: true, value: code };
+}
+
+const inRange = (cat: string, letter: string, lo: number, hi: number) => {
+  const n = Number(cat.slice(1, 3));
+  return cat[0] === letter && Number.isInteger(n) && n >= lo && n <= hi;
+};
+
+/**
+ * Which research outcome types a coded diagnosis counts as. Deliberately
+ * conservative: only categories that clearly mean the outcome. Admission and
+ * death cannot be read off a diagnosis and are never inferred here.
+ */
+export function outcomeTypesForIcd10(code: string | null): OutcomeType[] {
+  if (!code) return [];
+  const cat = code.slice(0, 3);
+  const out: OutcomeType[] = [];
+  if (inRange(cat, 'I', 10, 15)) out.push('HYPERTENSION_DIAGNOSED');           // hypertensive diseases
+  if (inRange(cat, 'E', 10, 14)) out.push('DIABETES_DIAGNOSED');               // diabetes mellitus
+  if (['I21', 'I22', 'I46', 'I50', 'G45'].includes(cat) || inRange(cat, 'I', 60, 64)) {
+    out.push('CVD_EVENT');                                                      // MI, cardiac arrest, heart failure, stroke, TIA
+  }
+  if (inRange(cat, 'I', 47, 49)) out.push('ARRHYTHMIA_DIAGNOSED');             // tachycardias, atrial fibrillation, other arrhythmias
+  return out;
+}
 
 export interface ClinicianOutcomeInput {
   outcomeType: unknown;
