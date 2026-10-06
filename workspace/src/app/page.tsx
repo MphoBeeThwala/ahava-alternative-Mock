@@ -240,9 +240,10 @@ export default function Home() {
             © {new Date().getFullYear()} Ahava Healthcare · POPIA Compliant
           </div>
           <div style={{ display: 'flex', gap: 16 }}>
-            {[['🔒', 'Privacy'], ['📋', 'Terms'], ['📞', 'Contact']].map(([icon, label]) => (
-              <span key={label} style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, cursor: 'pointer' }}>{icon} {label}</span>
-            ))}
+            {/* Real links: Google's OAuth review requires the home page to link to the privacy policy. */}
+            <Link href="/legal/privacy-policy" style={{ color: 'rgba(255,255,255,0.55)', fontSize: 13, textDecoration: 'none' }}>🔒 Privacy Policy</Link>
+            <Link href="/legal/terms" style={{ color: 'rgba(255,255,255,0.55)', fontSize: 13, textDecoration: 'none' }}>📋 Terms of Service</Link>
+            <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13 }}>📞 Contact</span>
           </div>
         </div>
       </footer>

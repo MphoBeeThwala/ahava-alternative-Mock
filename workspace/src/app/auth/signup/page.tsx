@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "../../../contexts/AuthContext";
 import { authApi, type StaffInviteDetails } from "../../../lib/api/auth";
+import GoogleSignInButton from "../../../components/GoogleSignInButton";
 
 const ROLE_LABEL: Record<StaffInviteDetails["role"], string> = {
   NURSE: "Nurse",
@@ -571,6 +572,17 @@ export default function SignupPage() {
                   : "Create Free Account →"}
             </button>
           </form>
+
+          {/* Patients only: staff accounts come from an invite, never Google. */}
+          {!invite && !inviteToken && (
+            <div style={{ marginTop: 20 }}>
+              <GoogleSignInButton
+                mode="signup"
+                onSignedIn={() => router.push("/patient/dashboard")}
+                onError={setError}
+              />
+            </div>
+          )}
 
           <p
             style={{

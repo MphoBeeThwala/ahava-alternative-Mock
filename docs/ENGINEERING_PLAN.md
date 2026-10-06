@@ -2975,3 +2975,51 @@ The admin dashboard's "Add user" also created staff accounts with a password the
 `admin.integration.test.ts` checks that staff can't be created directly.
 
 Operations: `docs/SECURITY_RUNBOOK.md` §7. After deploying, delete the two old variables from Railway.
+
+
+## 42. Account-security hardening: single-role gates, step-up, staff session limits, login throttling, 2026-10-05
+
+Follows a review of how roles and sign-in work. Two phases.
+
+**Phase A: small hardening**
+- `requirePatient` / `requireNurse` / `requireDoctor` admit only their own role. Admins used to pass all three, which contradicted §38's separation of duties.
+- Password-reset and email-verification tokens are stored as SHA-256 hashes (`services/oneTimeTokens.ts`); verification links now expire after 24 hours.
+- Changing the sign-in email needs the current password (and a 2FA code if enabled), signs out other devices, un-verifies the address and notifies the old one (`services/reauth.ts`).
+- `POST /admin/reset-trial-data` is refused in production unless `ALLOW_TRIAL_DATA_RESET=true`.
+
+**Phase B: staff sessions, step-up, throttling**
+- **Step-up (`middleware/stepUp.ts`).** Sensitive actions need an authenticator (or backup) code entered in the last `STEP_UP_WINDOW_MINUTES` (5), via `POST /auth/2fa/step-up`. Without it the route answers `403 STEP_UP_REQUIRED` and the web app prompts for the code, then retries. Covered: creating or resending staff invites, reactivating an account (suspending stays one click), verifying HPCSA / overriding SANC, resetting someone's 2FA, admin grants of patient access, break-glass access, refunds, trial-data reset. The window is stored on the user (`stepUpVerifiedAt`) and read from the database, never from the auth cache.
+- **Staff session limits (`services/sessionPolicy.ts`).** Staff access tokens last 5 minutes (`STAFF_ACCESS_TOKEN_MINUTES`); a session can't be refreshed after 15 idle minutes (`STAFF_SESSION_IDLE_MINUTES`) or 12 hours in total (`STAFF_SESSION_MAX_HOURS`). The refresh token carries the original sign-in time (`authTime`) through every rotation. Idle time is measured at refresh from the token's age, so there's no write on every request; effective idle limit is 10-15 minutes. Patients keep 15 minute / 7 day sessions. Refresh now takes the role from the database, not the old token.
+- **Login throttling (`services/loginThrottle.ts`).** Failures are counted per account + IP (5, then 15 minutes' block) and per account across all IPs (25). The owner on another IP isn't locked out by someone guessing, and tripping the account-wide lock takes five times the effort the old email-only counter did. The counters fall back to in-process memory with a 300 ms Redis deadline if Redis is down, instead of failing open. 2FA-code attempts use the same helper. A correct password clears only that IP's counter.
+
+**Not done (decision needed):** splitting the admin role (credential verifier vs access administrator) or requiring a second admin's approval for 2FA resets and long grants; per-code replay protection for TOTP; device / IP allowlisting for admins.
+
+**Operations:** run migrations `20261005120000_hash_one_time_tokens` (clears outstanding reset/verification tokens) and `20261005130000_add_step_up_verified_at`. Staff are signed out on deploy: the new refresh token carries `authTime`; old ones without it are treated as having started when issued. Tests: `accountSecurity`, `stepUp` (integration), `sessionPolicy`, `loginThrottle` (unit).
+
+
+## 43. Sign in with Google for patients, 2026-10-05
+
+Patients can sign in or sign up with Google. Staff cannot, ever. The feature is **off until `GOOGLE_CLIENT_ID` is set**: the endpoints answer 404 and the sign-in page shows no button.
+
+**Flow.** The page loads Google's sign-in button, asks `POST /auth/google/nonce` for a nonce (also set as an httpOnly cookie) and passes it to Google. Google returns an ID token; the page POSTs it to `POST /auth/google`. The server verifies it with Google's library (`services/googleIdentity.ts`: signature, expiry, issuer, audience = our client id) and checks the token's nonce equals the cookie's, so a token can't be injected into someone else's browser. No client secret is needed.
+
+**Rules (`routes/googleAuth.ts`).**
+1. Identities are matched on Google's stable `sub`, stored in `auth_identities`, never on email. The email must be verified by Google.
+2. **Staff are excluded.** A Google email belonging to a nurse, doctor or admin is refused (`GOOGLE_NOT_AVAILABLE`), and an identity pointing at a non-patient is refused too. New accounts are always `PATIENT`; the role never comes from the client.
+3. **No silent merge.** If the email already has a patient account, the server answers `linkRequired` with a 10-minute link token. Nothing is linked and no session starts until the patient proves that account's password (and a 2FA code if they've turned 2FA on) at `POST /auth/google/link`. That blocks pre-hijacking (someone registering a victim's email beforehand) and email-claim tricks. Password guessing there shares the login throttle.
+4. A patient who has opted into 2FA still gets the 2FA step after Google.
+5. A new Google-only patient has no password (`passwordHash` null); they're verified because Google verified the email. Unlinking needs the password and is refused when none exists, so nobody locks themselves out. Linking and unlinking are audited and emailed to the account.
+6. Sign-ins are audited with `method: google`.
+
+**Setup (when you have the credential).**
+1. Google Cloud console → create/choose a project → *APIs & Services → OAuth consent screen* (External, add app name, support email, privacy-policy and terms links, authorised domain).
+2. *Credentials → Create credentials → OAuth client ID → Web application*. Under **Authorised JavaScript origins** add every frontend origin (e.g. `https://app.ahavaon88.co.za`, and `http://localhost:3000` for development). No redirect URI is needed for the button flow.
+3. Set `GOOGLE_CLIENT_ID=<the client id>` on the **backend** service (comma-separate extra ids for Android/iOS). Redeploy. The button appears on sign-in and sign-up.
+4. Run migration `20261005140000_add_auth_identities`.
+
+**Known limits / next steps.**
+- Linking starts from the sign-in page (same email). The profile page shows status and unlinks, but doesn't start a link, so a signed-in patient can't be switched onto a different account by pressing the button.
+- The Capacitor mobile apps: Google refuses its sign-in inside embedded web views, so the button won't work in the app shell. The backend already accepts native ID tokens (add the Android/iOS client ids to `GOOGLE_CLIENT_ID`), but the app needs a native Google plugin and a way to pass the nonce; not built.
+- Sign in with Apple is not built (required on iOS if Google is offered in the iOS app).
+- Phone verification before a first booking is not built (no SMS provider yet).
+- New Google patients don't tick the terms checkbox; the sign-in page links the terms and privacy policy, but confirm with your information officer that this is enough consent for POPIA.

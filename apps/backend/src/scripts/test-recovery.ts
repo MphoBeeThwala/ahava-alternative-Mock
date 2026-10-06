@@ -2,6 +2,7 @@ import * as bcrypt from '@node-rs/bcrypt';
 import crypto from 'crypto';
 import 'dotenv/config';
 import prisma from '../lib/prisma';
+import { hashOneTimeToken } from '../services/oneTimeTokens';
 
 async function testRecoveryFlow() {
   const testEmail = 'themol581@gmail.com';
@@ -24,7 +25,7 @@ async function testRecoveryFlow() {
 
     await prisma.user.update({
       where: { id: user.id },
-      data: { passwordResetToken: token, passwordResetExpiry: expiry },
+      data: { passwordResetToken: hashOneTimeToken(token), passwordResetExpiry: expiry },
     });
     console.log(`✅ Token generated: ${token.slice(0, 10)}...`);
 
@@ -32,7 +33,7 @@ async function testRecoveryFlow() {
     console.log('STEP 2: Verifying token and updating password...');
     const verifyingUser = await prisma.user.findFirst({
       where: {
-        passwordResetToken: token,
+        passwordResetToken: hashOneTimeToken(token),
         passwordResetExpiry: { gt: new Date() },
       },
     });

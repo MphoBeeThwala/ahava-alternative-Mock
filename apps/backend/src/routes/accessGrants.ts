@@ -9,6 +9,7 @@ import { Router } from 'express';
 import Joi from 'joi';
 import { AccessGrantReason, UserRole } from '@prisma/client';
 import { AuthenticatedRequest, requireAdmin, requireRole } from '../middleware/auth';
+import { requireRecentStepUp } from '../middleware/stepUp';
 import { writeRequestAudit } from '../services/clinicalAudit';
 import { notifyEmergencyAccess } from '../services/notifications';
 import {
@@ -107,7 +108,7 @@ const breakGlassSchema = Joi.object({
     .messages({ 'string.min': 'Explain the emergency (at least 20 characters). This is reviewed by an administrator.' }),
 });
 
-router.post('/break-glass', requireVerifiedClinician(), async (req: AuthenticatedRequest, res, next) => {
+router.post('/break-glass', requireVerifiedClinician(), requireRecentStepUp, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { error, value } = breakGlassSchema.validate(req.body);
     if (error) return res.status(400).json({ error: error.details[0].message });
@@ -217,7 +218,7 @@ const adminGrantSchema = Joi.object({
   justification: Joi.string().trim().min(10).max(2000).required(),
 });
 
-router.post('/', requireAdmin, async (req: AuthenticatedRequest, res, next) => {
+router.post('/', requireAdmin, requireRecentStepUp, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { error, value } = adminGrantSchema.validate(req.body);
     if (error) return res.status(400).json({ error: error.details[0].message });

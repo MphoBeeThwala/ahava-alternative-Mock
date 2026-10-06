@@ -15,6 +15,15 @@ import { addEmailJob } from "../services/queue";
 import { isMfaRequired } from "../services/mfaPolicy";
 import { auditSignIn } from "../services/signInAudit";
 import { revokeAllSessions } from "../services/sessions";
+import {
+  EMAIL_VERIFICATION_TTL_MS,
+  PASSWORD_RESET_TTL_MS,
+  hashOneTimeToken,
+  newOneTimeToken,
+} from "../services/oneTimeTokens";
+import { verifyReauthentication } from "../services/reauth";
+import { accessTokenSecondsFor, refreshRefusal } from "../services/sessionPolicy";
+import { checkLoginAllowed, clearLoginFailures, recordLoginFailure } from "../services/loginThrottle";
 import { consumeInvite, findUsableInvite, isStaffInviteRequired } from "../services/staffInvites";
 import { writeRequestAudit } from "../services/clinicalAudit";
 import prisma, { TransactionClient } from "../lib/prisma";
@@ -45,60 +54,6 @@ export const passwordComplexitySchema = Joi.string()
     "string.pattern.name": "Password must contain at least one {#name}",
     "string.min": "Password must be at least 8 characters",
   });
-
-// ---------------------------------------------------------------------------
-// Account lockout helpers (Redis-backed, graceful fallback if Redis is down)
-// ---------------------------------------------------------------------------
-const LOCKOUT_MAX_ATTEMPTS = parseInt(
-  process.env.AUTH_LOCKOUT_MAX_ATTEMPTS ?? "5",
-  10,
-);
-const LOCKOUT_TTL_SECONDS = parseInt(
-  process.env.AUTH_LOCKOUT_TTL_SECONDS ?? "900",
-  10,
-); // 15 min
-
-async function isAccountLocked(
-  email: string,
-): Promise<{ locked: boolean; remainingSeconds?: number }> {
-  try {
-    const redis = getRedis();
-    const ttl = await redis.ttl(`auth:locked:${email}`);
-    if (ttl > 0) return { locked: true, remainingSeconds: ttl };
-  } catch {
-    // Redis unavailable — fail open (do not block healthcare login)
-    console.warn("[auth] Redis unavailable for lockout check, failing open");
-  }
-  return { locked: false };
-}
-
-async function recordFailedAttempt(email: string): Promise<void> {
-  try {
-    const redis = getRedis();
-    const key = `auth:failures:${email}`;
-    const attempts = await redis.incr(key);
-    // Reset window on first attempt
-    if (attempts === 1) await redis.expire(key, LOCKOUT_TTL_SECONDS);
-    if (attempts >= LOCKOUT_MAX_ATTEMPTS) {
-      await redis.set(`auth:locked:${email}`, "1", "EX", LOCKOUT_TTL_SECONDS);
-      await redis.del(key);
-      console.warn(
-        `[auth] Account locked after ${LOCKOUT_MAX_ATTEMPTS} failed attempts: ${email}`,
-      );
-    }
-  } catch {
-    console.warn("[auth] Redis unavailable for failure tracking");
-  }
-}
-
-async function clearFailedAttempts(email: string): Promise<void> {
-  try {
-    const redis = getRedis();
-    await redis.del(`auth:failures:${email}`);
-  } catch {
-    // Non-fatal
-  }
-}
 
 // Validation schemas
 const registerSchema = Joi.object({
@@ -161,7 +116,7 @@ function shouldExposeTokens(req: Request): boolean {
   return req.get("X-Ahava-Auth-Mode") !== "cookie";
 }
 
-function buildAuthResponse<
+export function buildAuthResponse<
   TPayload extends Record<string, unknown>,
 >(
   req: Request,
@@ -222,11 +177,15 @@ async function setRefreshReplayTokens(
   }
 }
 
-function createSignedTokens(userId: string, role: string): SignedTokens {
-  const accessExpiry = Math.max(
-    60,
-    process.env.JWT_EXPIRES_IN ? parseExpiry(process.env.JWT_EXPIRES_IN) : 900,
-  ); // 15m default
+function createSignedTokens(userId: string, role: string, authTime?: number): SignedTokens {
+  // Staff get a shorter access token (services/sessionPolicy.ts).
+  const accessExpiry = accessTokenSecondsFor(
+    role,
+    Math.max(60, process.env.JWT_EXPIRES_IN ? parseExpiry(process.env.JWT_EXPIRES_IN) : 900), // 15m default
+  );
+  // When the sign-in that started this session happened. A refresh passes the
+  // original value through, so the absolute staff session limit holds.
+  const sessionStart = authTime ?? Math.floor(Date.now() / 1000);
   const refreshExpiry = process.env.REFRESH_TOKEN_EXPIRES_IN
     ? parseExpiry(process.env.REFRESH_TOKEN_EXPIRES_IN)
     : 604800; // 7d
@@ -237,7 +196,7 @@ function createSignedTokens(userId: string, role: string): SignedTokens {
     { expiresInSeconds: accessExpiry },
   );
   const refreshToken = signToken(
-    { userId, role, typ: "refresh" },
+    { userId, role, typ: "refresh", authTime: sessionStart },
     { expiresInSeconds: refreshExpiry, jwtid: crypto.randomUUID() },
   );
   const refreshTokenHash = hashRefreshToken(refreshToken);
@@ -269,6 +228,7 @@ async function rotateRefreshToken(
   oldTokenHash: string,
   userId: string,
   role: string,
+  authTime?: number,
 ): Promise<SignedTokens | null> {
   return prisma.$transaction(async (tx) => {
     const deleted = await tx.refreshToken.deleteMany({
@@ -279,7 +239,7 @@ async function rotateRefreshToken(
       return null;
     }
 
-    const signedTokens = createSignedTokens(userId, role);
+    const signedTokens = createSignedTokens(userId, role, authTime);
     await storeRefreshToken(
       tx,
       userId,
@@ -421,10 +381,13 @@ router.post("/register", authRateLimiter, async (req, res, next) => {
     // Not needed when the account came from an emailed invite.
     if (!invite) {
       try {
-        const verificationToken = crypto.randomBytes(32).toString("hex");
+        const { token: verificationToken, tokenHash } = newOneTimeToken();
         await prisma.user.update({
           where: { id: user.id },
-          data: { emailVerificationToken: verificationToken },
+          data: {
+            emailVerificationToken: tokenHash,
+            emailVerificationExpiry: new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS),
+          },
         });
         const frontendBase = (
           process.env.FRONTEND_URL ?? "https://app.ahavaon88.co.za"
@@ -550,14 +513,15 @@ router.post("/login", authRateLimiter, async (req, res, next) => {
 
     const { email, password } = value;
 
-    // Check account lockout before doing any DB work
-    const lockStatus = await isAccountLocked(email);
-    if (lockStatus.locked) {
-      const minutes = Math.ceil(
-        (lockStatus.remainingSeconds ?? LOCKOUT_TTL_SECONDS) / 60,
-      );
+    // Check throttling before doing any DB work
+    const ip = req.ip ?? "";
+    const block = await checkLoginAllowed(email, ip);
+    if (block.blocked) {
+      const minutes = Math.ceil(block.retryAfterSeconds / 60);
+      res.set("Retry-After", String(block.retryAfterSeconds));
       return res.status(429).json({
-        error: `Account temporarily locked due to too many failed login attempts. Try again in ${minutes} minute${minutes !== 1 ? "s" : ""}.`,
+        error: `Too many failed login attempts. Try again in ${minutes} minute${minutes !== 1 ? "s" : ""}.`,
+        code: "LOGIN_THROTTLED",
       });
     }
 
@@ -568,7 +532,7 @@ router.post("/login", authRateLimiter, async (req, res, next) => {
 
     if (!user || !user.passwordHash) {
       // Still record attempt to prevent email enumeration timing attacks
-      await recordFailedAttempt(email);
+      await recordLoginFailure(email, ip);
       await auditSignIn(req, "LOGIN_FAILED", null, { email, reason: "unknown_account" });
       return res.status(401).json({ error: "Invalid credentials" });
     }
@@ -576,7 +540,7 @@ router.post("/login", authRateLimiter, async (req, res, next) => {
     // Verify password
     const isValidPassword = await bcrypt.compare(password, user.passwordHash);
     if (!isValidPassword) {
-      await recordFailedAttempt(email);
+      await recordLoginFailure(email, ip);
       await auditSignIn(req, "LOGIN_FAILED", user, { reason: "bad_password" });
       return res.status(401).json({ error: "Invalid credentials" });
     }
@@ -587,7 +551,7 @@ router.post("/login", authRateLimiter, async (req, res, next) => {
     }
 
     // Successful login — clear any failure counter
-    await clearFailedAttempts(email);
+    await clearLoginFailures(email, ip);
 
     // AH-29: opt-in 2FA. Password alone is not enough for an account with it
     // enabled — issue a short-lived "twofa_pending" token (a distinct JWT
@@ -659,7 +623,7 @@ router.post("/refresh", async (req, res, next) => {
     // Verify refresh token. `verifyToken` rejects an access token or a
     // WebSocket ticket presented here, even though all three are signed
     // with the same secret.
-    let decoded: { userId: string; role: string };
+    let decoded: { userId: string; role: string; iat?: number; authTime?: number };
     try {
       decoded = verifyToken(refreshToken, "refresh");
     } catch (verifyError) {
@@ -722,10 +686,28 @@ router.post("/refresh", async (req, res, next) => {
       return res.status(401).json({ error: "Account is deactivated" });
     }
 
+    // Staff sessions end after a short idle period and after an absolute
+    // lifetime (services/sessionPolicy.ts). The role comes from the database,
+    // not the token, so a role change is not carried forward by a refresh.
+    const refusal = refreshRefusal(tokenRecord.user.role, decoded.iat, decoded.authTime);
+    if (refusal) {
+      await prisma.refreshToken.deleteMany({ where: { token: tokenHash } }).catch(() => {});
+      try { await getRedis().del(`refresh:${tokenHash}`); } catch { /* the database delete above is what revokes */ }
+      clearAuthCookies(res, req);
+      await auditSignIn(req, "SESSION_EXPIRED", tokenRecord.user, { reason: refusal });
+      return res.status(401).json({
+        error: refusal === "SESSION_IDLE_TIMEOUT"
+          ? "You were signed out after a period of inactivity. Please sign in again."
+          : "Your session has reached its time limit. Please sign in again.",
+        code: refusal,
+      });
+    }
+
     const rotatedTokens = await rotateRefreshToken(
       tokenHash,
       tokenRecord.user.id,
-      decoded.role || tokenRecord.user.role,
+      tokenRecord.user.role,
+      decoded.authTime ?? decoded.iat,
     );
 
     if (!rotatedTokens) {
@@ -898,6 +880,11 @@ router.put(
           .allow(null),
         preferredLanguage: Joi.string().max(10).allow(null),
         email: emailSchema.optional(),
+        // Step-up proof, required only when the email address changes.
+        currentPassword: Joi.string().max(200).optional(),
+        code: Joi.alternatives()
+          .try(Joi.string().pattern(/^\d{6}$/), Joi.string().pattern(/^[0-9A-F]{5}-[0-9A-F]{5}$/i))
+          .optional(),
       }).validate(req.body);
       if (error)
         return res.status(400).json({ error: error.details[0].message });
@@ -922,6 +909,7 @@ router.put(
         updateData.preferredLanguage = value.preferredLanguage;
 
       let emailChanged = false;
+      let previousEmail: string | null = null;
       if (
         value.email &&
         value.email.toLowerCase() !== currentUser.email.toLowerCase()
@@ -929,16 +917,31 @@ router.put(
         const taken = await prisma.user.findUnique({
           where: { email: value.email.toLowerCase() },
         });
+        // The sign-in email is also where password-reset links go, so changing
+        // it is an account-takeover step: a stolen session alone isn't enough.
+        const reauth = await verifyReauthentication(userId, {
+          currentPassword: value.currentPassword,
+          code: value.code,
+        });
+        if (!reauth.ok) {
+          await writeRequestAudit({
+            userId, userRole: req.user!.role, action: "EMAIL_CHANGE_FAILED", resource: "Auth", resourceId: userId,
+            metadata: { reason: reauth.code }, ipAddress: req.ip, userAgent: req.get("User-Agent"),
+          });
+          return res.status(reauth.status).json({ error: reauth.error, code: reauth.code });
+        }
         if (taken)
           return res
             .status(409)
             .json({ error: "That email address is already in use." });
+        previousEmail = currentUser.email;
         updateData.email = value.email.toLowerCase();
         updateData.isVerified = false;
         emailChanged = true;
         try {
-          const verificationToken = crypto.randomBytes(32).toString("hex");
-          (updateData as any).emailVerificationToken = verificationToken;
+          const { token: verificationToken, tokenHash } = newOneTimeToken();
+          updateData.emailVerificationToken = tokenHash;
+          updateData.emailVerificationExpiry = new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS);
           const verifyUrl = `${process.env.FRONTEND_URL ?? ""}/auth/verify-email?token=${verificationToken}`;
           addEmailJob({
             to: value.email.toLowerCase(),
@@ -968,6 +971,20 @@ router.put(
       });
       await invalidateCachedUser(userId);
 
+      if (emailChanged && previousEmail) {
+        // Sign out every other device (this one gets fresh tokens), audit it,
+        // and tell the old address so an unexpected change is noticed.
+        await revokeAllSessions(userId);
+        const { accessToken, refreshToken } = await generateTokens(userId, updated.role);
+        setAuthCookies(res, req, { accessToken, refreshToken });
+        await writeRequestAudit({
+          userId, userRole: updated.role, action: "EMAIL_CHANGED", resource: "Auth", resourceId: userId,
+          metadata: { otherSessionsSignedOut: true }, ipAddress: req.ip, userAgent: req.get("User-Agent"),
+        });
+        notifyEmailChanged(previousEmail, updated.firstName, updated.email);
+        return res.json(buildAuthResponse(req, { success: true, user: updated, emailChanged }, { accessToken, refreshToken }));
+      }
+
       res.json({ success: true, user: updated, emailChanged });
     } catch (error) {
       return next(error);
@@ -995,12 +1012,12 @@ router.post("/forgot-password", authRateLimiter, async (req, res, next) => {
         message: "If that email exists, a reset link has been sent.",
       });
 
-    const token = crypto.randomBytes(32).toString("hex");
-    const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    const { token, tokenHash } = newOneTimeToken();
+    const expiry = new Date(Date.now() + PASSWORD_RESET_TTL_MS);
 
     await prisma.user.update({
       where: { id: user.id },
-      data: { passwordResetToken: token, passwordResetExpiry: expiry },
+      data: { passwordResetToken: tokenHash, passwordResetExpiry: expiry },
     });
 
     const resetUrl = `${process.env.FRONTEND_URL ?? ""}/auth/reset-password?token=${token}`;
@@ -1032,7 +1049,7 @@ router.post("/reset-password", authRateLimiter, async (req, res, next) => {
 
     const user = await prisma.user.findFirst({
       where: {
-        passwordResetToken: value.token,
+        passwordResetToken: hashOneTimeToken(value.token),
         passwordResetExpiry: { gt: new Date() },
       },
     });
@@ -1121,6 +1138,17 @@ router.post("/change-password", authMiddleware, authRateLimiter, async (req: Aut
   }
 });
 
+/** Best-effort notice to the OLD address that the sign-in email changed — the cue for someone who didn't do it. */
+function notifyEmailChanged(oldEmail: string, firstName: string, newEmail: string) {
+  const safeName = firstName.replace(/[<>&"]/g, "");
+  const masked = newEmail.replace(/^(.).*(@.*)$/, "$1***$2");
+  addEmailJob({
+    to: oldEmail,
+    subject: "Your Ahava Healthcare sign-in email was changed",
+    html: `<p>Hi ${safeName},</p><p>The sign-in email for your Ahava Healthcare account was just changed to <strong>${masked}</strong>, and all other devices were signed out.</p><p><strong>If this wasn't you</strong>, contact support immediately and reset your password.</p>`,
+  }).catch((err) => console.warn("[auth] email-changed notice failed:", (err as Error)?.message ?? err));
+}
+
 /** Best-effort "your password changed" email — the cue for someone who didn't do it. */
 function notifyPasswordChanged(email: string, firstName: string, kind: "change" | "reset") {
   const safeName = firstName.replace(/[<>&"]/g, "");
@@ -1141,7 +1169,10 @@ router.get("/verify-email", async (req, res, next) => {
       return res.status(400).json({ error: "Verification token missing." });
 
     const user = await prisma.user.findFirst({
-      where: { emailVerificationToken: token },
+      where: {
+        emailVerificationToken: hashOneTimeToken(token),
+        emailVerificationExpiry: { gt: new Date() },
+      },
     });
 
     if (!user)
@@ -1151,7 +1182,7 @@ router.get("/verify-email", async (req, res, next) => {
 
     await prisma.user.update({
       where: { id: user.id },
-      data: { isVerified: true, emailVerificationToken: null },
+      data: { isVerified: true, emailVerificationToken: null, emailVerificationExpiry: null },
     });
 
     res.json({ success: true, message: "Email verified successfully." });
@@ -1179,10 +1210,13 @@ router.post("/resend-verification", authRateLimiter, async (req, res, next) => {
         message: "If applicable, a verification email has been sent.",
       });
 
-    const token = crypto.randomBytes(32).toString("hex");
+    const { token, tokenHash } = newOneTimeToken();
     await prisma.user.update({
       where: { id: user.id },
-      data: { emailVerificationToken: token },
+      data: {
+        emailVerificationToken: tokenHash,
+        emailVerificationExpiry: new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS),
+      },
     });
 
     const verifyUrl = `${process.env.FRONTEND_URL ?? ""}/auth/verify-email?token=${token}`;
@@ -1221,7 +1255,7 @@ router.post(
       const userId = req.user!.id;
       await prisma.user.update({
         where: { id: userId },
-        data: { isVerified: true, emailVerificationToken: null },
+        data: { isVerified: true, emailVerificationToken: null, emailVerificationExpiry: null },
       });
       return res.json({ success: true, message: "Account manually verified." });
     } catch (error) {

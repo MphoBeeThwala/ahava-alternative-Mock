@@ -8,7 +8,9 @@ import { hashValue, writeRequestAudit } from './clinicalAudit';
  * reconstructing it from other activity (docs/SECURITY_RUNBOOK.md §0).
  * Unknown emails are stored hashed, never in clear.
  */
-export type SignInEvent = 'LOGIN_SUCCESS' | 'LOGIN_FAILED' | 'LOGIN_2FA_PENDING' | 'LOGIN_2FA_FAILED';
+export type SignInEvent =
+  | 'LOGIN_SUCCESS' | 'LOGIN_FAILED' | 'LOGIN_2FA_PENDING' | 'LOGIN_2FA_FAILED'
+  | 'SESSION_EXPIRED' | 'STEP_UP_SUCCESS' | 'STEP_UP_FAILED';
 
 export async function auditSignIn(
   req: Request,

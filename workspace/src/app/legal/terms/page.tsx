@@ -62,7 +62,7 @@ export default function TermsOfServicePage() {
           <p>We may update these Terms from time to time. We will notify you by email of material changes. Continued use of the Platform after notification constitutes acceptance.</p>
 
           <h2 style={{ fontSize: 20, fontWeight: 800, color: "#0f172a" }}>13. Contact</h2>
-          <p>For questions about these Terms, contact us at: <strong>legal@ahavahealthcare.co.za</strong></p>
+          <p>For questions about these Terms, contact us at: <strong>legal@ahavaon88.co.za</strong></p>
 
         </div>
       </div>

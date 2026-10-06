@@ -19,8 +19,9 @@ import { authMiddleware, AuthenticatedRequest, invalidateCachedUser } from "../m
 import { authRateLimiter } from "../middleware/rateLimiter";
 import prisma from "../lib/prisma";
 import { isMfaRequired } from "../services/mfaPolicy";
+import { stepUpWindowSeconds } from "../middleware/stepUp";
 import { auditSignIn } from "../services/signInAudit";
-import { getRedis } from "../services/redis";
+import { hit, lockedSeconds, reset } from "../services/loginThrottle";
 import { verifyToken, TokenTypeError } from "../services/tokens";
 import { setAuthCookies } from "../services/authSession";
 import { generateTokens } from "./auth";
@@ -65,33 +66,19 @@ function loginVerifyLockKey(userId: string): string {
   return `auth:2fa:lockout:${userId}`;
 }
 
+// Shared with the step-up endpoint below: both are "guess a 6-digit code"
+// surfaces. Counters fall back to in-process if Redis is down rather than
+// switching off (services/loginThrottle.ts).
 async function isLoginVerifyLocked(userId: string): Promise<boolean> {
-  try {
-    const redis = getRedis();
-    const attempts = await redis.get(loginVerifyLockKey(userId));
-    return Number(attempts ?? 0) >= LOGIN_VERIFY_MAX_ATTEMPTS;
-  } catch {
-    return false;
-  }
+  return (await lockedSeconds(loginVerifyLockKey(userId), LOGIN_VERIFY_MAX_ATTEMPTS)) > 0;
 }
 
 async function recordLoginVerifyFailure(userId: string): Promise<void> {
-  try {
-    const redis = getRedis();
-    const key = loginVerifyLockKey(userId);
-    const attempts = await redis.incr(key);
-    if (attempts === 1) await redis.expire(key, LOGIN_VERIFY_LOCKOUT_SECONDS);
-  } catch {
-    /* redis unavailable — this attempt is simply not rate-limited */
-  }
+  await hit(loginVerifyLockKey(userId), LOGIN_VERIFY_MAX_ATTEMPTS, LOGIN_VERIFY_LOCKOUT_SECONDS);
 }
 
 async function clearLoginVerifyFailures(userId: string): Promise<void> {
-  try {
-    await getRedis().del(loginVerifyLockKey(userId));
-  } catch {
-    /* redis unavailable — nothing to clear */
-  }
+  await reset(loginVerifyLockKey(userId));
 }
 
 // ---------------------------------------------------------------------------
@@ -292,6 +279,53 @@ router.post("/login-verify", authRateLimiter, async (req, res, next) => {
       user: buildAuthUser(user),
       ...(req.get("X-Ahava-Auth-Mode") !== "cookie" ? { accessToken, refreshToken } : {}),
     });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/auth/2fa/step-up — prove a fresh second factor for a sensitive
+// action. Opens a short window (middleware/stepUp.ts) in which routes that
+// require recent re-authentication accept this user. The client sees
+// STEP_UP_REQUIRED, asks for a code, calls this, and retries.
+// ---------------------------------------------------------------------------
+router.post("/step-up", authMiddleware, authRateLimiter, async (req: AuthenticatedRequest, res: Response, next) => {
+  try {
+    const { error, value } = Joi.object({
+      code: Joi.alternatives().try(codeSchema, backupCodeSchema).required(),
+    }).validate(req.body);
+    if (error) return res.status(400).json({ error: error.details[0].message });
+
+    const userId = req.user!.id;
+    if (await isLoginVerifyLocked(userId)) {
+      return res.status(429).json({ error: "Too many failed codes. Try again in a few minutes.", code: "STEP_UP_THROTTLED" });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.isActive || !user.totpEnabled || !user.totpSecret) {
+      return res.status(403).json({ error: "Set up two-factor authentication first.", code: "MFA_ENROLLMENT_REQUIRED" });
+    }
+
+    const validTotp = verifyTotpCode(decryptTotpSecret(user.totpSecret, user.id), value.code);
+    let remainingBackupCodes: string[] | null = null;
+    if (!validTotp) {
+      const backup = await consumeBackupCode(value.code, user.totpBackupCodes);
+      if (!backup.matched) {
+        await recordLoginVerifyFailure(userId);
+        await auditSignIn(req, "STEP_UP_FAILED", user);
+        return res.status(401).json({ error: "Invalid code" });
+      }
+      remainingBackupCodes = backup.remaining;
+    }
+
+    await clearLoginVerifyFailures(userId);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { stepUpVerifiedAt: new Date(), ...(remainingBackupCodes ? { totpBackupCodes: remainingBackupCodes } : {}) },
+    });
+    await auditSignIn(req, "STEP_UP_SUCCESS", user, { method: remainingBackupCodes ? "backup_code" : "totp" });
+    return res.json({ success: true, validForSeconds: stepUpWindowSeconds() });
   } catch (error) {
     return next(error);
   }

@@ -5,6 +5,7 @@
 import request from "supertest";
 import { app } from "../index";
 import prisma from "../lib/prisma";
+import * as queue from "../services/queue";
 
 const OLD = "Str0ng!Passw0rd";
 const NEW = "N3w!Passw0rd-2026";
@@ -45,10 +46,14 @@ describe("changing a password while signed in", () => {
 describe("resetting a forgotten password", () => {
   it("signs out every existing session (it used to leave them running)", async () => {
     const { email, userId, device1, device2 } = await registerPatient("pw-reset");
+    // The token is only ever in the emailed link — the database holds its hash.
+    const emailSpy = jest.spyOn(queue, "addEmailJob").mockResolvedValue(undefined as never);
     await request(app).post("/api/v1/auth/forgot-password").send({ email });
-    const { passwordResetToken } = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    const link = String(emailSpy.mock.calls[0][0].text ?? emailSpy.mock.calls[0][0].html);
+    const token = /token=([0-9a-f]{64})/.exec(link)![1];
+    emailSpy.mockRestore();
 
-    const res = await request(app).post("/api/v1/auth/reset-password").send({ token: passwordResetToken, password: NEW });
+    const res = await request(app).post("/api/v1/auth/reset-password").send({ token, password: NEW });
 
     expect(res.status).toBe(200);
     expect((await device1.post("/api/v1/auth/refresh").send({})).status).toBe(401);

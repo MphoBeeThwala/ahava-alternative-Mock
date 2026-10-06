@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth, TwoFactorRequiredError } from '../../../contexts/AuthContext';
+import GoogleSignInButton from '../../../components/GoogleSignInButton';
 
 export default function LoginPage() {
     const router = useRouter();
@@ -15,6 +16,14 @@ export default function LoginPage() {
     // AH-29: set once the account turns out to have opt-in 2FA enabled.
     const [pendingToken, setPendingToken] = useState<string | null>(null);
     const [twoFactorCode, setTwoFactorCode] = useState('');
+    // Why the person landed here: staff sessions end after inactivity or a time limit.
+    const [notice, setNotice] = useState('');
+
+    React.useEffect(() => {
+        const reason = new URLSearchParams(window.location.search).get('reason');
+        if (reason === 'idle') setNotice('You were signed out after a period of inactivity. Please sign in again.');
+        else if (reason === 'expired') setNotice('Your session reached its time limit. Please sign in again.');
+    }, []);
 
     // Redirect if already authenticated
     React.useEffect(() => {
@@ -143,6 +152,12 @@ export default function LoginPage() {
                         </p>
                     </div>
 
+                    {notice && !error && (
+                        <div role="status" style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: '12px 16px', marginBottom: 20, color: '#1d4ed8', fontSize: 13 }}>
+                            {notice}
+                        </div>
+                    )}
+
                     {error && (
                         <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
                             <span style={{ color: '#ef4444', fontSize: 16, flexShrink: 0 }}>⚠</span>
@@ -229,6 +244,16 @@ export default function LoginPage() {
                                 {loading ? 'Signing in…' : 'Sign In →'}
                             </button>
                         </form>
+                    )}
+
+                    {!pendingToken && (
+                        <div style={{ marginTop: 22 }}>
+                            <GoogleSignInButton
+                                onSignedIn={redirectAfterLogin}
+                                onTwoFactor={(token) => setPendingToken(token)}
+                                onError={setError}
+                            />
+                        </div>
                     )}
 
                     <p style={{ textAlign: 'center', marginTop: 28, fontSize: 13, color: '#57534e' }}>

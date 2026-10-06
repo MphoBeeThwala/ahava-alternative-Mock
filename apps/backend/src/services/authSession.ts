@@ -78,6 +78,21 @@ function getCookieOptions(req?: Pick<Request, "headers">) {
   } as const;
 }
 
+/** A short-lived httpOnly cookie (e.g. the Google sign-in nonce), with the same flags as the session cookies. */
+export function setTransientCookie(
+  res: Response,
+  req: Pick<Request, "headers"> | undefined,
+  name: string,
+  value: string,
+  ttlMs: number,
+): void {
+  res.cookie(name, value, { ...getCookieOptions(req), maxAge: ttlMs });
+}
+
+export function clearTransientCookie(res: Response, req: Pick<Request, "headers"> | undefined, name: string): void {
+  res.clearCookie(name, getCookieOptions(req));
+}
+
 export function getAccessTokenTtlMs(): number {
   const seconds = process.env.JWT_EXPIRES_IN
     ? parseExpiry(process.env.JWT_EXPIRES_IN, 900)

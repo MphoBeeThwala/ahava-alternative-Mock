@@ -5,6 +5,7 @@ import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 import prisma from '../lib/prisma';
 import { UserRole } from '@prisma/client';
 import { AuthenticatedRequest, authMiddleware, requireAdmin } from '../middleware/auth';
+import { requireRecentStepUp } from '../middleware/stepUp';
 
 const router: Router = Router();
 const payfast = new PayFastService();
@@ -262,7 +263,7 @@ router.get('/:id/status', authMiddleware, async (req: AuthenticatedRequest, res)
 // without app-level auth (the ITN webhook cannot present a JWT). Without it,
 // requireAdmin saw no req.user and this endpoint answered 401 to everyone,
 // including admins.
-router.post('/:id/refund', authMiddleware, requireAdmin, async (req: AuthenticatedRequest, res) => {
+router.post('/:id/refund', authMiddleware, requireAdmin, requireRecentStepUp, async (req: AuthenticatedRequest, res) => {
   try {
     const payment = await prisma.payment.findUnique({ where: { id: req.params.id } });
     if (!payment) return res.status(404).json({ error: 'Payment not found' });
