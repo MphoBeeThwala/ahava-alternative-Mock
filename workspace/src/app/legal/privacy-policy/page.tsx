@@ -94,7 +94,7 @@ export default function PrivacyPolicyPage() {
           <p>We use essential cookies for authentication sessions and to secure the sign-in process. We do not use tracking or advertising cookies. If you use Sign in with Google, Google may set its own cookies on its sign-in button; those are governed by Google&rsquo;s privacy policy.</p>
 
           <h2 style={{ fontSize: 20, fontWeight: 800, color: "#0f172a" }}>12. Contact Us</h2>
-          <p>For privacy-related queries or to exercise your POPIA rights, contact our Information Officer at: <strong>privacy@ahavahealthcare.co.za</strong></p>
+          <p>For privacy-related queries or to exercise your POPIA rights, contact our Information Officer at: <strong>privacy@ahavaon88.co.za</strong></p>
 
         </div>
       </div>
