@@ -122,6 +122,7 @@ describe('ResearchStatusCard', () => {
   const status = {
     captureEnabled: true, consentVersion: '1.0', consentedPatients: 12, snapshots: 340, subjectsWithSnapshots: 10,
     outcomes: { TRIAGE_REVIEWED: 8, CVD_EVENT: 1 }, shadowPredictions: [],
+    retention: { maxYears: 7, inactiveMonths: 24, lastRunAt: '2026-10-06T03:00:00Z' },
     outcomesRecordedByClinicianLast90Days: [{ clinicianId: 'd1', name: 'Dr Example', count: 4 }],
     firstObservedDay: '2026-10-01', lastObservedDay: '2026-10-06',
   };
@@ -134,6 +135,24 @@ describe('ResearchStatusCard', () => {
     expect(card).toHaveTextContent('12 patients have opted in');
     expect(card).toHaveTextContent('AI vs doctor triage reviews: 8');
     expect(card).toHaveTextContent('Dr Example: 4');
+  });
+
+  it('shows the retention policy in force and when it last ran', async () => {
+    getResearchStatus.mockResolvedValue(status);
+    render(<ResearchStatusCard />);
+    const line = await screen.findByTestId('research-retention');
+    expect(line).toHaveTextContent('kept for 7 years');
+    expect(line).toHaveTextContent('nothing new for 24 months are removed');
+    expect(line).not.toHaveTextContent('not yet');
+  });
+
+  it('says so when a retention rule is switched off or has never run', async () => {
+    getResearchStatus.mockResolvedValue({ ...status, retention: { maxYears: null, inactiveMonths: null, lastRunAt: null } });
+    render(<ResearchStatusCard />);
+    const line = await screen.findByTestId('research-retention');
+    expect(line).toHaveTextContent('unlimited number of years');
+    expect(line).toHaveTextContent('not yet');
+    expect(line).not.toHaveTextContent('are removed');
   });
 
   it('says plainly when capture is off and why', async () => {

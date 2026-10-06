@@ -84,6 +84,8 @@ export interface ResearchStatus {
   outcomes: Record<string, number>;
   shadowPredictions: Array<{ model: string; version: string; count: number }>;
   outcomesRecordedByClinicianLast90Days: Array<{ clinicianId: string; name: string; count: number }>;
+  /** null for a rule means it is switched off. */
+  retention: { maxYears: number | null; inactiveMonths: number | null; lastRunAt: string | null };
   firstObservedDay: string | null;
   lastObservedDay: string | null;
 }

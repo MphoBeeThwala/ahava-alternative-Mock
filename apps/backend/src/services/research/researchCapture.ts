@@ -13,6 +13,7 @@
  *      nothing recorded before someone agreed is ever pulled in)
  */
 import prisma from '../../lib/prisma';
+import { lastRetentionRun, retentionConfig } from './researchRetention';
 import {
   RESEARCH_CONSENT_TYPE,
   RESEARCH_CONSENT_VERSION,
@@ -372,6 +373,7 @@ export async function researchStatus() {
       .map((r) => ({ clinicianId: r.userId as string, name: nameOf.get(r.userId as string) ?? 'Unknown', count: r._count._all }))
       .sort((a, b) => b.count - a.count),
     captureEnabled: researchCaptureEnabled(),
+    retention: { ...(({ maxYears, inactiveMonths }) => ({ maxYears, inactiveMonths }))(retentionConfig()), lastRunAt: (await lastRetentionRun())?.toISOString() ?? null },
     consentVersion: RESEARCH_CONSENT_VERSION,
     consentedPatients,
     snapshots,

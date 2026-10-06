@@ -51,6 +51,11 @@ export default function ResearchStatusCard() {
       </p>
       <p style={small}><strong>{s.consentedPatients}</strong> patients have opted in · <strong>{s.subjectsWithSnapshots}</strong> have readings kept · <strong>{s.snapshots}</strong> readings in total</p>
       {s.firstObservedDay && <p style={small}>From {s.firstObservedDay} to {s.lastObservedDay}</p>}
+      <p style={small} data-testid="research-retention">
+        Retention: readings and outcomes kept for {s.retention.maxYears ?? 'an unlimited number of'} years
+        {s.retention.inactiveMonths !== null ? `; people with nothing new for ${s.retention.inactiveMonths} months are removed` : ''}.
+        {' '}Last run: {s.retention.lastRunAt ? new Date(s.retention.lastRunAt).toLocaleString('en-ZA') : 'not yet'}.
+      </p>
 
       <h4 style={{ margin: '14px 0 6px', fontSize: 13, fontWeight: 800 }}>Outcomes recorded</h4>
       {outcomes.length === 0 ? <p style={small}>None yet.</p> : (
