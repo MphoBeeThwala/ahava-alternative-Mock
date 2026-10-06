@@ -75,7 +75,24 @@ export interface AiHealth {
   providers: AiProviderHealth[];
 }
 
+export interface ResearchStatus {
+  captureEnabled: boolean;
+  consentVersion: string;
+  consentedPatients: number;
+  snapshots: number;
+  subjectsWithSnapshots: number;
+  outcomes: Record<string, number>;
+  shadowPredictions: Array<{ model: string; version: string; count: number }>;
+  outcomesRecordedByClinicianLast90Days: Array<{ clinicianId: string; name: string; count: number }>;
+  firstObservedDay: string | null;
+  lastObservedDay: string | null;
+}
+
 export const adminApi = {
+  getResearchStatus: async (): Promise<ResearchStatus> => {
+    const res = await apiClient.get('/admin/research/status');
+    return res.data.research;
+  },
   getBpFlagValidationReport: async (): Promise<BpFlagValidationReport> => {
     const res = await apiClient.get('/admin/bp-flag-validation');
     return res.data;

@@ -25,6 +25,7 @@ import { DataTable, type DataTableColumn } from '../../../components/ui/DataTabl
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { Skeleton } from '../../../components/ui/Skeleton';
 import { Modal } from '../../../components/ui/Modal';
+import ResearchConsentPrompt from '../../../components/ResearchConsentPrompt';
 import { Icon } from '../../../components/ui/Icon';
 import { enqueueBiometricReading } from '../../../lib/offlineBiometricQueue';
 import { useOfflineBiometricSync } from '../../../hooks/useOfflineBiometricSync';
@@ -287,6 +288,10 @@ export default function PatientDashboard() {
                         (lastReadingTime ? ` · last reading ${lastReadingTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : '')
                     }
                 />
+
+                {/* One-time, dismissible question for anyone who has not answered the research opt-in
+                    (Google sign-ups, accounts created by staff, and earlier sign-ups). Never a gate. */}
+                <ResearchConsentPrompt />
 
                 {/* Email verification — preserved exactly */}
                 {user && !user.isVerified && (

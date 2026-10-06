@@ -202,6 +202,8 @@ export const doctorApi = {
   },
   issuePrescription: async (caseId: string, payload: {
     diagnosis: string;
+    /** Optional coded diagnosis; helps check the AI's accuracy. */
+    icd10?: string;
     medications: { name: string; dosage: string; frequency: string; duration: string; instructions?: string }[];
     doctorNotes?: string;
   }) => {
@@ -220,6 +222,8 @@ export const doctorApi = {
   issueEmergencyReferral: async (caseId: string, payload: {
     referralType: string;
     provisionalDiagnosis: string;
+    /** Optional coded diagnosis; helps check the AI's accuracy. */
+    icd10?: string;
     clinicalNotes: string;
     recommendedFacility: string;
   }) => {

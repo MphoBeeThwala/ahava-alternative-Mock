@@ -11,6 +11,7 @@ export * from './nurse';
 export * from './doctor';
 export * from './wearables';
 export * from './consent';
+export * from './research';
 export * from './admin';
 export * from './doctorProfile';
 export * from './access';

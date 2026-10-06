@@ -1,6 +1,7 @@
 import { Modal } from '../../../../components/ui/Modal';
 import type { PrescriptionModalState } from '../_lib';
 import { blankMed } from '../_lib';
+import { Icd10Field } from '../../../../components/Icd10Field';
 
 export function PrescriptionModal({
   state,
@@ -38,6 +39,7 @@ export function PrescriptionModal({
             placeholder="Clinical diagnosis"
           />
         </div>
+        <Icd10Field value={state?.icd10 ?? ''} onChange={icd10 => state && onChange({ ...state, icd10 })} />
         <div>
           <div className="flex items-center justify-between mb-2">
             <label className="text-sm font-medium text-[var(--foreground)]">Medications <span className="text-red-500">*</span></label>
