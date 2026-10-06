@@ -1,0 +1,7 @@
+# Offline research tooling only (training, evaluation, readiness reports).
+# The live service does NOT need these: shadow scoring is numpy-only
+# (research/artifact.py), so the production image stays small and has no
+# training code path. Install where a data scientist runs `python -m research`.
+-r requirements.txt
+scikit-learn>=1.4
+scipy>=1.11
