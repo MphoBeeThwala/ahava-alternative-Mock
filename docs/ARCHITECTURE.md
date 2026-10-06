@@ -32,6 +32,7 @@ Ahava Healthcare is a full-stack healthcare platform for South Africa.
 - Location: apps/ml-service/
 - Database: TimescaleDB
 - Features: Early warning analysis, biometric anomaly detection, progressive personal baselines
+- Research (offline + silent shadow scoring): consent-gated pseudonymised capture, leak-safe training and evaluation, readiness reporting; no model runs on live cases. See docs/RESEARCH_DATA_PIPELINE.md
 
 ### Clinical Decision Support (RAG + Guardrails)
 - Grounding Source: NCBI StatPearls (with Redis caching)
