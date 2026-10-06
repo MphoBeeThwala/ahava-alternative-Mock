@@ -33,6 +33,7 @@ import rookRoutes from "./routes/rook";
 import consentRoutes from "./routes/consent";
 import healthConnectRoutes from "./routes/healthConnect";
 import doctorMonitoringRoutes from "./routes/doctorMonitoring";
+import researchOutcomeRoutes from "./routes/researchOutcomes";
 import bpValidationRoutes from "./routes/bpValidation";
 import accessGrantRoutes from "./routes/accessGrants";
 import patientRecordRoutes from "./routes/patientRecord";
@@ -50,6 +51,7 @@ import { initializeQueue, closeQueues } from "./services/queue";
 import { getWebSocketRedisHealth, initializeWebSocket } from "./services/websocket";
 import { getAiHealth } from "./services/aiHealth";
 import { startAiHealthMonitor } from "./services/aiProviders";
+import { startResearchSweepMonitor } from "./services/research/researchSweep";
 import prisma from "./lib/prisma";
 import { assertEncryptionKeyConfigured } from "./utils/encryption";
 import { loadEncryptionKeys } from "./lib/keyManagement";
@@ -239,6 +241,7 @@ app.use(`${API_V1}/terra`, terraRoutes);
 app.use(`${API_V1}/rook`, rookRoutes);
 app.use(`${API_V1}/consent`, authMiddleware, consentRoutes); // moved from /api/patient/consent to avoid prefix conflict
 app.use(`${API_V1}/doctor/monitoring`, authMiddleware, doctorMonitoringRoutes);
+app.use(`${API_V1}/research`, authMiddleware, researchOutcomeRoutes);
 app.use(`${API_V1}/access-grants`, authMiddleware, accessGrantRoutes);
 app.use(`${API_V1}/patient-records`, authMiddleware, patientRecordRoutes);
 app.use(`${API_V1}/biometrics/health-connect`, healthConnectRoutes);
@@ -352,6 +355,12 @@ async function startServer() {
   // (no tokens spent), so a dead key or retired model is found, and an
   // administrator emailed, before a patient's case hits it.
   startAiHealthMonitor();
+
+  // Research capture: sweeps consented patients' new readings into the
+  // pseudonymised research tables and scores them with any shadow model a
+  // human has approved. Off unless RESEARCH_PSEUDONYM_KEY is set. Never in the
+  // path of a clinical request. See docs/RESEARCH_DATA_PIPELINE.md.
+  startResearchSweepMonitor();
 
   // Start server
   server.listen(PORT, () => {

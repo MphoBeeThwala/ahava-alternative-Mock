@@ -25,6 +25,7 @@
     "reset:triage-cases": "tsx src/scripts/reset-triage-cases.ts",
     "encrypt:clinical-notes": "tsx src/scripts/encrypt-clinical-notes.ts",
     "ml-db-role": "tsx src/scripts/ml-db-role.ts",
+    "research-db-role": "tsx src/scripts/research-db-role.ts",
     "wrap-encryption-key": "tsx src/scripts/wrap-encryption-key.ts",
     "key-escrow": "tsx src/scripts/key-escrow.ts",
     "db:reset": "prisma migrate reset --force",

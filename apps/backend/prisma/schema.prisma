@@ -613,6 +613,124 @@ model PatientConsent {
   @@map("patient_consents")
 }
 
+// ---------------------------------------------------------------------------
+// Research data pipeline (docs/RESEARCH_DATA_PIPELINE.md)
+//
+// Pseudonymised, consent-gated, prospective-only capture that a future
+// predictive model can be trained and validated on. Nothing here is ever shown
+// to a patient or clinician, and nothing here feeds a live decision.
+//
+// These tables deliberately have NO foreign key to users: the link is
+// subjectKey = HMAC-SHA256(RESEARCH_PSEUDONYM_KEY, userId), recomputable by the
+// backend (so a withdrawal can delete a person's rows) but not reversible by
+// anyone holding only this data. No names, contact details, free text, exact
+// timestamps or locations are stored; dates are day-level, age is a 5-year band.
+// ---------------------------------------------------------------------------
+model ResearchSnapshot {
+  id             String   @id @default(cuid())
+  subjectKey     String
+  sourceRef      String   // HMAC of the source reading id; dedupe only
+  observedDay    DateTime @db.Date
+  schemaVersion  Int      @default(1)
+  consentVersion String
+
+  // Demographics (generalised)
+  ageBand        String   // "40-44"
+  sex            String?  // "male" | "female"
+
+  // Risk factors (null = unknown, never imputed at capture time)
+  smoker               Boolean?
+  diabetes             Boolean?
+  hypertensionKnown    Boolean?
+  hivPositive          Boolean?
+  activeTb             Boolean?
+  bpTreatment          Boolean?
+  totalCholesterolMmol Float?
+  hdlMmol              Float?
+
+  // Measurements
+  hrResting       Float?
+  hrvRmssd        Float?
+  spo2            Float?
+  respRate        Float?
+  skinTempOffset  Float?
+  sbp             Float?
+  dbp             Float?
+  glucose         Float?
+  bmi             Float?
+  steps           Int?
+  sleepHours      Float?
+  ecgIrregular    Boolean?
+  temperatureTrend String?
+  source          String   // "wearable" | "manual"
+
+  // What the live rules engine said at the time, kept only so a learned model
+  // can be compared against it on identical rows.
+  liveAlertLevel     String?
+  liveCvdCategory    String?
+  liveFraminghamPct  Float?
+  liveBpPrompt       Boolean?
+  liveEngineVersion  String?
+
+  createdAt      DateTime @default(now())
+
+  predictions    ResearchPrediction[]
+
+  @@unique([subjectKey, sourceRef])
+  @@index([subjectKey, observedDay])
+  @@index([observedDay])
+  @@map("research_snapshots")
+}
+
+// A shadow model's output for a snapshot. Write-only from the app's point of
+// view: no route returns these to patients or clinicians.
+model ResearchPrediction {
+  id            String   @id @default(cuid())
+  snapshotId    String
+  modelName     String
+  modelVersion  String
+  target        String
+  probability   Float
+  contributions Json?    // top feature contributions on the logit scale
+  createdAt     DateTime @default(now())
+
+  snapshot      ResearchSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@unique([snapshotId, modelName, modelVersion])
+  @@index([modelName, modelVersion])
+  @@map("research_predictions")
+}
+
+// Ground truth. Only structured values: outcome type, day, optional ICD-10
+// code and a whitelisted details object. Never free text.
+model ResearchOutcome {
+  id             String   @id @default(cuid())
+  subjectKey     String
+  sourceRef      String   // HMAC of source record id + outcome type; dedupe only
+  outcomeType    String
+  outcomeDay     DateTime @db.Date
+  icd10          String?
+  details        Json?
+  source         String   // "TRIAGE_REVIEW" | "CLINICIAN_ENTRY" | "ALERT_ADJUDICATION"
+  recordedByRole String?  // "DOCTOR" | "NURSE" | "SYSTEM"
+  consentVersion String
+  createdAt      DateTime @default(now())
+
+  @@unique([subjectKey, sourceRef])
+  @@index([subjectKey, outcomeDay])
+  @@index([outcomeType, outcomeDay])
+  @@map("research_outcomes")
+}
+
+// Progress marker for the reading sweep (services/research/researchSweep.ts).
+model ResearchCursor {
+  name      String   @id
+  value     DateTime
+  updatedAt DateTime @updatedAt
+
+  @@map("research_cursors")
+}
+
 model DoctorSession {
   id            String    @id @default(cuid())
   doctorId      String

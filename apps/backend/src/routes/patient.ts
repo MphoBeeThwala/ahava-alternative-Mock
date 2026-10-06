@@ -17,6 +17,7 @@ import { startDemoStream } from "../services/demoStream";
 import { mlServiceHeaders } from "../services/mlServiceAuth";
 import prisma from "../lib/prisma";
 import { hashValue, writeClinicalAudit } from "../services/clinicalAudit";
+import { captureReadingSnapshot } from "../services/research/researchCapture";
 
 const router: Router = Router();
 
@@ -745,6 +746,18 @@ router.get(
           persistErr.message,
         );
       }
+
+      // Research capture (docs/RESEARCH_DATA_PIPELINE.md): attaches what the
+      // rules engine concluded to this reading's research snapshot, only for
+      // patients who opted in. Fire-and-forget: it never delays or changes
+      // the response, and it swallows its own errors.
+      void captureReadingSnapshot(userId, latestReading, {
+        alertLevel: (mlData as any)?.alert_level ?? null,
+        cvdRiskCategory: (mlData as any)?.cvd_risk?.risk_category ?? null,
+        framinghamRiskPct: (mlData as any)?.framingham_lab_risk?.ten_year_risk_pct ?? null,
+        bpPromptCheck: (mlData as any)?.bp_risk?.prompt_bp_check ?? null,
+        engineVersion: (mlData as any)?.provenance?.model_version ?? null,
+      });
 
       const responseSource = String((mlData as any)?._source ?? "ml_service");
       await writeClinicalAudit({
