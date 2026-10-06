@@ -9,6 +9,8 @@ import { PageHeader } from "../../../components/ui/PageHeader";
 import { StatusBadge } from "../../../components/ui/StatusBadge";
 import { doctorApi, MonitoringWorklistPatient, UnassignedMonitoringAlert } from "../../../lib/api";
 import { useToast } from "../../../contexts/ToastContext";
+import AlertFeedback from "../../../components/AlertFeedback";
+import ClinicianResearchNotice from "../../../components/ClinicianResearchNotice";
 
 function alertVariant(level: string): "danger" | "warning" | "success" {
   if (level === "RED") return "danger";
@@ -100,6 +102,8 @@ export default function DoctorMonitoringPage() {
                 or an absolute physiological threshold — clinical correlation is recommended.
               </p>
             </div>
+
+            <ClinicianResearchNotice />
 
             {loading && (
               <div className="py-12 text-center text-[var(--muted)]">Loading monitoring worklist…</div>
@@ -228,6 +232,8 @@ export default function DoctorMonitoringPage() {
                           </span>
                         </div>
                       </div>
+
+                      <AlertFeedback patientId={p.userId} alertLevel={p.alertLevel} />
                     </div>
                   </Card>
                 ))}

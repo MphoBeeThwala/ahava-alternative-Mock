@@ -11,6 +11,7 @@ import prisma from '../../lib/prisma';
 import { RESEARCH_CONSENT_TYPE, RESEARCH_CONSENT_VERSION, getPseudonymKey, researchCaptureEnabled, sourceRefFor, subjectKeyFor } from './pseudonym';
 import { buildSnapshotFields } from './researchFeatures';
 import { reconcileConsent } from './researchCapture';
+import { retentionConfig, runRetention } from './researchRetention';
 import { scoreUnscored } from './researchShadow';
 
 const CURSOR = 'readings';
@@ -95,6 +96,7 @@ export async function runResearchSweep(now = new Date()): Promise<SweepResult> {
 }
 
 let timer: NodeJS.Timeout | null = null;
+let retentionTimer: NodeJS.Timeout | null = null;
 
 export function startResearchSweepMonitor(): void {
   if (timer || !researchCaptureEnabled()) {
@@ -121,9 +123,29 @@ export function startResearchSweepMonitor(): void {
   timer.unref();
   setTimeout(tick, 30_000).unref(); // first pass shortly after boot, not during it
   console.log(`[research] capture on; sweep every ${Math.round(everyMs / 1000)}s`);
+
+  // Retention: once a day, first shortly after boot. Idempotent, so several replicas are harmless.
+  const cfg = retentionConfig();
+  for (const w of cfg.warnings) console.warn(`[research] ${w}`);
+  const retain = async () => {
+    try {
+      const r = await runRetention(new Date(), cfg);
+      if (r.snapshots + r.outcomes > 0) {
+        console.log(`[research] retention: removed readings=${r.snapshots} outcomes=${r.outcomes} inactivePeople=${r.inactiveSubjects}`);
+      }
+    } catch (err) {
+      console.warn('[research] retention failed (non-fatal):', err instanceof Error ? err.message : 'error');
+    }
+  };
+  retentionTimer = setInterval(retain, 24 * 3600_000);
+  retentionTimer.unref();
+  setTimeout(retain, 10 * 60_000).unref();
+  console.log(`[research] retention: rows kept ${cfg.maxYears ?? 'unlimited'} years; people inactive ${cfg.inactiveMonths ?? 'unlimited'} months removed`);
 }
 
 export function stopResearchSweepMonitor(): void {
   if (timer) clearInterval(timer);
+  if (retentionTimer) clearInterval(retentionTimer);
   timer = null;
+  retentionTimer = null;
 }

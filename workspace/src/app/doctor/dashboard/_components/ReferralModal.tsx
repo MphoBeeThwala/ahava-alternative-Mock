@@ -1,5 +1,6 @@
 import { Modal } from '../../../../components/ui/Modal';
 import type { ReferralModalState } from '../_lib';
+import { Icd10Field } from '../../../../components/Icd10Field';
 
 export function ReferralModal({
   state,
@@ -62,6 +63,7 @@ export function ReferralModal({
             placeholder="e.g. Suspected bacterial meningitis"
           />
         </div>
+        <Icd10Field value={state?.icd10 ?? ''} onChange={icd10 => state && onChange({ ...state, icd10 })} />
         <div>
           <label className="mb-1.5 block text-sm font-medium text-[var(--foreground)]">Clinical assessment / referral notes <span className="text-red-500">*</span></label>
           <textarea rows={5} className="w-full rounded-lg border px-4 py-2.5 text-sm" style={{ borderColor: 'var(--border)' }}

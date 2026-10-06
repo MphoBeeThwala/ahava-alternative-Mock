@@ -1,12 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { consentApi } from '../lib/api';
+import { consentApi, researchApi, type MyResearchData } from '../lib/api';
+import { RESEARCH_AGREE_TEXT, RESEARCH_CONSENT_VERSION, RESEARCH_TITLE, ResearchDetails, ResearchIntro } from './ResearchConsentCopy';
 
-// Must match RESEARCH_CONSENT_VERSION in the backend (services/research/pseudonym.ts).
-// Change both together when the wording below changes materially, so earlier
-// agreements stop counting and people are asked again on the new wording.
-export const RESEARCH_CONSENT_VERSION = '1.0';
+// Re-exported so existing importers keep working.
+export { RESEARCH_CONSENT_VERSION };
 
 type ConsentRow = { consentType: string; version: string; withdrawn: boolean };
 
@@ -14,10 +13,11 @@ type ConsentRow = { consentType: string; version: string; withdrawn: boolean };
  * Patients: optional, separate opt-in for using their pseudonymised readings
  * and clinician-confirmed outcomes to build and test future health tools for
  * South African patients. Off by default, never bundled with another consent,
- * and withdrawing it deletes what was captured.
+ * and withdrawing it deletes what was captured. Also shows, to the patient
+ * alone, exactly what has been kept (their right of access).
  *
- * The wording here describes what the code does (services/research/*). It still
- * needs legal / ethics-committee sign-off before real patients are shown it.
+ * The wording lives in ResearchConsentCopy.tsx (approved by legal and the
+ * Information Officer).
  */
 export default function ResearchConsentSettings() {
   const [enrolled, setEnrolled] = useState<boolean | null>(null);
@@ -76,26 +76,13 @@ export default function ResearchConsentSettings() {
 
   return (
     <div style={card} data-testid="research-consent">
-      <h3 style={{ margin: '0 0 6px', fontSize: 16, fontWeight: 800, color: '#0f172a' }}>Help build better early warning for African patients (optional)</h3>
-      <p style={p}>
-        Most health prediction tools were built on data from other parts of the world and work less well for us. If you agree, Ahava will
-        keep a coded copy of your readings and the outcomes your clinicians confirm, to help build and test future tools that are accurate
-        for South African and African patients.
-      </p>
-      <details style={{ marginBottom: 12 }}>
-        <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 700, color: '#0f172a' }}>Exactly what this means</summary>
-        <ul style={{ ...p, paddingLeft: 18, marginTop: 8 }}>
-          <li><strong>What is kept:</strong> your age group (5-year band), sex, the health history you entered (for example smoker or diabetes), your readings (heart rate, blood pressure, oxygen and similar), the date (not the time), and clinician-confirmed outcomes such as a diagnosis or hospital admission.</li>
-          <li><strong>What is not kept:</strong> your name, contact details, ID number, address, location, messages, or anything you typed in your own words.</li>
-          <li><strong>Coded, not anonymous:</strong> your data is stored under a code that only Ahava can link back to you, so that we can delete it if you withdraw. Because of that, it is still personal information under POPIA.</li>
-          <li><strong>Only from now:</strong> readings recorded before you agree are never included.</li>
-          <li><strong>No effect on your care:</strong> your care, alerts and results do not change, and nothing from this is shown to you or to a clinician. It is used to build and check tools in the background.</li>
-          <li><strong>You can leave at any time:</strong> withdrawing stops new data and deletes what was captured.</li>
-        </ul>
-      </details>
+      <h3 style={{ margin: '0 0 6px', fontSize: 16, fontWeight: 800, color: '#0f172a' }}>{RESEARCH_TITLE}</h3>
+      <ResearchIntro />
+      <ResearchDetails />
       {enrolled ? (
         <>
           <p style={{ ...p, color: '#166534', fontWeight: 600 }}>You are taking part.</p>
+          <WhatHasBeenKept />
           <button type="button" onClick={leave} disabled={busy} style={{ background: 'white', border: '1.5px solid #e7e5e4', borderRadius: 8, padding: '9px 16px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
             {busy ? 'Working…' : 'Stop taking part and delete my data'}
           </button>
@@ -104,7 +91,7 @@ export default function ResearchConsentSettings() {
         <>
           <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 13, color: '#0f172a', fontWeight: 600, marginBottom: 12 }}>
             <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} style={{ marginTop: 3 }} />
-            <span>I agree that Ahava may keep a coded copy of my readings and clinician-confirmed outcomes from now on, for developing and testing health tools, as described above. I understand I can withdraw at any time.</span>
+            <span>{RESEARCH_AGREE_TEXT}</span>
           </label>
           <button type="button" onClick={join} disabled={busy || !agree} style={{ background: busy || !agree ? '#94a3b8' : '#0f172a', color: 'white', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 14, fontWeight: 700, cursor: busy || !agree ? 'not-allowed' : 'pointer' }}>
             {busy ? 'Saving…' : 'Take part'}
@@ -116,3 +103,66 @@ export default function ResearchConsentSettings() {
     </div>
   );
 }
+
+/** What has been kept about this patient, shown to them alone. */
+function WhatHasBeenKept() {
+  const [data, setData] = useState<MyResearchData | null>(null);
+  const [open, setOpen] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  const load = async () => {
+    setOpen(true);
+    try {
+      setData(await researchApi.myData());
+    } catch {
+      setFailed(true);
+    }
+  };
+
+  const download = () => {
+    if (!data) return;
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'my-research-data.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const small: React.CSSProperties = { margin: '0 0 8px', fontSize: 13, color: '#57534e', lineHeight: 1.5 };
+  return (
+    <div style={{ marginBottom: 12 }}>
+      {!open ? (
+        <button type="button" onClick={load} style={{ background: 'white', border: '1.5px solid #e7e5e4', borderRadius: 8, padding: '8px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+          See what has been kept about me
+        </button>
+      ) : failed ? (
+        <p role="alert" style={{ ...small, color: '#dc2626' }}>Could not load this right now. Please try again later.</p>
+      ) : !data ? (
+        <p style={small}>Loading…</p>
+      ) : (
+        <div data-testid="my-research-data">
+          <p style={small}>
+            <strong>{data.readings.length}</strong> reading{data.readings.length === 1 ? '' : 's'} and{' '}
+            <strong>{data.outcomes.length}</strong> clinician-confirmed outcome{data.outcomes.length === 1 ? '' : 's'} kept
+            {data.since ? <> since {new Date(data.since).toLocaleDateString()}</> : null}.
+          </p>
+          {data.modelScoresComputed > 0 && (
+            <p style={small}>
+              {data.modelScoresComputed} automated check{data.modelScoresComputed === 1 ? ' was' : 's were'} run on this data while
+              testing new tools. They are experimental, are not shown to you or your clinicians, and do not affect your care. To ask
+              about them, contact privacy@ahavaon88.co.za.
+            </p>
+          )}
+          {data.readings.length + data.outcomes.length > 0 && (
+            <button type="button" onClick={download} style={{ background: 'white', border: '1.5px solid #e7e5e4', borderRadius: 8, padding: '8px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+              Download a copy
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+

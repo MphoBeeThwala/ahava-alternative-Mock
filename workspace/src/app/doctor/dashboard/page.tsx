@@ -13,6 +13,8 @@ import { Worklist } from './_components/Worklist';
 import { ReviewPane } from './_components/ReviewPane';
 import { ReviewModal } from './_components/ReviewModal';
 import { PrescriptionModal } from './_components/PrescriptionModal';
+import { isValidIcd10 } from '../../../lib/api/research';
+import ClinicianResearchNotice from '../../../components/ClinicianResearchNotice';
 import { ReferralModal } from './_components/ReferralModal';
 import { FollowUpRequestModal } from './_components/FollowUpRequestModal';
 import { NurseVisitCard } from './_components/NurseVisitCard';
@@ -184,10 +186,15 @@ export default function DoctorDashboard() {
             toast.error('Diagnosis and at least one medication are required.');
             return;
         }
+        if (prescriptionModal.icd10.trim() && !isValidIcd10(prescriptionModal.icd10)) {
+            toast.error('The ICD-10 code is not in a valid format (for example I10 or E11.9). Correct it or leave it blank.');
+            return;
+        }
         setSubmittingDoc(true);
         try {
             await doctorApi.issuePrescription(prescriptionModal.caseId, {
                 diagnosis: prescriptionModal.diagnosis,
+                icd10: prescriptionModal.icd10.trim() || undefined,
                 medications: meds,
                 doctorNotes: prescriptionModal.doctorNotes || undefined,
             });
@@ -209,11 +216,16 @@ export default function DoctorDashboard() {
             toast.error('Diagnosis, clinical notes and recommended facility are required.');
             return;
         }
+        if (referralModal.icd10.trim() && !isValidIcd10(referralModal.icd10)) {
+            toast.error('The ICD-10 code is not in a valid format (for example I10 or E11.9). Correct it or leave it blank.');
+            return;
+        }
         setSubmittingDoc(true);
         try {
             await doctorApi.issueEmergencyReferral(referralModal.caseId, {
                 referralType: referralModal.referralType,
                 provisionalDiagnosis: referralModal.provisionalDiagnosis,
+                icd10: referralModal.icd10.trim() || undefined,
                 clinicalNotes: referralModal.clinicalNotes,
                 recommendedFacility: referralModal.recommendedFacility,
             });
@@ -274,6 +286,8 @@ export default function DoctorDashboard() {
                     subtitle={`${totalPending} case${totalPending === 1 ? '' : 's'} waiting for review`}
                     right={<StatusBadge variant={totalPending > 0 ? 'warning' : 'success'}>{totalPending} pending</StatusBadge>}
                 />
+
+                <div className="px-5 pt-4"><ClinicianResearchNotice /></div>
 
                 {/* HPCSA onboarding banner — preserved exactly */}
                 {hcpsaStatus !== null && (
@@ -344,8 +358,8 @@ export default function DoctorDashboard() {
                                 investigationsText: (c.requestedInvestigations || []).join('\n'),
                             })}
                             onRelease={handleRelease}
-                            onOpenPrescription={(c) => setPrescriptionModal({ caseId: c.id, diagnosis: c.doctorDiagnosis || '', medications: [blankMed()], doctorNotes: '' })}
-                            onOpenReferral={(c) => setReferralModal({ caseId: c.id, referralType: 'EMERGENCY', provisionalDiagnosis: c.doctorDiagnosis || '', clinicalNotes: '', recommendedFacility: 'HOSPITAL' })}
+                            onOpenPrescription={(c) => setPrescriptionModal({ caseId: c.id, diagnosis: c.doctorDiagnosis || '', icd10: '', medications: [blankMed()], doctorNotes: '' })}
+                            onOpenReferral={(c) => setReferralModal({ caseId: c.id, referralType: 'EMERGENCY', provisionalDiagnosis: c.doctorDiagnosis || '', icd10: '', clinicalNotes: '', recommendedFacility: 'HOSPITAL' })}
                         />
                     </div>
                 )}

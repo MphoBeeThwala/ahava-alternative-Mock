@@ -91,6 +91,7 @@ export const blankMed = (): MedRow => ({ name: '', dosage: '', frequency: '', du
 export type PrescriptionModalState = {
   caseId: string;
   diagnosis: string;
+  icd10: string;
   medications: MedRow[];
   doctorNotes: string;
 };
@@ -99,6 +100,7 @@ export type ReferralModalState = {
   caseId: string;
   referralType: string;
   provisionalDiagnosis: string;
+  icd10: string;
   clinicalNotes: string;
   recommendedFacility: string;
 };

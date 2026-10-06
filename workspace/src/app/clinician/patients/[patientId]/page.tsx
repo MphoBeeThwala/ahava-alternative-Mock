@@ -9,6 +9,9 @@ import { Card, CardHeader, CardTitle } from "../../../../components/ui/Card";
 import { PageHeader } from "../../../../components/ui/PageHeader";
 import { StatusBadge } from "../../../../components/ui/StatusBadge";
 import { accessApi, ACCESS_REASON_LABEL, AccessGrantReason } from "../../../../lib/api";
+import { useAuth } from "../../../../contexts/AuthContext";
+import OutcomeRecorder from "../../../../components/OutcomeRecorder";
+import ClinicianResearchNotice from "../../../../components/ClinicianResearchNotice";
 
 interface PatientRecord {
   access: { reason: AccessGrantReason; expiresAt: string };
@@ -34,6 +37,7 @@ const fmt = (v: number | null, unit = "") => (v == null ? "—" : `${Math.round(
  */
 export default function PatientRecordPage() {
   const { patientId } = useParams<{ patientId: string }>();
+  const { user } = useAuth();
   const [record, setRecord] = useState<PatientRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -137,6 +141,14 @@ export default function PatientRecordPage() {
                   </ul>
                 )}
               </Card>
+
+              {user?.role === "DOCTOR" && (
+                <Card padding="sm">
+                  <CardHeader><CardTitle>Record a later outcome</CardTitle></CardHeader>
+                  <OutcomeRecorder patientId={record.patient.id} />
+                  <div className="mt-3"><ClinicianResearchNotice /></div>
+                </Card>
+              )}
 
               {(record.prescriptions.length > 0 || record.referrals.length > 0) && (
                 <Card padding="sm">

@@ -39,7 +39,8 @@ import {
   getReviewedStatusError,
   resolveTriageOverride,
 } from "../services/triageReviewValidation";
-import { captureTriageOutcome } from "../services/research/researchCapture";
+import { captureDiagnosisOutcomes, captureTriageOutcome } from "../services/research/researchCapture";
+import { parseOptionalIcd10 } from "../services/research/researchOutcomes";
 
 const router: Router = Router();
 const VALID_QUEUE_STATUSES = [
@@ -741,6 +742,8 @@ router.post(
           .status(400)
           .json({ error: "Diagnosis and at least one medication are required" });
       }
+      const icd = parseOptionalIcd10(req.body?.icd10);
+      if (!icd.ok) return res.status(400).json({ error: icd.error });
 
       const triageCase = await prisma.triageCase.findUnique({
         where: { id },
@@ -791,6 +794,7 @@ router.post(
           where: { triageCaseId: id },
           update: {
             diagnosis: diagnosis.trim(),
+            icd10: icd.value,
             medications,
             doctorNotes: doctorNotes?.trim() || null,
             hcpsaNumberSnapshot: doctor.hcpsaNumber,
@@ -802,6 +806,7 @@ router.post(
             patientId: triageCase.patientId,
             doctorId: req.user!.id,
             diagnosis: diagnosis.trim(),
+            icd10: icd.value,
             medications,
             doctorNotes: doctorNotes?.trim() || null,
             hcpsaNumberSnapshot: doctor.hcpsaNumber,
@@ -831,6 +836,7 @@ router.post(
         finalTriageLevel: triageCase.finalTriageLevel,
         route: "PRESCRIPTION",
       });
+      void captureDiagnosisOutcomes({ caseId: id, patientId: triageCase.patientId, icd10: icd.value, route: "PRESCRIPTION" });
 
       const downloadUrl = `/triage-review/${id}/prescription/pdf`;
       sendToUser(triageCase.patientId, {
@@ -968,6 +974,8 @@ router.post(
             "Referral type, provisional diagnosis, clinical notes, and recommended facility are required",
         });
       }
+      const icd = parseOptionalIcd10(req.body?.icd10);
+      if (!icd.ok) return res.status(400).json({ error: icd.error });
 
       const triageCase = await prisma.triageCase.findUnique({
         where: { id },
@@ -1006,6 +1014,7 @@ router.post(
           update: {
             referralType: referralType.trim(),
             provisionalDiagnosis: provisionalDiagnosis.trim(),
+            icd10: icd.value,
             clinicalNotes: clinicalNotes.trim(),
             recommendedFacility: recommendedFacility.trim(),
             hcpsaNumberSnapshot: doctor.hcpsaNumber,
@@ -1018,6 +1027,7 @@ router.post(
             doctorId: req.user!.id,
             referralType: referralType.trim(),
             provisionalDiagnosis: provisionalDiagnosis.trim(),
+            icd10: icd.value,
             clinicalNotes: clinicalNotes.trim(),
             recommendedFacility: recommendedFacility.trim(),
             hcpsaNumberSnapshot: doctor.hcpsaNumber,
@@ -1047,6 +1057,7 @@ router.post(
         route: "REFERRAL",
         emergencyReferral: referral.referralType === "EMERGENCY",
       });
+      void captureDiagnosisOutcomes({ caseId: id, patientId: triageCase.patientId, icd10: icd.value, route: "REFERRAL" });
 
       const downloadUrl = `/triage-review/${id}/referral/pdf`;
       sendToUser(triageCase.patientId, {

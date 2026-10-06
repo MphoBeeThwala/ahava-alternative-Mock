@@ -13,6 +13,7 @@
  *      nothing recorded before someone agreed is ever pulled in)
  */
 import prisma from '../../lib/prisma';
+import { lastRetentionRun, retentionConfig } from './researchRetention';
 import {
   RESEARCH_CONSENT_TYPE,
   RESEARCH_CONSENT_VERSION,
@@ -29,7 +30,7 @@ import {
   type ReadingLike,
   type SubjectLike,
 } from './researchFeatures';
-import { triageDetails, validateClinicianOutcome, type ClinicianOutcomeInput, type OutcomeType, type TriageRoute } from './researchOutcomes';
+import { outcomeTypesForIcd10, triageDetails, validateClinicianOutcome, type ClinicianOutcomeInput, type OutcomeType, type TriageRoute } from './researchOutcomes';
 
 export type CaptureStatus =
   | 'captured'
@@ -217,6 +218,71 @@ export async function captureTriageOutcome(c: {
   }
 }
 
+/**
+ * A diagnosis code the doctor already entered on a prescription or referral.
+ * Recorded silently, marked REMOTE_TRIAGE (diagnosed remotely, not examined or
+ * tested) so analyses can discount it. No code, or a code that maps to no
+ * outcome, records nothing.
+ */
+export async function captureDiagnosisOutcomes(c: {
+  caseId: string;
+  patientId: string;
+  icd10: string | null;
+  route: 'PRESCRIPTION' | 'REFERRAL';
+  closedAt?: Date | null;
+}): Promise<CaptureStatus> {
+  try {
+    const types = outcomeTypesForIcd10(c.icd10);
+    // Same case + same route is the same fact. When the doctor corrects the code
+    // (I10 -> E11, or removes it), what the earlier code recorded must go, or the
+    // dataset would keep an outcome nobody now stands behind. Needs only the key,
+    // not consent: deleting is always allowed.
+    await clearSupersededDiagnosisOutcomes(c.patientId, `${c.caseId}:${c.route}`, types);
+    if (types.length === 0) return 'captured';
+    const day = toDay(c.closedAt ?? new Date());
+    let status: CaptureStatus = 'captured';
+    for (const outcomeType of types) {
+      status = await writeOutcome({
+        userId: c.patientId,
+        outcomeType,
+        outcomeDay: day,
+        sourceKind: 'triage-dx',
+        sourceId: `${c.caseId}:${c.route}`,
+        icd10: c.icd10,
+        details: { basis: 'REMOTE_TRIAGE', route: c.route },
+        source: 'TRIAGE_REVIEW',
+        recordedByRole: 'DOCTOR',
+      });
+      if (status !== 'captured') return status;
+    }
+    return status;
+  } catch (err) {
+    warn('captureDiagnosisOutcomes failed', err);
+    return 'error';
+  }
+}
+
+async function clearOppositeAlertAnswer(userId: string, chosen: OutcomeType, sourceId: string): Promise<void> {
+  const key = getPseudonymKey();
+  if (!researchCaptureEnabled() || !key) return;
+  const opposite: OutcomeType = chosen === 'ALERT_CONFIRMED' ? 'ALERT_DISMISSED' : 'ALERT_CONFIRMED';
+  await prisma.researchOutcome.deleteMany({
+    where: { subjectKey: subjectKeyFor(userId, key)!, sourceRef: sourceRefFor(`outcome:${opposite}:clinician`, sourceId, key)! },
+  });
+}
+
+// Every type a diagnosis code can map to, so a stale one can be found and removed.
+const DIAGNOSIS_TYPES: OutcomeType[] = ['HYPERTENSION_DIAGNOSED', 'DIABETES_DIAGNOSED', 'CVD_EVENT', 'ARRHYTHMIA_DIAGNOSED'];
+
+async function clearSupersededDiagnosisOutcomes(userId: string, sourceId: string, keep: OutcomeType[]): Promise<void> {
+  const key = getPseudonymKey();
+  if (!researchCaptureEnabled() || !key) return;
+  const subjectKey = subjectKeyFor(userId, key)!;
+  const stale = DIAGNOSIS_TYPES.filter((t) => !keep.includes(t)).map((t) => sourceRefFor(`outcome:${t}:triage-dx`, sourceId, key)!);
+  if (stale.length === 0) return;
+  await prisma.researchOutcome.deleteMany({ where: { subjectKey, sourceRef: { in: stale } } });
+}
+
 /** A clinician-entered, validated outcome for a patient they hold access to (checked by the route). */
 export async function recordClinicianOutcome(
   patientId: string,
@@ -228,13 +294,18 @@ export async function recordClinicianOutcome(
   try {
     const { outcomeType, outcomeDay, icd10, details } = v.value;
     const isAlert = outcomeType === 'ALERT_CONFIRMED' || outcomeType === 'ALERT_DISMISSED';
+    const sourceId = `${patientId}:${outcomeDay.toISOString().slice(0, 10)}:${icd10 ?? ''}`;
+    // "Useful" and "false alarm" for the same patient and day contradict each
+    // other. A doctor changing their mind replaces the earlier answer; the
+    // dataset never holds both.
+    if (isAlert) await clearOppositeAlertAnswer(patientId, outcomeType, sourceId);
     const status = await writeOutcome({
       userId: patientId,
       outcomeType,
       outcomeDay,
       sourceKind: 'clinician',
       // Same patient + type + day + code is the same fact entered twice.
-      sourceId: `${patientId}:${outcomeDay.toISOString().slice(0, 10)}:${icd10 ?? ''}`,
+      sourceId,
       icd10,
       details,
       source: isAlert ? 'ALERT_ADJUDICATION' : 'CLINICIAN_ENTRY',
@@ -282,8 +353,27 @@ export async function researchStatus() {
     prisma.researchSnapshot.findFirst({ orderBy: { observedDay: 'asc' }, select: { observedDay: true } }),
     prisma.researchSnapshot.findFirst({ orderBy: { observedDay: 'desc' }, select: { observedDay: true } }),
   ]);
+  // Who recorded outcomes (from the audit trail, last 90 days): lets an admin
+  // see that outcome recording is happening and who is doing it, without any
+  // row-level research data.
+  const since = new Date(Date.now() - 90 * 86_400_000);
+  const byClinician = await prisma.auditLog.groupBy({
+    by: ['userId'],
+    where: { resource: 'ResearchOutcome', action: 'CREATE', createdAt: { gte: since }, metadata: { path: ['status'], equals: 'captured' } },
+    _count: { _all: true },
+  });
+  const ids = byClinician.map((r) => r.userId).filter((id): id is string => Boolean(id));
+  const names = ids.length
+    ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, firstName: true, lastName: true } })
+    : [];
+  const nameOf = new Map(names.map((u) => [u.id, `${u.firstName} ${u.lastName}`]));
   return {
+    outcomesRecordedByClinicianLast90Days: byClinician
+      .filter((r) => r.userId)
+      .map((r) => ({ clinicianId: r.userId as string, name: nameOf.get(r.userId as string) ?? 'Unknown', count: r._count._all }))
+      .sort((a, b) => b.count - a.count),
     captureEnabled: researchCaptureEnabled(),
+    retention: { ...(({ maxYears, inactiveMonths }) => ({ maxYears, inactiveMonths }))(retentionConfig()), lastRunAt: (await lastRetentionRun())?.toISOString() ?? null },
     consentVersion: RESEARCH_CONSENT_VERSION,
     consentedPatients,
     snapshots,
@@ -294,3 +384,51 @@ export async function researchStatus() {
     lastObservedDay: lastDay?.observedDay.toISOString().slice(0, 10) ?? null,
   };
 }
+
+/**
+ * What is held about one person, for their own eyes (POPIA right of access).
+ * Their snapshots and recorded outcomes are returned in full. Model scores are
+ * returned as a COUNT only: they come from unvalidated candidate models and
+ * showing a patient a risk number would amount to the clinical claim the
+ * pipeline deliberately does not make. Anyone wanting those can ask the
+ * Information Officer.
+ */
+export async function researchDataFor(userId: string) {
+  const consent = await prisma.patientConsent.findFirst({
+    where: { userId, consentType: RESEARCH_CONSENT_TYPE, version: RESEARCH_CONSENT_VERSION, withdrawn: false },
+    select: { givenAt: true },
+  });
+  const subjectKey = subjectKeyFor(userId);
+  if (!subjectKey) {
+    return { taking_part: Boolean(consent), since: consent?.givenAt ?? null, readings: [], outcomes: [], modelScoresComputed: 0, captureEnabled: false };
+  }
+  const [readings, outcomes, scores] = await Promise.all([
+    prisma.researchSnapshot.findMany({
+      where: { subjectKey },
+      orderBy: { observedDay: 'asc' },
+      // Everything about the reading except the internal keys.
+      select: {
+        observedDay: true, ageBand: true, sex: true, smoker: true, diabetes: true, hypertensionKnown: true,
+        hivPositive: true, activeTb: true, bpTreatment: true, totalCholesterolMmol: true, hdlMmol: true,
+        hrResting: true, hrvRmssd: true, spo2: true, respRate: true, skinTempOffset: true, sbp: true, dbp: true,
+        glucose: true, bmi: true, steps: true, sleepHours: true, ecgIrregular: true, temperatureTrend: true, source: true,
+        liveAlertLevel: true, liveCvdCategory: true,
+      },
+    }),
+    prisma.researchOutcome.findMany({
+      where: { subjectKey },
+      orderBy: { outcomeDay: 'asc' },
+      select: { outcomeType: true, outcomeDay: true, icd10: true, details: true, source: true },
+    }),
+    prisma.researchPrediction.count({ where: { snapshot: { subjectKey } } }),
+  ]);
+  return {
+    taking_part: Boolean(consent),
+    since: consent?.givenAt ?? null,
+    readings,
+    outcomes,
+    modelScoresComputed: scores,
+    captureEnabled: researchCaptureEnabled(),
+  };
+}
+

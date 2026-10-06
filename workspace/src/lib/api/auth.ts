@@ -10,6 +10,8 @@ export interface RegisterData {
   dateOfBirth?: string;
   gender?: string;
   preferredLanguage?: string;
+  // Patients only: the optional, unticked-by-default research opt-in on the sign-up form.
+  researchConsent?: boolean;
   // Staff only: the token from the invite link an admin sent them.
   inviteToken?: string;
   sancRegistrationNumber?: string;

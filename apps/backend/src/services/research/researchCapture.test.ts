@@ -6,7 +6,7 @@
  */
 import prisma from '../../lib/prisma';
 import { subjectKeyFor } from './pseudonym';
-import { captureReadings, captureTriageOutcome, purgeSubject, reconcileConsent, recordClinicianOutcome } from './researchCapture';
+import { captureDiagnosisOutcomes, captureReadings, captureTriageOutcome, purgeSubject, reconcileConsent, recordClinicianOutcome } from './researchCapture';
 
 jest.mock('../../lib/prisma', () => ({
   __esModule: true,
@@ -173,6 +173,74 @@ describe('outcomes', () => {
     db.patientConsent.findFirst.mockResolvedValue(null);
     expect(await recordClinicianOutcome('u1', { outcomeType: 'DEATH', outcomeDay: '2026-09-15' }, 'DOCTOR')).toEqual({ ok: true, status: 'no_consent' });
     expect(db.researchOutcome.upsert).not.toHaveBeenCalled();
+  });
+});
+
+describe('alert answers', () => {
+  const answer = (outcomeType: string) =>
+    recordClinicianOutcome('u1', { outcomeType, outcomeDay: '2026-09-15', alertLevel: 'RED' }, 'DOCTOR');
+
+  it('a changed mind replaces the earlier answer: useful and false-alarm never both stand for one patient and day', async () => {
+    await answer('ALERT_DISMISSED');
+    const dismissedRef = db.researchOutcome.upsert.mock.calls[0][0].where.subjectKey_sourceRef.sourceRef;
+    db.researchOutcome.deleteMany.mockClear();
+
+    await answer('ALERT_CONFIRMED');
+    const removed = db.researchOutcome.deleteMany.mock.calls[0][0].where;
+    expect(removed.subjectKey).toBe(subjectKeyFor('u1', KEY));
+    expect(removed.sourceRef).toBe(dismissedRef); // exactly the row the earlier answer wrote
+  });
+
+  it('does not touch other outcome types', async () => {
+    await recordClinicianOutcome('u1', { outcomeType: 'DEATH', outcomeDay: '2026-09-15' }, 'DOCTOR');
+    expect(db.researchOutcome.deleteMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('captureDiagnosisOutcomes', () => {
+  const run = (icd10: string | null, route: 'PRESCRIPTION' | 'REFERRAL' = 'PRESCRIPTION') =>
+    captureDiagnosisOutcomes({ caseId: 'case-9', patientId: 'u1', icd10, route });
+
+  it('records a weak-label (REMOTE_TRIAGE) outcome for a mappable code, with the code and no identity', async () => {
+    expect(await run('I10')).toBe('captured');
+    const arg = db.researchOutcome.upsert.mock.calls[0][0];
+    expect(arg.create).toMatchObject({
+      outcomeType: 'HYPERTENSION_DIAGNOSED', icd10: 'I10', source: 'TRIAGE_REVIEW', recordedByRole: 'DOCTOR',
+      details: { basis: 'REMOTE_TRIAGE', route: 'PRESCRIPTION' },
+    });
+    expect(JSON.stringify(arg)).not.toContain('case-9');
+    expect(JSON.stringify(arg)).not.toContain('u1"');
+  });
+
+  it('records nothing when there is no code or it maps to no outcome (and does not even read consent)', async () => {
+    for (const code of [null, 'J06.9', 'I25.1']) await run(code);
+    expect(db.researchOutcome.upsert).not.toHaveBeenCalled();
+    expect(db.patientConsent.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('records nothing without consent', async () => {
+    db.patientConsent.findFirst.mockResolvedValue(null);
+    expect(await run('E11.9', 'REFERRAL')).toBe('no_consent');
+    expect(db.researchOutcome.upsert).not.toHaveBeenCalled();
+  });
+
+  it('a corrected code removes what the earlier code recorded (and a removed code removes it all)', async () => {
+    await run('E11.9'); // now diabetes: hypertension, CVD and arrhythmia rows from an earlier code must go
+    const deleted = db.researchOutcome.deleteMany.mock.calls[0][0].where;
+    expect(deleted.subjectKey).toBe(subjectKeyFor('u1', KEY));
+    expect(deleted.sourceRef.in).toHaveLength(3);
+
+    db.researchOutcome.deleteMany.mockClear();
+    await run(null);
+    expect(db.researchOutcome.deleteMany.mock.calls[0][0].where.sourceRef.in).toHaveLength(4);
+    expect(db.researchOutcome.upsert).toHaveBeenCalledTimes(1); // only the E11 write; nothing for the cleared code
+  });
+
+  it('the same case re-saved maps to the same row, so a corrected code replaces rather than duplicates', async () => {
+    await run('I10');
+    await run('I10');
+    const [a, b] = db.researchOutcome.upsert.mock.calls.map((c: any) => c[0].where.subjectKey_sourceRef.sourceRef);
+    expect(a).toBe(b);
   });
 });
 

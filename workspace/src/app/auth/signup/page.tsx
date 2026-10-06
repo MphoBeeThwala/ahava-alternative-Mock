@@ -5,7 +5,9 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "../../../contexts/AuthContext";
 import { authApi, type StaffInviteDetails } from "../../../lib/api/auth";
+import { consentApi } from "../../../lib/api/consent";
 import GoogleSignInButton from "../../../components/GoogleSignInButton";
+import { RESEARCH_AGREE_TEXT, RESEARCH_CONSENT_VERSION, RESEARCH_TITLE, ResearchDetails, ResearchIntro } from "../../../components/ResearchConsentCopy";
 
 const ROLE_LABEL: Record<StaffInviteDetails["role"], string> = {
   NURSE: "Nurse",
@@ -27,6 +29,8 @@ export default function SignupPage() {
 
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  // Optional research opt-in. Unticked by default and never a condition of signing up.
+  const [researchConsent, setResearchConsent] = useState(false);
   // Staff (nurses, doctors, admins) join only through a single-use invite
   // link an administrator sends them: /auth/signup?invite=<token>.
   const [inviteToken, setInviteToken] = useState<string | null>(null);
@@ -74,6 +78,8 @@ export default function SignupPage() {
         email: formData.email,
         password: formData.password,
         role: invite ? invite.role : ("PATIENT" as const),
+        // Sent only when ticked, and only for patients: staff are not research subjects.
+        ...(!invite && researchConsent ? { researchConsent: true } : {}),
         ...(invite && inviteToken ? { inviteToken } : {}),
         ...(invite?.role === "NURSE" && registrationNumber
           ? { sancRegistrationNumber: registrationNumber }
@@ -545,6 +551,29 @@ export default function SignupPage() {
               </div>
             )}
 
+            {!invite && (
+              <div
+                data-testid="signup-research-consent"
+                style={{ border: "1px solid #e7e5e4", borderRadius: 10, padding: "14px 16px", background: "#fafaf9" }}
+              >
+                <p style={{ margin: "0 0 6px", fontSize: 13, fontWeight: 800, color: "#0f172a" }}>{RESEARCH_TITLE}</p>
+                <ResearchIntro />
+                <ResearchDetails />
+                <label style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 12, color: "#0f172a", fontWeight: 600 }}>
+                  <input
+                    type="checkbox"
+                    checked={researchConsent}
+                    onChange={(e) => setResearchConsent(e.target.checked)}
+                    style={{ marginTop: 3 }}
+                  />
+                  <span>{RESEARCH_AGREE_TEXT}</span>
+                </label>
+                <p style={{ margin: "8px 0 0", fontSize: 11, color: "#64748b" }}>
+                  Optional. You can create your account without ticking this, and change your mind any time on your Profile page.
+                </p>
+              </div>
+            )}
+
             <button
               type="submit"
               disabled={loading || inviteChecking || (!!inviteToken && !invite)}
@@ -578,7 +607,18 @@ export default function SignupPage() {
             <div style={{ marginTop: 20 }}>
               <GoogleSignInButton
                 mode="signup"
-                onSignedIn={() => router.push("/patient/dashboard")}
+                onSignedIn={async () => {
+                  // The research box sits above this button: honour it if it was ticked. If this
+                  // fails the dashboard asks again, so a choice is never silently lost.
+                  if (researchConsent) {
+                    try {
+                      await consentApi.give("RESEARCH_DATA", RESEARCH_CONSENT_VERSION);
+                    } catch {
+                      /* the dashboard prompt will ask */
+                    }
+                  }
+                  router.push("/patient/dashboard");
+                }}
                 onError={setError}
               />
             </div>

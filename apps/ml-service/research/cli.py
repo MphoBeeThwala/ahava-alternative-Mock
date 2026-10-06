@@ -52,6 +52,8 @@ def main(argv=None) -> int:
     p.add_argument("--target", required=True, choices=sorted(TARGETS))
     p.add_argument("--force-small", action="store_true", help="train a flagged, underpowered model despite too few events")
     p.add_argument("--bootstrap", type=int, default=300)
+    p.add_argument("--strong-labels-only", action="store_true",
+                   help="leave out events that rest on a remote-triage diagnosis (no examination or test)")
     sub.add_parser("models")
     p = sub.add_parser("approve"); p.add_argument("name"); p.add_argument("version"); p.add_argument("--by", required=True); p.add_argument("--note", default="")
     p = sub.add_parser("revoke"); p.add_argument("name"); p.add_argument("version")
@@ -102,7 +104,8 @@ def main(argv=None) -> int:
         from .outcomes import get_target
         from .train import card_markdown, train
         target = get_target(args.target)
-        frame = build_frame(snaps, outs, target)
+        frame = build_frame(snaps, outs, target, strong_labels_only=args.strong_labels_only)
+        provenance = {**provenance, "strong_labels_only": bool(args.strong_labels_only)}
         try:
             art, card = train(frame, target, synthetic=synthetic_flag, seed=args.seed, n_boot=args.bootstrap,
                               force_small=args.force_small, data_provenance=provenance)
