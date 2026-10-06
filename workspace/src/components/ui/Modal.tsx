@@ -19,6 +19,7 @@ export function Modal({
   primaryDisabled,
   secondaryLabel = "Cancel",
   onSecondary,
+  zIndex,
 }: {
   open: boolean;
   onClose: () => void;
@@ -29,6 +30,8 @@ export function Modal({
   primaryDisabled?: boolean;
   secondaryLabel?: string;
   onSecondary?: () => void;
+  /** Stacking order; set above 1000 for a prompt that must appear over another dialog. */
+  zIndex?: number;
 }) {
   const contentRef = useRef<HTMLDivElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
@@ -80,7 +83,7 @@ export function Modal({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ backgroundColor: "rgba(0,0,0,0.5)" }}
+      style={{ backgroundColor: "rgba(0,0,0,0.5)", ...(zIndex !== undefined ? { zIndex } : {}) }}
       role="dialog"
       aria-modal="true"
       aria-labelledby="modal-title"
