@@ -48,6 +48,11 @@ patient opts in (RESEARCH_DATA consent, optional, profile page)
 | Outcomes are structured: a fixed type list, a day, an optional ICD-10 *format*-checked code, a whitelisted `basis` | `researchOutcomes.ts` |
 | Capture never delays or fails a clinical request; errors are swallowed and logged without ids | `researchCapture.ts` |
 | Training reads through a read-only login on three tables, nothing else | `scripts/research-db-role.ts` |
+| Sign-up opt-in is unticked and optional, recorded atomically with the account; staff cannot be enrolled | `routes/auth.ts`, `signup/page.tsx` |
+| A weak (remote-triage) diagnosis is marked and can be excluded from training; a corrected code replaces the earlier one | `researchCapture.ts`, `research/dataset.py` |
+| "Useful" and "false alarm" for one patient and day cannot both stand | `researchCapture.ts` |
+| A patient can see and download their own kept data; model scores are never shown, only counted | `GET /research/my-data`, `ResearchConsentSettings.tsx` |
+| Doctors are informed (not asked) how their decisions are used; only their role is stored | `ClinicianResearchNotice.tsx` |
 
 **It is pseudonymised, not anonymised**, because Ahava keeps the means to
 recompute the pseudonym (that is what makes deletion on withdrawal possible). It
@@ -63,9 +68,14 @@ is still personal information under POPIA and the patient-facing wording says so
    migration, and keep it away from the research database credentials: whoever
    holds the research tables *and* the key *and* a list of user ids can re-link people.
 2. Deploy. The migration `20261006120000_add_research_data_pipeline` creates the tables.
-3. Nothing is captured until a patient opts in on **Profile → "Help build better
-   early warning for African patients"**. Check accrual: `GET /api/v1/admin/research/status`
-   (counts only).
+3. Nothing is captured until a patient opts in. There are three ways to say yes, all the same wording
+   (`workspace/src/components/ResearchConsentCopy.tsx`, the only place to edit it): an **unticked, optional checkbox
+   at sign-up** (also honoured if they then use Google sign-up); a **one-time prompt on the dashboard** for anyone
+   who has not answered (Google sign-ups, accounts a nurse or administrator created, earlier sign-ups; "Not now"
+   hides it for 30 days on that device and nothing is stored server-side); and the **Profile page**, where they can
+   also withdraw and see what has been kept. A withdrawal is an answer and is never asked again. An agreement on
+   older wording is not current, so those people are asked again. Check accrual:
+   `GET /api/v1/admin/research/status` (counts only), shown as a card on the admin dashboard.
 4. `RESEARCH_CAPTURE_ENABLED=false` switches capture off without removing the key.
 
 `RESEARCH_SWEEP_INTERVAL_MS` (default 900000), `RESEARCH_SHADOW_ENABLED` (default on,
@@ -73,19 +83,41 @@ and a no-op until a model is approved) tune the rest. See `apps/backend/env.exam
 
 ## Recording outcomes (the part that decides whether this is ever useful)
 
-A model is only as good as its labels. Readings without outcomes teach nothing.
+A model is only as good as its labels. Readings without outcomes teach nothing. Four sources, from least to most effort
+for a doctor, and one rule above them all:
 
-- **Automatic:** when a doctor releases a triage result, issues a prescription or
-  a referral, the AI's level and the doctor's final level are recorded
-  (`TRIAGE_REVIEWED`), plus `EMERGENCY_REFERRAL` for emergency referrals.
-- **Clinician-entered:** `POST /api/v1/research/outcomes`
-  `{ patientId, outcomeType, outcomeDay: "YYYY-MM-DD", icd10?, basis?, alertLevel? }`
-  for `HYPERTENSION_DIAGNOSED, DIABETES_DIAGNOSED, CVD_EVENT, ARRHYTHMIA_DIAGNOSED,
-  HOSPITAL_ADMISSION, DEATH, ALERT_CONFIRMED, ALERT_DISMISSED`. **There is no UI for
-  this yet** (see "Not done").
-- Negatives are only as reliable as outcome recording: a patient with no recorded
-  outcome is counted as event-free once follow-up has elapsed. If clinicians do
-  not record outcomes, the data will say everyone is healthy.
+**"The doctor agreed with the AI" is never stored as the truth.** Doctors tend to accept what the AI shows them, so
+treating acceptance as a label would teach a model to copy the AI and its mistakes while the numbers improved. Agreement
+is kept as its own measurement (below) and nothing else.
+
+1. **Automatic, nothing asked of the doctor:** when a doctor releases a result, issues a prescription or a referral, the
+   AI's level and the final level are recorded (`TRIAGE_REVIEWED`, including "accepted unchanged"), plus
+   `EMERGENCY_REFERRAL`. This is a *measurement of the AI* (`python -m research triage`), not a training label.
+2. **A code the doctor already types:** an optional ICD-10 field on the prescription and referral forms (format-checked,
+   stored on the clinical record). A code that clearly means hypertension (I10-I15), diabetes (E10-E14), a cardiovascular
+   event (I21, I22, I46, I50, I60-I64, G45) or an arrhythmia (I47-I49) is recorded silently as an outcome, marked
+   `REMOTE_TRIAGE`: **diagnosed remotely, without an examination or test, so a weaker label.** Correcting or removing the
+   code replaces what the earlier one recorded. `--strong-labels-only` leaves these out of training, and the readiness
+   report shows what share of events are weak.
+3. **One click on an alert:** "Real concern" / "False alarm" on each monitored patient (`ALERT_CONFIRMED` /
+   `ALERT_DISMISSED`). Only an explicit answer is recorded, never "the doctor opened it"; a changed answer replaces the
+   earlier one.
+4. **A short panel for later events** on the clinician's patient record (doctors only): hospital admission, a diagnosis
+   made elsewhere, a cardiovascular event, a death. These arrive weeks or months after any triage case, so they cannot be
+   inferred from one, and they are the strongest labels there are (`POST /api/v1/research/outcomes`, structured fields
+   only, no free text).
+
+Negatives are only as reliable as outcome recording: a patient with no recorded outcome is counted as event-free once
+follow-up has elapsed. If outcomes are not recorded, the data will say everyone is healthy.
+
+**Doctors are told, not asked.** A notice on the doctor dashboard, monitoring page and patient record explains what is
+recorded, that only their *role* is stored (not their name), that they cannot opt a patient in or out, and that it never
+changes their decision or reaches patients. The privacy policy says the same.
+
+**Who can see what.** Nobody can view research rows: they are coded precisely so they cannot be linked back. Admins see
+counts and who recorded outcomes (from the audit trail). A patient sees **their own** kept data (readings and outcomes) on
+their Profile page and can download it; model scores are shown to them as a **count only**, never a number, because they
+come from unvalidated models and a risk figure would be the clinical claim this pipeline deliberately does not make.
 
 ## Offline workflow
 
@@ -149,14 +181,26 @@ validation; a regulatory decision on whether the software is a medical device
 fatigue; and the rule the live system already follows, that a model may raise
 urgency but never lower it. None of that is implied by anything here.
 
-## Not done / open decisions
+## Decisions recorded and what is still open
 
-- **Clinician outcome-entry UI.** Only the API exists; without it, labels come only from triage.
-- **Legal and ethics review of the consent wording and the privacy-policy section.** Drafted from what the code does; not reviewed by a lawyer or ethics committee. The Information Officer should decide the POPIA basis for secondary research use of health information.
+- **Wording approved** by Ahava's legal adviser and Information Officer (confirmed by the project owner, 2026-10-06). The
+  approval was for the Profile-page wording. **Asking at sign-up and on the dashboard is a different setting: have the
+  Information Officer confirm the placement.** The wording itself is unchanged, so the consent version stays `1.0`; change
+  both copies of the version together if the text ever changes materially.
+- **Model scores shown as a count only.** Whether a person is entitled to see unvalidated scores about themselves under
+  POPIA's right of access is a question for the Information Officer; today it is "on request to the Information Officer".
+- **Research ethics approval** is separate from the wording sign-off and is not covered by it. It is not needed for silent
+  capture, but confirm whether it is needed before analysing data for validation or sharing or publishing results.
 - **Retention.** No automatic expiry. Decide a period (and whether to re-ask consent) and add a deletion job.
-- **Per-reading capture of non-wearable history, labs and medications.** Only what `BiometricReading` and the risk profile hold is captured. Adding lab values or a coded medical history will help more than any modelling change.
-- **Province / language / urban-rural** are not captured (they would increase re-identification risk); the representativeness warnings therefore cover sex and age only.
-- **Scale.** Dataset building is a plain Python loop (about 10k rows/second). Fine into the hundreds of thousands of rows; vectorise before millions.
+- **Nurse follow-up.** Outcome recording is for doctors only; home-visit findings are not captured as outcomes.
+- **Prompt snooze is per device.** "Not now" is remembered in the browser for 30 days; deliberately nothing is stored
+  server-side about a "no".
+- **Captured only if a patient has readings.** Only what `BiometricReading` and the risk profile hold is captured. Adding lab
+  values or a coded medical history will help more than any modelling change.
+- **Province / language / urban-rural** are not captured (they would raise re-identification risk), so representativeness
+  warnings cover sex and age only.
+- **Scale.** Dataset building is a plain Python loop (about 10k rows per second, measured). Fine into the hundreds of
+  thousands of rows; vectorise before millions.
 - **Integration with the live engine:** `engine.py` is untouched by design.
 
 ## Tests
@@ -166,4 +210,4 @@ Backend unit and integration: `pseudonym`, `researchFeatures`, `researchOutcomes
 Postgres), `research-db-role.integration`. ML service: `tests/test_research_*.py`
 (features, dataset rules, artifacts and approval gate, training and metrics, the
 HTTP API, triage agreement, readiness, CLI). The outcome vocabulary is pinned on
-both sides by a contract test. Frontend: `ResearchConsentSettings.test.tsx`.
+both sides by a contract test. Frontend: `ResearchConsentSettings`, `ResearchConsentPrompt`, `ResearchSettingsMyData`, `ClinicianComponents` (ICD-10 field, alert feedback, outcome recorder, doctor notice, admin card) and the sign-up page (`signup/page.test.tsx`). Backend integration also covers sign-up opt-in, diagnosis codes through the real referral and prescription routes, the patient's own view and the admin per-clinician counts (`researchCapturePaths.integration.test.ts`).
