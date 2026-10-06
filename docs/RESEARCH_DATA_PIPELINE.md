@@ -199,9 +199,10 @@ Predictions go with their readings, consent records are never touched, and the a
 it last ran. These are defaults chosen by engineering for the stated purpose; the Information Officer can change them by
 changing the two environment variables, no code needed.
 
-**Proposed wording for the privacy policy** (not yet added, because the policy text is legal text and needs your legal
-adviser's nod first): *"Research data is kept for at most seven years, and is deleted sooner if you have had no new readings or
-outcomes for two years, or if you withdraw."*
+**Privacy policy.** The policy page as it stands (research programme section, the clinician paragraph, the note that patients
+can see and download what is kept) was approved by legal with its current wording (project owner, 2026-10-06). It does not
+state the retention period. If legal later wants it stated, suggested text: *"Research data is kept for at most seven years,
+and is deleted sooner if you have had no new readings or outcomes for two years, or if you withdraw."*
 
 ## Decisions recorded and what is still open
 
