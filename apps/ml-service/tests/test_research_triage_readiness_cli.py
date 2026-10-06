@@ -128,3 +128,21 @@ def test_cli_train_then_approval_is_refused_for_synthetic(capsys):
     assert main(["approve", m["name"], m["version"], "--by", "Dr A. Example"]) == 2
     assert "synthetic" in capsys.readouterr().err
     assert registry.load_approved() == []
+
+
+def test_readiness_reports_how_many_events_rest_on_weaker_labels():
+    snaps = [snap(f"s{i}", 0) for i in range(4)] + [snap(f"s{i}", 120) for i in range(4)]
+    outs = [outcome("s0", 30, details={"basis": "LAB"}),
+            outcome("s1", 30, details={"basis": "REMOTE_TRIAGE", "route": "REFERRAL"}),
+            outcome("s2", 30, details={"basis": "REMOTE_TRIAGE", "route": "REFERRAL"})]
+    s, o = tables(snaps, outs)
+    r = target_readiness(s, o, TARGETS["adverse_event_90d"])
+    assert r["event_subjects"] == 3 and r["event_subjects_strong_labels"] == 1
+    assert any("remote-triage" in w and "67%" in w for w in r["warnings"])
+
+
+def test_cli_can_train_on_confirmed_labels_only(capsys):
+    assert main(["train", "--target", "adverse_event_90d", "--source", "synthetic", "--synthetic-subjects", "500",
+                 "--bootstrap", "20", "--strong-labels-only"]) == 0
+    out = capsys.readouterr().out
+    assert "confirmed outcomes only" in out

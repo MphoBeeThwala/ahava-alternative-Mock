@@ -97,3 +97,25 @@ def test_temporal_split_is_by_whole_subjects_and_tests_on_the_latest():
     assert not (train_subjects & test_subjects)
     assert len(test_subjects) == 5
     assert min(f[f["subject"].isin(test_subjects)]["day"]) >= max(f[f["subject"].isin(train_subjects)].groupby("subject")["day"].min())
+
+
+# ---------------------------------------------------------------- weak (remote-triage) labels
+def weak(subject, day_offset, outcome_type="CVD_EVENT"):
+    return outcome(subject, day_offset, outcome_type, {"basis": "REMOTE_TRIAGE", "route": "REFERRAL"})
+
+
+def test_weak_labels_count_by_default_and_can_be_left_out():
+    snaps, outs = [snap("a", 0), snap("b", 0)], [weak("a", 30), outcome("b", 30, details={"basis": "LAB"})]
+    both = frame_for(snaps, outs)
+    assert sorted(both["label"]) == [1, 1]
+    strong = build_frame(*tables(snaps, outs), T90, strong_labels_only=True)
+    labels = {r.subject: r.label for r in strong.itertuples()}
+    assert labels.get("b") == 1
+    assert labels.get("a") in (None, 0)
+
+
+def test_leaving_out_a_weak_label_does_not_make_the_person_look_lost_to_follow_up():
+    # a's only later evidence of being observed is the weak outcome at day 120. Dropping it as an EVENT must not
+    # also drop it as proof of follow-up: the day-0 row stays a genuine 90-day negative rather than being censored.
+    strong = build_frame(*tables([snap("a", 0)], [weak("a", 120)]), T90, strong_labels_only=True)
+    assert len(strong) == 1 and strong["label"].iloc[0] == 0

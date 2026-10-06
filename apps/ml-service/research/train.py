@@ -169,6 +169,9 @@ def card_markdown(card: dict) -> str:
         f"{card['data']['events']} people had the outcome ({card['data']['positive_rows']} positive rows), "
         f"{card['data']['first_day']} to {card['data']['last_day']}.",
     ]
+    lines.append("**Labels:** " + ("confirmed outcomes only (remote-triage diagnoses left out)."
+                 if card["data"]["provenance"].get("strong_labels_only")
+                 else "all recorded outcomes, including diagnoses made remotely during triage (weaker)."))
     if card["synthetic"]:
         lines += ["", "> **SYNTHETIC DATA. Pipeline test only. Says nothing about patients. Cannot be approved.**"]
     if card["underpowered"]:

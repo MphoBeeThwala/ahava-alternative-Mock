@@ -79,13 +79,31 @@ def _records(group: pd.DataFrame) -> List[Dict]:
 
 
 # --------------------------------------------------------------------- building
-def build_frame(snaps: pd.DataFrame, outs: pd.DataFrame, target: Target) -> pd.DataFrame:
-    """One row per eligible snapshot: subject, day, FEATURES..., label, baseline columns."""
+WEAK_BASES = ("REMOTE_TRIAGE",)
+
+
+def is_weak_label(details) -> bool:
+    """A diagnosis made remotely during triage (no examination or test) is a weaker label than a confirmed one."""
+    return isinstance(details, dict) and details.get("basis") in WEAK_BASES
+
+
+def build_frame(snaps: pd.DataFrame, outs: pd.DataFrame, target: Target,
+                strong_labels_only: bool = False) -> pd.DataFrame:
+    """
+    One row per eligible snapshot: subject, day, FEATURES..., label, baseline columns.
+
+    strong_labels_only drops outcomes recorded on a weak basis (remote triage) from the EVENTS. They still
+    count as proof the person was alive and observed on that day, so follow-up (and so censoring) is unchanged:
+    ignoring a weak label must not turn the person into someone we lost track of.
+    """
     snaps, outs = _clean(snaps, outs)
     H = target.horizon_days
 
+    target_outs = outs[outs["outcomeType"].isin(target.outcome_types)]
+    if strong_labels_only and len(target_outs):
+        target_outs = target_outs[~target_outs["details"].map(is_weak_label)]
     events: Dict[str, List[date]] = {}
-    for r in outs[outs["outcomeType"].isin(target.outcome_types)].itertuples():
+    for r in target_outs.itertuples():
         events.setdefault(r.subjectKey, []).append(r.day)
 
     # Last day we know a subject was alive and observed: any snapshot or any recorded outcome.

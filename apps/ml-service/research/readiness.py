@@ -63,6 +63,8 @@ def _eta_months(frame: pd.DataFrame, need: int) -> Optional[float]:
 
 def target_readiness(snaps: pd.DataFrame, outs: pd.DataFrame, target: Target) -> dict:
     frame = build_frame(snaps, outs, target)
+    strong_events = int(build_frame(snaps, outs, target, strong_labels_only=True)
+                        .pipe(lambda f: f.loc[f["label"] == 1, "subject"].nunique()))
     # Events are counted as labelled positive ROWS' subjects' first-event incidents: count distinct
     # subject-events, not rows (one person's 30 snapshot rows before an event are one event).
     positives = frame[frame["label"] == 1]
@@ -81,6 +83,12 @@ def target_readiness(snaps: pd.DataFrame, outs: pd.DataFrame, target: Target) ->
             share = float(mask.mean())
             if share < MIN_GROUP_SHARE:
                 warnings.append(f"only {share:.0%} of subjects are {name}: results will not generalise to them")
+    if events and strong_events < events:
+        weak_share = 1 - strong_events / events
+        warnings.append(
+            f"{weak_share:.0%} of these events rest on a remote-triage diagnosis (no examination or test): "
+            f"{strong_events} are confirmed. Train with --strong-labels-only to leave the weaker ones out"
+        )
     warnings.append("negatives are only as reliable as clinicians' recording of outcomes: check ascertainment before relying on them")
     snap_frame = _clean(snaps, outs)[0]
     followup = (snap_frame.groupby("subjectKey")["day"].agg(lambda d: (max(d) - min(d)).days)).median() if len(snap_frame) else 0
@@ -88,7 +96,7 @@ def target_readiness(snaps: pd.DataFrame, outs: pd.DataFrame, target: Target) ->
         warnings.append(f"median follow-up is {int(followup)} days against a {target.horizon_days}-day horizon: many rows are censored")
     return {
         "target": target.name, "definition": target.description, "stage": _stage(events),
-        "event_subjects": events, "rows": int(len(frame)), "subjects": int(frame["subject"].nunique()),
+        "event_subjects": events, "event_subjects_strong_labels": strong_events, "rows": int(len(frame)), "subjects": int(frame["subject"].nunique()),
         "events_needed": {"train_flagged_exploratory": MIN_EVENTS_TO_TRAIN, "development": dev, "development_plus_validation": val},
         "events_still_needed_for_validation": max(0, val - events),
         "rough_months_to_validation_ready": _eta_months(
@@ -124,7 +132,7 @@ def readiness_text(rep: dict) -> str:
         eta = t["rough_months_to_validation_ready"]
         out += [
             f"[{t['stage']}] {t['target']}: {t['definition']}",
-            f"    {t['event_subjects']} events (first events, one per person) in {t['subjects']} eligible subjects / {t['rows']} rows",
+            f"    {t['event_subjects']} events (first events, one per person; {t['event_subjects_strong_labels']} on confirmed labels) in {t['subjects']} eligible subjects / {t['rows']} rows",
             f"    exploratory training at {need['train_flagged_exploratory']}; development at {need['development']}; "
             f"development + validation at {need['development_plus_validation']} -> {t['events_still_needed_for_validation']} more events needed",
             f"    rough time to get there at the recent rate: {'unknown (no recent events)' if eta is None else ('already there' if eta == 0 else f'~{eta} months')}",
