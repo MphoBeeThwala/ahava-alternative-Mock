@@ -4,6 +4,8 @@ import Joi from 'joi';
 import { StaffInvite, UserRole } from '@prisma/client';
 import { AuthenticatedRequest, requireAdmin, invalidateCachedUser } from '../middleware/auth';
 import { checkStepUp, requireRecentStepUp } from '../middleware/stepUp';
+import { getAiHealth } from '../services/aiHealth';
+import { probeAiProviders } from '../services/aiProviders';
 import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 import { emailSchema, passwordComplexitySchema } from './auth';
 import { adminOverrideVerification, SancVerificationStatus } from '../services/sancVerification';
@@ -12,6 +14,23 @@ import { revokeAllSessions } from '../services/sessions';
 import { createStaffInvite, INVITABLE_ROLES, inviteLink, inviteStatus, reissueStaffInvite, sendStaffInviteEmail } from '../services/staffInvites';
 
 const router: Router = Router();
+
+// AI triage health (Admin only): is each provider working, which model last
+// worked, what the last failure was. The answer to "did the AI actually run?"
+// that used to exist only as a console line. Contains no patient data.
+router.get('/ai-health', requireAdmin, async (_req: AuthenticatedRequest, res, next) => {
+  try {
+    return res.json({ success: true, ...getAiHealth() });
+  } catch (error) { return next(error); }
+});
+
+// Ask each provider right now which models it offers (spends no tokens).
+router.post('/ai-health/probe', requireAdmin, async (_req: AuthenticatedRequest, res, next) => {
+  try {
+    await probeAiProviders();
+    return res.json({ success: true, ...getAiHealth() });
+  } catch (error) { return next(error); }
+});
 
 // Get all users (Admin only)
 router.get('/users', requireAdmin, async (req: AuthenticatedRequest, res, next) => {

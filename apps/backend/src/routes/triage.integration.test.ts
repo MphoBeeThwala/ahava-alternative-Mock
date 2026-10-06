@@ -115,3 +115,43 @@ describe("triage submission (AH-32 end to end, no queue/AI provider configured)"
     expect(res.status).toBe(401);
   });
 });
+
+
+describe("triage submission: long histories and the unavailable-AI result", () => {
+  it("accepts a long clinical history instead of cutting it short", async () => {
+    const agent = request.agent(app);
+    await registerAndConsentPatient(agent);
+    const longHistory = `${"Background history of fatigue and episodes of numbness. ".repeat(100)} CSF oligoclonal bands positive.`;
+
+    const res = await agent.post("/api/v1/triage").send({ symptoms: longHistory });
+
+    expect(res.status).toBe(200);
+    const saved = await prisma.triageCase.findUniqueOrThrow({ where: { id: res.body.triageCaseId } });
+    expect(saved.symptoms).toBe(longHistory); // stored complete
+  });
+
+  it("refuses an over-long description with a clear message", async () => {
+    const agent = request.agent(app);
+    await registerAndConsentPatient(agent);
+
+    const res = await agent.post("/api/v1/triage").send({ symptoms: "x".repeat(20_001) });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("SYMPTOMS_TOO_LONG");
+  });
+
+  it("with no AI available, saves no invented diagnosis and says so on the case", async () => {
+    const agent = request.agent(app);
+    await registerAndConsentPatient(agent);
+
+    const res = await agent.post("/api/v1/triage").send({
+      symptoms: "Painful loss of vision in my right eye, trouble walking, and fatigue.",
+    });
+
+    const saved = await prisma.triageCase.findUniqueOrThrow({ where: { id: res.body.triageCaseId } });
+    expect(saved.aiModel).toMatch(/^no-ai-analysis/);
+    expect(saved.aiPossibleConditions).toEqual(["AI analysis unavailable: no provisional diagnosis was generated"]);
+    expect(JSON.stringify(saved.aiPossibleConditions)).not.toMatch(/viral|influenza|infection/i);
+    expect(saved.aiTriageLevel).toBeLessThanOrEqual(3);
+  });
+});

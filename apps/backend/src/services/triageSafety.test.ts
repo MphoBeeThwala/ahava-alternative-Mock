@@ -394,3 +394,31 @@ describe("assessDeterministicRisk", () => {
     });
   });
 });
+
+
+// A test of a multiple-sclerosis presentation came back "viral infection, SATS 4"
+// when AI was unavailable: no rule recognised neurological symptoms at all.
+describe('assessDeterministicRisk: neurological symptoms', () => {
+  it.each([
+    'Painful loss of vision in my right eye over three days',
+    'I have double vision since Monday',
+    'optic neuritis diagnosed last year, now new tingling in my legs',
+    'trouble walking and loss of balance',
+    'weakness in my left arm that comes and goes',
+    'hyperreflexia and an unsteady gait on examination',
+    'known multiple sclerosis with a new attack',
+  ])('sets a floor of SATS 3 for: %s', (text) => {
+    const risk = assessDeterministicRisk(text);
+    expect(risk.minTriageLevel).toBeLessThanOrEqual(3);
+    expect(risk.cautionFlags.length + risk.hardFlags.length).toBeGreaterThan(0);
+  });
+
+  it('does not fire on a denial', () => {
+    const risk = assessDeterministicRisk('Mild cold. No tingling, no double vision, no trouble walking.');
+    expect(risk.minTriageLevel).toBe(5);
+  });
+
+  it('does not downgrade an existing, more urgent floor', () => {
+    expect(assessDeterministicRisk('tingling in my hands and crushing chest pain').minTriageLevel).toBeLessThanOrEqual(2);
+  });
+});

@@ -280,3 +280,20 @@ describe("admin: reset-trial-data validation (destructive path not exercised)", 
     expect(res.status).toBe(403);
   });
 });
+
+
+describe("admin: AI triage health", () => {
+  it("shows provider status to admins, with no patient data", async () => {
+    const admin = await registerAdmin("admin-ai-health");
+    const res = await admin.agent.get("/api/v1/admin/ai-health");
+    expect(res.status).toBe(200);
+    expect(["ok", "degraded", "down", "unconfigured"]).toContain(res.body.status);
+    expect(res.body.providers.map((p: { provider: string }) => p.provider).sort()).toEqual(["claude", "gemini"]);
+  });
+
+  it("is admin-only", async () => {
+    const patient = await registerRole("PATIENT", "admin-ai-health-deny");
+    expect((await patient.agent.get("/api/v1/admin/ai-health")).status).toBe(403);
+    expect((await patient.agent.post("/api/v1/admin/ai-health/probe").send({})).status).toBe(403);
+  });
+});

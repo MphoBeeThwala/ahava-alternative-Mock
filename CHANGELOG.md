@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (AI triage incident, 2026-10-06)
+- **AI triage no longer fails silently, and never shows a guessed diagnosis.** A complex neurological test case was rated "viral infection, SATS 4" because the AI never ran and the keyword fallback invented a diagnosis. Provider calls now use configurable model chains with automatic fallback and discovery of the models each provider offers, a 90 s timeout, correct handling of `thinking` blocks and `max_tokens`, and the full case text (24,000 characters; nothing cut silently). Lab/imaging attachments and stored photos now reach the model.
+- With no AI, a case gets no possible conditions ("AI analysis unavailable"), a priority of at least SATS 3 (emergency red flags still SATS 1), a red banner for the doctor, and automatic re-analysis (2 min, 10 min, 30 min, 2 h) that never overwrites a case a doctor has claimed.
+- Administrators are emailed when AI triage goes down or recovers; status on the admin dashboard, `GET /admin/ai-health` and `/ready`.
+- New conservative neurological rules (SATS 3 floor); **need clinical sign-off**.
+- Triage descriptions over 20,000 characters are refused with a message to attach long reports as files.
+
 ### Security
 - **Role gates**: `requirePatient`, `requireNurse` and `requireDoctor` now admit only their own role. Admin accounts were previously let through all three, contradicting the separation-of-duties model in `services/careAccess.ts`.
 - **Email changes need re-authentication**: `PUT /auth/profile` requires the current password (plus a TOTP or backup code when 2FA is on) to change the sign-in email. A successful change signs out other devices, un-verifies the address, notifies the old address and is audited (`EMAIL_CHANGED` / `EMAIL_CHANGE_FAILED`).
