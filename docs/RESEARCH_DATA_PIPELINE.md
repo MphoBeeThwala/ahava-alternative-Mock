@@ -48,6 +48,7 @@ patient opts in (RESEARCH_DATA consent, optional, profile page)
 | Outcomes are structured: a fixed type list, a day, an optional ICD-10 *format*-checked code, a whitelisted `basis` | `researchOutcomes.ts` |
 | Capture never delays or fails a clinical request; errors are swallowed and logged without ids | `researchCapture.ts` |
 | Training reads through a read-only login on three tables, nothing else | `scripts/research-db-role.ts` |
+| Rows kept at most 7 years; people inactive for 24 months removed; settings bounded against typos | `researchRetention.ts` |
 | Sign-up opt-in is unticked and optional, recorded atomically with the account; staff cannot be enrolled | `routes/auth.ts`, `signup/page.tsx` |
 | A weak (remote-triage) diagnosis is marked and can be excluded from training; a corrected code replaces the earlier one | `researchCapture.ts`, `research/dataset.py` |
 | "Useful" and "false alarm" for one patient and day cannot both stand | `researchCapture.ts` |
@@ -78,7 +79,7 @@ is still personal information under POPIA and the patient-facing wording says so
    `GET /api/v1/admin/research/status` (counts only), shown as a card on the admin dashboard.
 4. `RESEARCH_CAPTURE_ENABLED=false` switches capture off without removing the key.
 
-`RESEARCH_SWEEP_INTERVAL_MS` (default 900000), `RESEARCH_SHADOW_ENABLED` (default on,
+`RESEARCH_RETENTION_MAX_YEARS` (7) and `RESEARCH_RETENTION_INACTIVE_MONTHS` (24), `RESEARCH_SWEEP_INTERVAL_MS` (default 900000), `RESEARCH_SHADOW_ENABLED` (default on,
 and a no-op until a model is approved) tune the rest. See `apps/backend/env.example`.
 
 ## Recording outcomes (the part that decides whether this is ever useful)
@@ -181,18 +182,40 @@ validation; a regulatory decision on whether the software is a medical device
 fatigue; and the rule the live system already follows, that a model may raise
 urgency but never lower it. None of that is implied by anything here.
 
+## Retention
+
+Two rules run once a day (`researchRetention.ts`), audited with counts only:
+
+1. **No row is kept longer than 7 years** (`RESEARCH_RETENTION_MAX_YEARS`). Validating a risk model takes years of follow-up
+   (the diabetes target alone needs 365 days before a negative can be called), so the limit has to be generous; 7 years sits
+   above the 5-year health-record norm without keeping anyone's data indefinitely (POPIA s14: no longer than the purpose needs).
+2. **A person with no new reading or outcome for 24 months is removed entirely**
+   (`RESEARCH_RETENTION_INACTIVE_MONTHS`). Someone who has gone quiet is no longer contributing to the purpose, and their
+   agreement is likely stale. If they are still opted in and send readings again, capture restarts from that day.
+
+The settings are bounded so a typo cannot become "delete everything": plain whole numbers only, floors of 1 year and 6
+months, anything else falls back to the default with a warning, and the only way to switch a rule off is the word `off`.
+Predictions go with their readings, consent records are never touched, and the admin card shows the policy in force and when
+it last ran. These are defaults chosen by engineering for the stated purpose; the Information Officer can change them by
+changing the two environment variables, no code needed.
+
+**Proposed wording for the privacy policy** (not yet added, because the policy text is legal text and needs your legal
+adviser's nod first): *"Research data is kept for at most seven years, and is deleted sooner if you have had no new readings or
+outcomes for two years, or if you withdraw."*
+
 ## Decisions recorded and what is still open
 
-- **Wording approved** by Ahava's legal adviser and Information Officer (confirmed by the project owner, 2026-10-06). The
-  approval was for the Profile-page wording. **Asking at sign-up and on the dashboard is a different setting: have the
-  Information Officer confirm the placement.** The wording itself is unchanged, so the consent version stays `1.0`; change
-  both copies of the version together if the text ever changes materially.
-- **Model scores shown as a count only.** Whether a person is entitled to see unvalidated scores about themselves under
-  POPIA's right of access is a question for the Information Officer; today it is "on request to the Information Officer".
-- **Research ethics approval** is separate from the wording sign-off and is not covered by it. It is not needed for silent
-  capture, but confirm whether it is needed before analysing data for validation or sharing or publishing results.
-- **Retention.** No automatic expiry. Decide a period (and whether to re-ask consent) and add a deletion job.
-- **Nurse follow-up.** Outcome recording is for doctors only; home-visit findings are not captured as outcomes.
+- **Wording approved** by Ahava's legal adviser and Information Officer. Legal's later confirmation that the wording is
+  sound was given in reply to the question about the sign-up and dashboard placement (relayed by the project owner,
+  2026-10-06); it names the wording, not the placement, so if the placement ever needs its own sign-off, ask for that. The wording is unchanged, so the consent version
+  stays `1.0`; change both copies of the version together if the text ever changes materially.
+- **Unvalidated model scores** are shown to a patient as a count only. A request for the scores themselves is handled case by
+  case through a request for information to the Information Officer (owner's decision, 2026-10-06).
+- **Ethics.** The owner confirms the ethics position meets the legal requirements. No ethics-committee approval reference is on
+  file; if a journal, regulator or partner later asks for one, that is where to look.
+- **Retention** decided by engineering as above.
+- **Nurse follow-up outcomes: deliberately left open.** Outcome recording is for doctors only; home-visit findings are not
+  captured. To be decided later.
 - **Prompt snooze is per device.** "Not now" is remembered in the browser for 30 days; deliberately nothing is stored
   server-side about a "no".
 - **Captured only if a patient has readings.** Only what `BiometricReading` and the risk profile hold is captured. Adding lab
