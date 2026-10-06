@@ -56,6 +56,25 @@ export interface BpFlagValidationReport {
   }>;
 }
 
+export interface AiProviderHealth {
+  provider: 'claude' | 'gemini';
+  configured: boolean;
+  consecutiveFailures: number;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  lastFailure: { model: string; kind: string; status?: number; message: string } | null;
+  workingModel: string | null;
+  lastProbeAt: string | null;
+  lastProbeOk: boolean | null;
+  lastProbeError: string | null;
+}
+
+export interface AiHealth {
+  success: boolean;
+  status: 'ok' | 'degraded' | 'down' | 'unconfigured';
+  providers: AiProviderHealth[];
+}
+
 export const adminApi = {
   getBpFlagValidationReport: async (): Promise<BpFlagValidationReport> => {
     const res = await apiClient.get('/admin/bp-flag-validation');
@@ -71,6 +90,14 @@ export const adminApi = {
   },
   updateUserStatus: async (userId: string, isActive: boolean) => {
     const res = await apiClient.patch(`/admin/users/${userId}`, { isActive });
+    return res.data;
+  },
+  getAiHealth: async (): Promise<AiHealth> => {
+    const res = await apiClient.get('/admin/ai-health');
+    return res.data;
+  },
+  probeAiHealth: async (): Promise<AiHealth> => {
+    const res = await apiClient.post('/admin/ai-health/probe', {});
     return res.data;
   },
   getStats: async () => {

@@ -265,6 +265,8 @@ router.post(
   },
 );
 
+const MAX_SYMPTOMS_CHARS = 20000;
+
 // POST /api/triage – run AI triage and create a case for doctor review
 router.post(
   "/",
@@ -285,6 +287,18 @@ router.post(
         return res
           .status(400)
           .json({ error: "Symptoms description is required" });
+      }
+      if (typeof symptoms !== "string") {
+        return res.status(400).json({ error: "Symptoms must be text" });
+      }
+      // The AI analyses up to 24,000 characters (services/aiTriage.ts); this
+      // keeps submissions under that, and tells the patient why instead of
+      // quietly losing the end of a long history.
+      if (symptoms.length > MAX_SYMPTOMS_CHARS) {
+        return res.status(400).json({
+          error: `Please shorten your description to ${MAX_SYMPTOMS_CHARS.toLocaleString("en-ZA")} characters or fewer. Attach long reports (lab results, scans) as files instead.`,
+          code: "SYMPTOMS_TOO_LONG",
+        });
       }
       if (!patientId) {
         return res.status(401).json({ error: "Not authenticated" });

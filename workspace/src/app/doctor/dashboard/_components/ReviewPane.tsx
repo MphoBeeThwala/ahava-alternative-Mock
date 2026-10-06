@@ -141,6 +141,22 @@ export function ReviewPane({
       <div className="grid gap-5 p-5 lg:grid-cols-2">
         {/* Left: AI draft + patient's own words */}
         <div className="space-y-4">
+          {tc.aiModel?.startsWith('no-ai-analysis') && (
+            <div
+              role="alert"
+              className="rounded-[var(--radius)] border-2 p-4"
+              style={{ borderColor: '#b91c1c', background: '#fef2f2', color: '#7f1d1d' }}
+            >
+              <p className="flex items-center gap-1.5 text-sm font-extrabold uppercase tracking-wide">
+                <Icon name="alert-square" size={14} /> AI analysis did not run for this case
+              </p>
+              <p className="mt-1.5 text-sm">
+                There is <strong>no automated interpretation</strong> and no provisional diagnosis. The priority shown comes only
+                from automatic safety rules and is a minimum, not an assessment. Please read the patient&apos;s full history and any
+                attachments yourself. The system will keep retrying and update this case if the AI recovers.
+              </p>
+            </div>
+          )}
           <div className="rounded-[var(--radius)] border p-4" style={{ borderColor: 'var(--acuity-urgent)', background: 'var(--acuity-urgent-bg)' }}>
             <div className="mb-2 flex items-center justify-between">
               <span className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold" style={{ background: 'var(--acuity-urgent)', color: 'white' }}>
@@ -149,13 +165,16 @@ export function ReviewPane({
             </div>
             <p className="text-sm text-[var(--foreground)]">{tc.aiReasoning}</p>
             <p className="mt-2 text-sm text-[var(--foreground)]"><strong>Recommendation:</strong> {tc.aiRecommendedAction}</p>
-            {tc.aiPossibleConditions.length > 0 && (
+            {tc.aiPossibleConditions.length > 0 && !tc.aiModel?.startsWith('no-ai-analysis') && (
               <p className="mt-2 text-xs text-[var(--muted)]"><strong>Possible conditions:</strong> {tc.aiPossibleConditions.join(', ')}</p>
             )}
             <div className="mt-3 border-t pt-3 text-xs text-[var(--muted)]" style={{ borderColor: 'var(--border-strong)' }}>
               <p className="mb-1 font-semibold uppercase tracking-wide" style={{ fontSize: 'var(--text-eyebrow)' }}>What the model used</p>
               <ul className="space-y-0.5">
                 <li>• Symptoms described (patient text)</li>
+                {tc.attachments && tc.attachments.length > 0 && !tc.aiModel?.startsWith('no-ai-analysis') && (
+                  <li>• {tc.attachments.length} attached file{tc.attachments.length === 1 ? '' : 's'} (lab results, reports, photo)</li>
+                )}
                 {(tc.medicalPassport?.chronicConditions?.length || tc.medicalPassport?.allergies?.length) ? (
                   <li>• Chronic conditions / allergies on file (medical passport)</li>
                 ) : null}

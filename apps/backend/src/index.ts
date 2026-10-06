@@ -48,6 +48,8 @@ import { originGuard } from "./middleware/originGuard";
 import { getRedis, initializeRedis } from "./services/redis";
 import { initializeQueue, closeQueues } from "./services/queue";
 import { getWebSocketRedisHealth, initializeWebSocket } from "./services/websocket";
+import { getAiHealth } from "./services/aiHealth";
+import { startAiHealthMonitor } from "./services/aiProviders";
 import prisma from "./lib/prisma";
 import { assertEncryptionKeyConfigured } from "./utils/encryption";
 import { loadEncryptionKeys } from "./lib/keyManagement";
@@ -180,10 +182,16 @@ app.get("/ready", async (req, res) => {
     }
   }
 
+  // AI triage is reported but never makes the instance "not ready": a provider
+  // outage must not pull healthy replicas out of rotation. It shows up here,
+  // in the admin dashboard and by email instead.
+  const ai = getAiHealth().status;
+  const checksWithAi: Record<string, string> = { ...checks, ai: ai === "unconfigured" ? "degraded" : ai };
+
   const ready = checks.database === "ok";
   res.status(ready ? 200 : 503).json({
     status: ready ? "ready" : "not_ready",
-    checks,
+    checks: checksWithAi,
     timestamp: new Date().toISOString(),
   });
 });
@@ -339,6 +347,11 @@ async function startServer() {
   } else {
     if (DEBUG) console.log(`🔗 Frontend URL: ${process.env.FRONTEND_URL}`);
   }
+
+  // Ask the AI providers which models they offer now and every 10 minutes
+  // (no tokens spent), so a dead key or retired model is found, and an
+  // administrator emailed, before a patient's case hits it.
+  startAiHealthMonitor();
 
   // Start server
   server.listen(PORT, () => {

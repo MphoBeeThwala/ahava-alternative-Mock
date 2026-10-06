@@ -150,6 +150,40 @@ export function assessDeterministicRisk(
         /\bparalysis\b/,
     ];
 
+    // Level 3 (Urgent) - neurological symptoms that point to a possible
+    // central nervous system or demyelinating process (optic neuritis,
+    // myelopathy, multiple sclerosis and similar). Added after a test case of
+    // a multiple-sclerosis presentation was rated non-urgent "viral
+    // infection" when AI analysis was unavailable: none of these were caught by
+    // any rule. Deliberately conservative: it sets a floor (a doctor same
+    // day), it does not diagnose. NEEDS CLINICAL SIGN-OFF
+    // (docs/CLINICAL_SIGNOFF_CHECKLIST.md) before being relied on.
+    const level3Patterns = [
+        /\b(?:loss of|lost|losing) (?:my |his |her |the )?(?:vision|sight)\b/,
+        /\b(?:vision|visual|sight) loss\b/,
+        /\boptic neuritis\b/,
+        /\bdouble vision\b/,
+        /\bdiplopia\b/,
+        /\b(?:arm|leg|limb|hand|foot|facial|face)s? weakness\b/,
+        /\bweakness (?:in|of) (?:my |his |her |the )?(?:(?:left|right|both) )?(?:arm|leg|limb|hand|foot|face)s?\b/,
+        /\b(?:left|right) (?:arm|leg|hand|foot|sided) weakness\b/,
+        /\b(?:tingling|pins and needles|par(?:a)?esthesia|paraesthesia)\b/,
+        /\bloss of balance\b/,
+        /\bunsteady (?:on (?:my|his|her) feet|gait|walking)\b/,
+        /\b(?:difficulty|trouble|problems?) walking\b/,
+        /\bgait (?:disturbance|imbalance|ataxia|problems?)\b/,
+        /\b(?:urinary|bladder) (?:retention|incontinence)\b/,
+        /\bloss of bladder control\b/,
+        /\bbowel incontinence\b/,
+        /\bhyperreflexia\b/,
+        /\bbabinski\b/,
+        /\bclonus\b/,
+        /\blhermitte\b/,
+        /\bmultiple sclerosis\b/,
+        /\bdemyelinat\w*/,
+        /\boligoclonal\b/,
+    ];
+
     // South Africa-specific patterns (TB, HIV, Malaria endemic regions)
     const saSpecificPatterns = {
         level1: [
@@ -233,6 +267,12 @@ export function assessDeterministicRisk(
     if (minTriageLevel > 2 && hasAnyPattern(negationScrubbedSymptoms, saSpecificPatterns.level2 || [])) {
         cautionFlags.push('SA_HIGH_RISK_CONDITION');
         minTriageLevel = 2;
+    }
+
+    // Level 3 (Urgent): neurological symptoms (see level3Patterns above)
+    if (minTriageLevel > 3 && hasAnyPattern(negationScrubbedSymptoms, level3Patterns)) {
+        cautionFlags.push('NEUROLOGICAL_SYMPTOM_REVIEW');
+        minTriageLevel = 3;
     }
 
     // Vital signs assessment — AH-47/AH-44: replaced the old independent,

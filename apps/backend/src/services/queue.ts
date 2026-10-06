@@ -203,9 +203,15 @@ export const addEmailJob = async (data: {
  * gets stuck showing only the interim placeholder forever. Same function
  * either way; see jobs/aiTriageJob.ts.
  */
-export const addAiTriageJob = async (data: AiTriageJobData): Promise<boolean> => {
+export const addAiTriageJob = async (
+  data: AiTriageJobData,
+  options: { delayMs?: number } = {},
+): Promise<boolean> => {
   if (!aiTriageQueue) return false;
-  await aiTriageQueue.add("analyze", data, { priority: 1 });
+  await aiTriageQueue.add("analyze", data, {
+    priority: 1,
+    ...(options.delayMs ? { delay: options.delayMs } : {}),
+  });
   return true;
 };
 

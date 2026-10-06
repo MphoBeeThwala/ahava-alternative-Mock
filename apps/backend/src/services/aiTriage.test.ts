@@ -40,8 +40,13 @@ describe("analyzeSymptoms — fallback heuristic negation handling", () => {
       symptoms: "Sudden crushing chest pain radiating to my left arm, started 20 minutes ago.",
     });
 
+    // The deterministic safety rules still escalate a genuine red flag...
     expect(result.triageLevel).toBe(1);
-    expect(result.possibleConditions).toContain("Acute cardiopulmonary emergency");
+    expect(result.uncertaintyFlags).toContain("EMERGENCY_RED_FLAG_NO_AI");
+    // ...but with no AI the case carries NO invented diagnosis.
+    expect(result.possibleConditions).toEqual([
+      "AI analysis unavailable: no provisional diagnosis was generated",
+    ]);
   }, 20000);
 });
 

@@ -9,6 +9,7 @@ import DashboardLayout from '../../../components/DashboardLayout';
 import { Card, CardHeader, CardTitle } from '../../../components/ui/Card';
 import { StatusBadge } from '../../../components/ui/StatusBadge';
 import StaffInvites, { InviteLinkNotice } from '../../../components/StaffInvites';
+import AiHealthCard from '../../../components/AiHealthCard';
 
 type RoleFilter = 'ALL' | User['role'];
 type StatusFilter = 'ALL' | 'ACTIVE' | 'INACTIVE';
@@ -390,6 +391,7 @@ export default function AdminDashboard() {
                 </Card>
 
                 <StaffInvites refreshKey={invitesRefreshKey} />
+                <div style={{ marginTop: 24 }}><AiHealthCard /></div>
                 </div>{/* p-6 */}
                 </div>{/* outer bg */}
 
