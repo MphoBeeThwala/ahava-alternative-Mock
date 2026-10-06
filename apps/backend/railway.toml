@@ -3,3 +3,15 @@
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
+
+[deploy]
+# Deploy health check: Railway starts the new version, calls this path, and only
+# switches traffic to it once it answers 200; otherwise the previous version
+# keeps serving. /ready (src/index.ts) is 200 only when the database answers,
+# so a bad migration or a broken DATABASE_URL fails the deploy instead of going
+# live. Redis or AI-provider trouble is reported as "degraded" there and does
+# not block a deploy. (/health is liveness only and would pass regardless.)
+# The container runs `prisma migrate deploy` before starting (see Dockerfile),
+# so allow time for migrations before the first probe must succeed.
+healthcheckPath = "/ready"
+healthcheckTimeout = 180
