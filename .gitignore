@@ -189,3 +189,9 @@ workspace/package-lock.json
 
 # Claude Code local settings/worktrees — personal, not shared
 .claude/
+
+# Research model artifacts: ignored by default so candidates (and synthetic-data
+# models) can't be committed by accident. An APPROVED model is added with
+# `git add -f` in a reviewed PR; see apps/ml-service/research/artifacts/README.md
+apps/ml-service/research/artifacts/*
+!apps/ml-service/research/artifacts/README.md

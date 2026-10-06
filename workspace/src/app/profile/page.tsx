@@ -6,6 +6,7 @@ import DashboardLayout from "../../components/DashboardLayout";
 import TwoFactorSettings from "../../components/TwoFactorSettings";
 import ChangePasswordSettings from "../../components/ChangePasswordSettings";
 import GoogleLinkSettings from "../../components/GoogleLinkSettings";
+import ResearchConsentSettings from "../../components/ResearchConsentSettings";
 import { authApi, patientApi, RiskProfile } from "../../lib/api";
 import { useAuth } from "../../contexts/AuthContext";
 
@@ -771,6 +772,7 @@ export default function ProfilePage() {
 
             {user && <ChangePasswordSettings />}
             {user?.role === "PATIENT" && <GoogleLinkSettings />}
+            {user?.role === "PATIENT" && <ResearchConsentSettings />}
             {user && <TwoFactorSettings initiallyEnabled={!!user.totpEnabled} required={['NURSE', 'DOCTOR', 'ADMIN'].includes(user.role)} />}
           </div>
         </div>

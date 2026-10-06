@@ -84,8 +84,8 @@ jobs:
       - name: Install dependencies
         working-directory: apps/ml-service
         run: |
-          pip install -r requirements.txt
-          pip install pytest
+          pip install -r requirements-research.txt
+          pip install pytest httpx
 
       - name: Run tests
         working-directory: apps/ml-service

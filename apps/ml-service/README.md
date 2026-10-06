@@ -48,3 +48,15 @@ Backend and ML service must use the exact same `ML_SERVICE_SHARED_SECRET`.
 - `TIMESCALE_MODE=off`: always use plain PostgreSQL table
 
 For Railway Postgres without Timescale installed, use `auto` or `off`.
+
+## Research tooling (offline) and shadow scoring
+
+`python -m research ...` builds datasets from the pseudonymised research tables, trains and evaluates
+candidate models, reports whether there is enough data to seek validation, and manages the human approval
+gate. It needs `pip install -r requirements-research.txt` (scikit-learn) and `RESEARCH_DATABASE_URL`
+(a read-only login from `pnpm --filter backend research-db-role`). Try it without patient data via
+`--source synthetic`. The live service needs none of this: it serves only models a named person has approved
+for **shadow** scoring (`GET /research/models`, `POST /research/shadow-predict`), numpy only, and by default
+serves none. Optional: `RESEARCH_MODEL_DIR` (default `research/artifacts`). Full guide:
+`docs/RESEARCH_DATA_PIPELINE.md`.
+

@@ -11,7 +11,7 @@
 import { Request, Response, NextFunction } from 'express';
 import prisma from '../lib/prisma';
 
-export type ConsentType = 'AI_TRIAGE' | 'BIOMETRIC_MONITORING' | 'DATA_SHARING' | 'MARKETING';
+export type ConsentType = 'AI_TRIAGE' | 'BIOMETRIC_MONITORING' | 'DATA_SHARING' | 'MARKETING' | 'RESEARCH_DATA';
 
 export function requireConsent(consentType: ConsentType, version = '1.0') {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {

@@ -93,7 +93,10 @@ export default function PrivacyPolicyPage() {
           <h2 style={{ fontSize: 20, fontWeight: 800, color: "#0f172a" }}>11. Cookies</h2>
           <p>We use essential cookies for authentication sessions and to secure the sign-in process. We do not use tracking or advertising cookies. If you use Sign in with Google, Google may set its own cookies on its sign-in button; those are governed by Google&rsquo;s privacy policy.</p>
 
-          <h2 style={{ fontSize: 20, fontWeight: 800, color: "#0f172a" }}>12. Contact Us</h2>
+          <h2 style={{ fontSize: 20, fontWeight: 800, color: "#0f172a" }}>12. Optional research programme</h2>
+          <p>If, and only if, you choose to take part (a separate, optional setting in your profile that is off by default), we keep a coded copy of your readings, your age group, sex, the health history you entered, and outcomes your clinicians confirm, to build and test future health tools that are accurate for South African and African patients. We do not keep your name, contact details, ID number, address, location, messages or anything you typed in your own words. The copy is stored under a code that only we can link back to you, so it remains personal information under POPIA. Only readings recorded after you agree are included, taking part does not change your care, and nothing from it is shown to you or to a clinician. You can withdraw at any time from your profile, which stops new data and deletes what was captured.</p>
+
+          <h2 style={{ fontSize: 20, fontWeight: 800, color: "#0f172a" }}>13. Contact Us</h2>
           <p>For privacy-related queries or to exercise your POPIA rights, contact our Information Officer at: <strong>privacy@ahavaon88.co.za</strong></p>
 
         </div>

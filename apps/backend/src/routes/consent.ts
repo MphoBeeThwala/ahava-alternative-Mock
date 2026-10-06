@@ -10,10 +10,16 @@ import { Router, Request, Response, NextFunction } from 'express';
 import Joi from 'joi';
 import prisma from '../lib/prisma';
 import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
+import { RESEARCH_CONSENT_TYPE, RESEARCH_CONSENT_VERSION } from '../services/research/pseudonym';
+import { purgeSubject } from '../services/research/researchCapture';
 
 const router: Router = Router();
 
-const VALID_CONSENT_TYPES = ['AI_TRIAGE', 'BIOMETRIC_MONITORING', 'DATA_SHARING', 'MARKETING'] as const;
+// RESEARCH_DATA is a separate, opt-in purpose (POPIA s13/s15: specific purpose,
+// no bundling): pseudonymised use of a patient's readings and clinician-confirmed
+// outcomes to build and validate future prediction models. It is never implied
+// by any other consent. See docs/RESEARCH_DATA_PIPELINE.md.
+const VALID_CONSENT_TYPES = ['AI_TRIAGE', 'BIOMETRIC_MONITORING', 'DATA_SHARING', 'MARKETING', RESEARCH_CONSENT_TYPE] as const;
 type ValidConsentType = (typeof VALID_CONSENT_TYPES)[number];
 
 function isValidConsentType(value: string): value is ValidConsentType {
@@ -31,6 +37,12 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
     const userId = (req as any).user.id;
     const { error, value } = giveConsentSchema.validate(req.body);
     if (error) return res.status(400).json({ success: false, error: error.details[0].message });
+    if (value.consentType === RESEARCH_CONSENT_TYPE && value.version !== RESEARCH_CONSENT_VERSION) {
+      return res.status(400).json({
+        success: false,
+        error: `RESEARCH_DATA consent must be given on the current wording (version ${RESEARCH_CONSENT_VERSION})`,
+      });
+    }
 
     const ipAddress = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()
       ?? req.socket.remoteAddress ?? null;
@@ -136,6 +148,27 @@ router.delete('/:consentType', async (req: Request, res: Response, next: NextFun
         ?? req.socket.remoteAddress ?? null,
       userAgent: req.headers['user-agent'] ?? null,
     }).catch(() => undefined);
+
+    // Withdrawing research consent also deletes what was already captured
+    // under it; "no longer processed" would not be true otherwise. If the
+    // delete could not run we say so instead of claiming it did.
+    if (consentType === RESEARCH_CONSENT_TYPE) {
+      const purge = await purgeSubject(userId);
+      await createAuditLog({
+        userId,
+        userRole: (req as any).user?.role,
+        action: 'DELETE',
+        resource: 'ResearchData',
+        metadata: { event: 'RESEARCH_DATA_PURGED_ON_WITHDRAWAL', purged: purge.purged, snapshots: purge.snapshots, outcomes: purge.outcomes },
+      }).catch(() => undefined);
+      return res.json({
+        success: true,
+        message: purge.purged
+          ? 'Research consent withdrawn. Your readings and outcomes held for research have been deleted.'
+          : 'Research consent withdrawn and no further data will be captured. Deletion of data already captured is pending and will be completed by our team.',
+        researchDataDeleted: purge.purged,
+      });
+    }
 
     res.json({
       success: true,

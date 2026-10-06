@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import Optional
+from typing import List, Optional
 from models import (
     BiometricData, IngestResponse, ReadinessScore, AlertLevel,
     ContextualProfile, EarlyWarningSummary,
@@ -143,6 +143,59 @@ def set_early_warning_context(user_id: str, context: ContextualProfile):
 def get_baseline_info(user_id: str):
     """Return baseline confidence stage and progress for a user."""
     return engine.get_baseline_info(user_id)
+
+# ---------------------------------------------------------------------------
+# Research: shadow scoring (docs/RESEARCH_DATA_PIPELINE.md)
+#
+# Scores de-identified snapshots with models a named human has approved for
+# SHADOW use. The backend stores the result next to the snapshot; nothing here
+# is returned to patients or clinicians and nothing feeds a live decision. The
+# research package is imported defensively: if it is missing or broken the live
+# endpoints above are unaffected and these answer 503.
+# ---------------------------------------------------------------------------
+try:
+    from research import shadow as _research_shadow
+except Exception as _research_err:  # pragma: no cover - defensive
+    _research_shadow = None
+    print(f"[research] shadow scoring unavailable: {_research_err}")
+
+
+class _ModelRef(BaseModel):
+    name: str
+    version: str
+
+
+class _ShadowItem(BaseModel):
+    snapshot_id: str
+    snapshot: dict
+    history: List[dict] = []
+
+
+class ShadowPredictRequest(BaseModel):
+    models: Optional[List[_ModelRef]] = None
+    items: List[_ShadowItem]
+
+
+@app.get("/research/models")
+def research_models():
+    """Models currently approved for shadow scoring (usually none)."""
+    if _research_shadow is None:
+        raise HTTPException(status_code=503, detail="research scoring unavailable")
+    return {"models": _research_shadow.describe()}
+
+
+@app.post("/research/shadow-predict")
+def research_shadow_predict(body: ShadowPredictRequest):
+    if _research_shadow is None:
+        raise HTTPException(status_code=503, detail="research scoring unavailable")
+    if len(body.items) > 200:
+        raise HTTPException(status_code=413, detail="at most 200 items per request")
+    results = _research_shadow.score_items(
+        [i.model_dump() for i in body.items],
+        [m.model_dump() for m in body.models] if body.models else None,
+    )
+    return {"results": results}
+
 
 # Middleware / Metadata
 @app.middleware("http")

@@ -1,5 +1,7 @@
 import 'dotenv/config';
 import prisma from '../lib/prisma';
+import { getPseudonymKey } from '../services/research/pseudonym';
+import { purgeSubject } from '../services/research/researchCapture';
 
 async function targetedReset() {
   const keepEmail = 'themol581@gmail.com';
@@ -36,6 +38,26 @@ async function targetedReset() {
       select: { id: true }
     });
     const bookingIdsToDelete = bookingsToDelete.map(b => b.id);
+
+    // Research rows are linked by pseudonym, not by user id, so they are not
+    // removed with the user: purge each leaving user's explicitly, before the
+    // account (and so the means of recomputing the pseudonym) is gone.
+    const leaving = await prisma.user.findMany({ where: { id: { notIn: keepIds } }, select: { id: true } });
+    if (getPseudonymKey()) {
+      let failures = 0;
+      for (const u of leaving) {
+        if (!(await purgeSubject(u.id)).purged) failures += 1;
+      }
+      if (failures > 0) {
+        console.error(`❌ Could not purge research data for ${failures} user(s). Aborting before deleting accounts.`);
+        return;
+      }
+    } else if ((await prisma.researchSnapshot.count()) + (await prisma.researchOutcome.count()) > 0) {
+      // Rows exist but the key that links them to people is missing: they cannot be
+      // purged per person, and deleting the accounts would strand them.
+      console.error('❌ Research data exists but RESEARCH_PSEUDONYM_KEY is not set, so it cannot be purged per user. Set the key, or clear the research tables deliberately. Aborting.');
+      return;
+    }
 
     await prisma.message.deleteMany({ where: { OR: [{ senderId: { notIn: keepIds } }, { recipientId: { notIn: keepIds } }] } });
     await prisma.biometricReading.deleteMany({ where: { userId: { notIn: keepIds } } });

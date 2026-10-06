@@ -5,6 +5,7 @@ import { StaffInvite, UserRole } from '@prisma/client';
 import { AuthenticatedRequest, requireAdmin, invalidateCachedUser } from '../middleware/auth';
 import { checkStepUp, requireRecentStepUp } from '../middleware/stepUp';
 import { getAiHealth } from '../services/aiHealth';
+import { researchStatus } from '../services/research/researchCapture';
 import { probeAiProviders } from '../services/aiProviders';
 import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 import { emailSchema, passwordComplexitySchema } from './auth';
@@ -178,6 +179,19 @@ router.post('/invites/:id/revoke', requireAdmin, async (req: AuthenticatedReques
 });
 
 // Get system stats (Admin only)
+// How much research data has accrued (counts only; no rows, no subject keys).
+// This is the "is the dataset growing, and are outcomes arriving" view; whether
+// it is enough to train or validate on is `python -m research.readiness`.
+router.get('/research/status', requireAdmin, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const status = await researchStatus();
+    await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'READ', resource: 'AdminAction', metadata: { entity: 'ResearchStatus' }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
+    res.json({ success: true, research: status });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get('/stats', requireAdmin, async (req: AuthenticatedRequest, res, next) => {
   try {
     const [userCount, bookingCount, visitCount, triageCaseCount] = await Promise.all([
@@ -425,6 +439,12 @@ router.post('/reset-trial-data', requireAdmin, refuseResetInProduction, requireR
     await prisma.triageCase.deleteMany({});
     await prisma.visit.deleteMany({});
     await prisma.booking.deleteMany({});
+    // Research rows have no link to users, so they would outlive the consent
+    // records deleted just below. Data kept "under consent" must never survive
+    // the consent: clear them together (predictions cascade from snapshots).
+    await prisma.researchSnapshot.deleteMany({});
+    await prisma.researchOutcome.deleteMany({});
+    await prisma.researchCursor.deleteMany({});
     await prisma.patientConsent.deleteMany({});
 
     let deletedUserCount = 0;

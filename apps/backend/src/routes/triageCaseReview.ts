@@ -39,6 +39,7 @@ import {
   getReviewedStatusError,
   resolveTriageOverride,
 } from "../services/triageReviewValidation";
+import { captureTriageOutcome } from "../services/research/researchCapture";
 
 const router: Router = Router();
 const VALID_QUEUE_STATUSES = [
@@ -614,6 +615,16 @@ router.post(
         include: triageCaseInclude,
       });
 
+      // Research: AI level vs the doctor's final level (opted-in patients only).
+      void captureTriageOutcome({
+        id: updated.id,
+        patientId: updated.patientId,
+        aiTriageLevel: updated.aiTriageLevel,
+        finalTriageLevel: updated.finalTriageLevel,
+        route: "RELEASED",
+        closedAt: updated.releasedAt,
+      });
+
       sendToUser(updated.patientId, {
         type: "TRIAGE_RESULT_RELEASED",
         data: {
@@ -813,6 +824,14 @@ router.post(
 
       // No /api prefix: fetched via apiClient, whose baseURL is already
       // "/api" (was /api/api/... and 404ing — see routes/triage.ts).
+      void captureTriageOutcome({
+        id,
+        patientId: triageCase.patientId,
+        aiTriageLevel: triageCase.aiTriageLevel,
+        finalTriageLevel: triageCase.finalTriageLevel,
+        route: "PRESCRIPTION",
+      });
+
       const downloadUrl = `/triage-review/${id}/prescription/pdf`;
       sendToUser(triageCase.patientId, {
         type: "PRESCRIPTION_ISSUED",
@@ -1019,6 +1038,15 @@ router.post(
           },
         }),
       ]);
+
+      void captureTriageOutcome({
+        id,
+        patientId: triageCase.patientId,
+        aiTriageLevel: triageCase.aiTriageLevel,
+        finalTriageLevel: triageCase.finalTriageLevel,
+        route: "REFERRAL",
+        emergencyReferral: referral.referralType === "EMERGENCY",
+      });
 
       const downloadUrl = `/triage-review/${id}/referral/pdf`;
       sendToUser(triageCase.patientId, {
