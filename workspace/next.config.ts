@@ -8,6 +8,17 @@ const nextConfig: NextConfig = {
   ...(process.env.NEXT_OUTPUT_STANDALONE === "false"
     ? {}
     : { output: "standalone" as const }),
+  // Google's sign-in popup talks back to the page with postMessage. The
+  // default browser policy for some setups blocks that; this is the value
+  // Google documents for pages that use Sign in with Google.
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [{ key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" }],
+      },
+    ];
+  },
   env: {
     NEXT_PUBLIC_API_URL:
       process.env.NEXT_PUBLIC_API_URL ||

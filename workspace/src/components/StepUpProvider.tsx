@@ -61,6 +61,8 @@ export function StepUpProvider({ children }: { children: React.ReactNode }) {
         primaryLabel={busy ? "Checking…" : "Confirm"}
         onPrimary={submit}
         primaryDisabled={busy || !code.trim()}
+        // Must sit above whatever dialog triggered the action (the admin dialogs use 1000).
+        zIndex={10000}
       >
         <p className="mb-4 text-sm text-slate-600">
           This action needs a fresh code from your authenticator app. You can also use one of your backup codes.
