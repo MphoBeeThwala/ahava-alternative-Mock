@@ -63,6 +63,20 @@ export function isUnavailableResult(result: Pick<TriageResult, "uncertaintyFlags
   return result.uncertaintyFlags.includes("AI_ANALYSIS_UNAVAILABLE");
 }
 
+/**
+ * Without the AI, the safety rules alone put a case at SATS 3 or 2 and miss
+ * time-critical conditions (the diagnostic pack measured 10 of 20 cases below their
+ * safe minimum in this state). A short outage is covered by the doctor banner and
+ * the quick first retries; a case that is STILL unanalysed after this many
+ * re-analysis attempts (default 2, about 12 minutes) is raised to SATS 2 so a
+ * doctor looks at it sooner, and flagged AI_UNAVAILABLE_PROLONGED. 0 turns it off.
+ */
+export function prolongedOutageAttempts(): number {
+  const raw = process.env.AI_UNAVAILABLE_ESCALATE_AFTER_ATTEMPTS;
+  const n = raw === undefined || raw.trim() === "" ? 2 : parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 0 ? n : 2;
+}
+
 const MAX_AI_FILES = 6;
 const MAX_AI_FILE_BYTES = 5 * 1024 * 1024;
 
@@ -120,7 +134,7 @@ export async function processAiTriageJob(data: AiTriageJobData): Promise<void> {
   }
   const files = await loadAiFiles(manifest.attachments);
 
-  const result = await analyzeSymptoms({
+  const analysis = await analyzeSymptoms({
     symptoms,
     imageBase64,
     files,
@@ -130,8 +144,16 @@ export async function processAiTriageJob(data: AiTriageJobData): Promise<void> {
     vitalsSnapshot,
     patient,
   });
+  // A copy: the urgency adjustments below must never change what the analyser returned.
+  const result: TriageResult = { ...analysis };
   const unavailable = isUnavailableResult(result);
   if (holdUrgency) result.triageLevel = Math.min(result.triageLevel, triageCase.aiTriageLevel) as TriageResult["triageLevel"];
+  const escalateAfter = prolongedOutageAttempts();
+  if (unavailable && escalateAfter > 0 && retryAttempt >= escalateAfter && result.triageLevel > 2) {
+    result.triageLevel = 2;
+    result.uncertaintyFlags = [...new Set([...result.uncertaintyFlags, "AI_UNAVAILABLE_PROLONGED"])];
+    result.reasoning += " No AI analysis could be produced for this case after repeated attempts, so its priority has been raised to SATS 2 so that a doctor looks at it sooner.";
+  }
 
   const now = new Date();
   // A re-analysis must not restart the patient's clock: the SLA runs from when

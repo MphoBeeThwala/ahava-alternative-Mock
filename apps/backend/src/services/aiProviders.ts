@@ -152,7 +152,16 @@ const RETRYABLE: ReadonlySet<FailureKind> = new Set([
   'rate_limited', 'overloaded', 'server_error', 'timeout', 'network',
 ]);
 
+// Anthropic reports an empty account as HTTP 400 "invalid_request_error: Your credit
+// balance is too low to access the Anthropic API. Please go to Plans & Billing...".
+// It was filed under bad_request, so nothing said "out of credit" and the chain
+// tried every Claude model (same account) before giving up. Deliberately narrow:
+// Google's per-minute 429 text also says "check your plan and billing details", and
+// that one is a transient rate limit, not an empty account.
+const BILLING_PATTERN = /credit balance (?:is )?too low|purchase credits|plans\s*&\s*billing|insufficient (?:credit|funds)|payment required/i;
+
 export function classifyHttpFailure(status: number, body: string): FailureKind {
+  if (status === 402 || BILLING_PATTERN.test(body)) return 'billing';
   if (status === 401 || status === 403) return 'auth';
   if (status === 404) return 'model_not_found';
   if (status === 400) return /model/i.test(body) ? 'model_not_found' : 'bad_request';
@@ -413,10 +422,17 @@ async function callGeminiOnce(model: string, input: ProviderInput, opts: CallOpt
 // Not worth starting a call that has less than this left of the chain's budget.
 const MIN_CALL_MS = 5_000;
 
+/** Triage uses the defaults. The diagnostic-pack judge asks for a cheaper model and effort. */
+export interface ChainOptions {
+  models?: string[];
+  effort?: string;
+}
+
 async function runChain<T>(
   provider: AiProvider,
   input: ProviderInput,
   accept: (text: string, model: string) => T,
+  options: ChainOptions = {},
 ): Promise<{ value: T; failures: ProviderFailure[] }> {
   const once = provider === 'claude' ? callClaudeOnce : callGeminiOnce;
   const failures: ProviderFailure[] = [];
@@ -425,14 +441,14 @@ async function runChain<T>(
   // Once a model has been slow or busy, ask the next one to think less.
   let slowPath = false;
 
-  for (const model of effectiveChain(provider)) {
+  for (const model of options.models ?? effectiveChain(provider)) {
     if (remaining() < MIN_CALL_MS) break;
     for (let attempt = 0; attempt < 2; attempt++) {
       if (remaining() < MIN_CALL_MS) break;
       try {
         const text = await once(model, input, {
           limitMs: Math.min(timeoutMs(), remaining()),
-          effort: slowPath ? fallbackEffort() : claudeEffort(),
+          effort: slowPath ? fallbackEffort() : (options.effort ?? claudeEffort()),
         });
         const accepted = accept(text, model);
         recordSuccess(provider, model);
@@ -455,8 +471,11 @@ async function runChain<T>(
         }
         failures.push(failure);
         recordFailure(failure);
-        // A bad key or missing configuration won't be fixed by another model.
-        if (e.kind === 'auth' || e.kind === 'not_configured') throw new AiProviderError(provider, failures);
+        // A bad key, missing configuration or an empty account won't be fixed by
+        // another model on the same account: stop here and let the next provider try.
+        if (e.kind === 'auth' || e.kind === 'not_configured' || e.kind === 'billing') {
+          throw new AiProviderError(provider, failures);
+        }
         break;
       }
     }
@@ -467,10 +486,10 @@ async function runChain<T>(
   throw new AiProviderError(provider, failures);
 }
 
-export const runClaude = <T>(input: ProviderInput, accept: (text: string, model: string) => T) =>
-  runChain('claude', input, accept);
-export const runGemini = <T>(input: ProviderInput, accept: (text: string, model: string) => T) =>
-  runChain('gemini', input, accept);
+export const runClaude = <T>(input: ProviderInput, accept: (text: string, model: string) => T, options?: ChainOptions) =>
+  runChain('claude', input, accept, options);
+export const runGemini = <T>(input: ProviderInput, accept: (text: string, model: string) => T, options?: ChainOptions) =>
+  runChain('gemini', input, accept, options);
 
 // ---- single-model check ----------------------------------------------------
 

@@ -32,6 +32,8 @@
     "ai-pack:smoke": "tsx src/scripts/ai-diagnostic-pack.ts --smoke",
     "ai-pack:floor": "tsx src/scripts/ai-diagnostic-pack.ts --floor-only --out floor-report.md",
     "ai-pack:set2": "tsx src/scripts/ai-diagnostic-pack.ts --cases ../../docs/diagnostic-test-pack/ahava-diagnostic-test-cases-set2.json --judge --stage2 --out report-set2.md",
+    "ai-pack:set2-quick": "tsx src/scripts/ai-diagnostic-pack.ts --cases ../../docs/diagnostic-test-pack/ahava-diagnostic-test-cases-set2.json --judge --out report-set2.md",
+    "ai-pack:quick": "tsx src/scripts/ai-diagnostic-pack.ts --judge --out report-quick.md",
     "ai-pack:full": "tsx src/scripts/ai-diagnostic-pack.ts --judge --stage2 --out report.md",
     "db:reset": "prisma migrate reset --force",
     "validate:env": "node scripts/validate-env.js"

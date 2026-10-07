@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { buildCaseInput, renderReport, scoreSafety, type CaseOutcome, type PackCase } from './diagnosticPack';
+import { buildCaseInput, packKeyPolicy, plannedRuns, renderReport, scoreSafety, type CaseOutcome, type PackCase } from './diagnosticPack';
 import { assessDeterministicRisk } from './triageSafety';
 import { checkModel } from './aiProviders';
 
@@ -111,5 +111,45 @@ describe('checkModel', () => {
     const r = await checkModel('claude', 'claude-x');
     expect(r).toMatchObject({ ok: false, kind: 'model_not_found', status: 404 });
     expect(f).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('which API keys a pack run may spend (an early run used up the production credit)', () => {
+  const full = { floorOnly: false, smoke: false };
+
+  it('refuses a full run on the loaded production keys by default', () => {
+    expect(packKeyPolicy({ ANTHROPIC_API_KEY: 'prod', GEMINI_API_KEY: 'prod' }, full).allowed).toBe(false);
+  });
+
+  it('allows a full run on separate test keys, and says it is in test mode', () => {
+    expect(packKeyPolicy({ AI_PACK_ANTHROPIC_API_KEY: 'test' }, full)).toEqual({ testMode: true, allowed: true });
+    expect(packKeyPolicy({ AI_PACK_GEMINI_API_KEY: 'test' }, full)).toEqual({ testMode: true, allowed: true });
+  });
+
+  it('allows spending production credit only when explicitly accepted', () => {
+    expect(packKeyPolicy({ AI_PACK_ALLOW_PRODUCTION_KEYS: '1' }, full).allowed).toBe(true);
+    expect(packKeyPolicy({ AI_PACK_ALLOW_PRODUCTION_KEYS: 'true' }, full).allowed).toBe(false);
+  });
+
+  it('always allows the free and near-free modes', () => {
+    expect(packKeyPolicy({}, { floorOnly: true, smoke: false }).allowed).toBe(true);
+    expect(packKeyPolicy({}, { floorOnly: false, smoke: true }).allowed).toBe(true);
+  });
+});
+
+describe('planned runs', () => {
+  it('counts one run per case, plus one for each case that has later results when stage 2 is on', () => {
+    const withLater = cases.filter((c) => c.input.labs.some((l) => l.withholdUntilStage) || c.input.stages).length;
+    expect(plannedRuns(cases, false)).toBe(20);
+    expect(plannedRuns(cases, true)).toBe(20 + withLater);
+    expect(withLater).toBeGreaterThan(10);
+  });
+});
+
+describe('a run that stopped early says so at the top of the report', () => {
+  it('shows the reason and which judge scored it', () => {
+    const md = renderReport([], { generatedAt: 'now', judged: true, mode: 'full engine', judge: 'claude-sonnet-5-5, medium effort', aborted: 'a provider reports no credit left' });
+    expect(md).toMatch(/RUN STOPPED EARLY: a provider reports no credit left/);
+    expect(md).toMatch(/Judge: claude-sonnet-5-5, medium effort/);
   });
 });

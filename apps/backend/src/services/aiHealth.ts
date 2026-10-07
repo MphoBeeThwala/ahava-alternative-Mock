@@ -23,6 +23,8 @@ export type AiProvider = 'claude' | 'gemini';
 
 export type FailureKind =
   | 'auth'
+  /** The account has no credit left (or a billing problem). Account-wide: another model on the same account will not help. */
+  | 'billing'
   | 'model_not_found'
   | 'rate_limited'
   | 'overloaded'
@@ -161,6 +163,9 @@ export function recordFailure(failure: ProviderFailure): void {
     `[aiHealth] ${failure.provider} (${failure.model}) failed: ${failure.kind}` +
       `${failure.status ? ` ${failure.status}` : ''} - ${trim(failure.message)}`,
   );
+  // Out of credit or a rejected key needs a human, and must not wait for BOTH
+  // providers to fail: the other one is a weaker fallback, silently.
+  if (ACCOUNT_KINDS.has(failure.kind)) void alertAccountProblem(failure);
   void evaluateAlerts();
 }
 
@@ -213,17 +218,19 @@ export function getAiHealth(): {
 const alertCooldownMs = () =>
   Math.max(1, parseInt(process.env.AI_ALERT_COOLDOWN_MINUTES ?? '60', 10) || 60) * 60_000;
 
-let lastDownAlertAt = 0;
+// 'down' = no provider works; 'account' = a provider is out of credit or rejected its key.
+// Separate cooldowns, so one kind of alert never hides the other.
+const lastAlertAt: Record<'down' | 'account', number> = { down: 0, account: 0 };
 let downAlerted = false;
 
-async function claimAlertSlot(): Promise<boolean> {
+async function claimAlertSlot(kind: 'down' | 'account'): Promise<boolean> {
   const now = Date.now();
-  if (now - lastDownAlertAt < alertCooldownMs()) return false;
+  if (now - lastAlertAt[kind] < alertCooldownMs()) return false;
   try {
     const { getRedis } = await import('./redis');
     // One replica sends the email; the others see the lock and stay quiet.
     const got = await getRedis().set(
-      'ai:health:alert-lock',
+      kind === 'down' ? 'ai:health:alert-lock' : `ai:health:alert-lock:${kind}`,
       '1',
       'EX',
       Math.ceil(alertCooldownMs() / 1000),
@@ -233,7 +240,7 @@ async function claimAlertSlot(): Promise<boolean> {
   } catch {
     /* Redis unavailable: this replica's own cooldown is the only guard */
   }
-  lastDownAlertAt = now;
+  lastAlertAt[kind] = now;
   return true;
 }
 
@@ -264,11 +271,40 @@ async function emailAdmins(subject: string, lines: string[]): Promise<void> {
   }
 }
 
+const ACCOUNT_KINDS: ReadonlySet<FailureKind> = new Set(['billing', 'auth']);
+
+/**
+ * Out of credit, or the key was rejected. Found on the first failing call (and
+ * the e-mail goes out at once), because the usual "both providers failing" alert
+ * would wait for the weaker fallback to fail as well, and in the meantime every
+ * case is quietly analysed by the second-best model.
+ */
+async function alertAccountProblem(failure: ProviderFailure): Promise<void> {
+  if (process.env.NODE_ENV === 'test' && process.env.AI_ALERTS_IN_TESTS !== 'true') return;
+  if (!(await claimAlertSlot('account'))) return;
+  const outOfCredit = failure.kind === 'billing';
+  const fix =
+    failure.provider === 'claude'
+      ? outOfCredit
+        ? 'Add credit in the Anthropic Console (console.anthropic.com, Plans & Billing) and turn on auto-reload so it cannot run out again. Also check that test runs (npm run ai-pack) are not using the production key.'
+        : 'Check ANTHROPIC_API_KEY in the backend variables: the key was rejected (wrong, revoked, or its workspace was disabled).'
+      : outOfCredit
+        ? 'Check billing and quota for the Gemini key in Google AI Studio or the Google Cloud console.'
+        : 'Check GEMINI_API_KEY in the backend variables: the key was rejected.';
+  const what = outOfCredit ? 'is out of credit' : 'rejected its API key';
+  console.error(`[aiHealth] ALERT: ${failure.provider} ${what} (${failure.kind}${failure.status ? ` ${failure.status}` : ''}).`);
+  await emailAdmins(`URGENT: Ahava AI provider ${failure.provider} ${what}`, [
+    `${failure.provider} is refusing requests (${failure.kind}${failure.status ? ` ${failure.status}` : ''}: ${trim(failure.message, 160)}). Patient cases are falling back to the other AI provider, or to "no AI analysis" if it is unavailable too.`,
+    fix,
+    'Cases left without an AI summary are re-analysed automatically once this is fixed.',
+  ]);
+}
+
 export async function evaluateAlerts(): Promise<void> {
   if (process.env.NODE_ENV === 'test' && process.env.AI_ALERTS_IN_TESTS !== 'true') return;
   const { status, providers } = getAiHealth();
   if (status === 'down') {
-    if (!(await claimAlertSlot())) return;
+    if (!(await claimAlertSlot('down'))) return;
     downAlerted = true;
     console.error('[aiHealth] ALERT: AI triage is DOWN. Every new case is falling back to "no AI analysis".');
     await emailAdmins('URGENT: Ahava AI triage is down', [
@@ -293,6 +329,7 @@ export async function evaluateAlerts(): Promise<void> {
 export function _resetAiHealthForTests(): void {
   state.clear();
   modelHealth.clear();
-  lastDownAlertAt = 0;
+  lastAlertAt.down = 0;
+  lastAlertAt.account = 0;
   downAlerted = false;
 }
