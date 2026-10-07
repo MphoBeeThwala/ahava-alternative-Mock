@@ -101,16 +101,59 @@ export function getProviderState(provider: AiProvider): ProviderState {
 
 const trim = (s: string, n = 240) => (s.length > n ? `${s.slice(0, n)}…` : s);
 
+// ---- per-model health -------------------------------------------------------
+//
+// The first live run of the diagnostic pack showed a flaw in "try the model that
+// last worked first": ONE slow Opus call made Sonnet the "working model", Sonnet
+// kept succeeding, and every later case was answered by Sonnet until the process
+// restarted, silently, on the hardest cases. A model is now demoted only when it
+// is actually unhealthy:
+//  - it does not exist (model_not_found): demoted for an hour, because retrying a
+//    retired name costs a round trip on every case; or
+//  - it has failed several times IN A ROW (a circuit breaker): demoted for a short
+//    cool-down, so an Opus outage does not make every case wait out a timeout, and
+//    then tried again.
+// A single timeout or overload demotes nothing.
+
+interface ModelHealth {
+  consecutive: number;
+  lastFailureAt: number;
+  lastKind: FailureKind | null;
+}
+
+const modelHealth = new Map<string, ModelHealth>();
+const healthKey = (provider: AiProvider, model: string) => `${provider}:${model}`;
+
+const envMs = (name: string, fallback: number) => {
+  const n = parseInt(process.env[name] ?? '', 10);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+};
+const circuitThreshold = () => Math.max(1, envMs('AI_MODEL_CIRCUIT_THRESHOLD', 3));
+const circuitOpenMs = () => envMs('AI_MODEL_CIRCUIT_OPEN_MS', 120_000);
+const retiredModelDemotionMs = () => envMs('AI_MODEL_RETIRED_DEMOTION_MS', 60 * 60_000);
+
+export function isModelDemoted(provider: AiProvider, model: string): boolean {
+  const h = modelHealth.get(healthKey(provider, model));
+  if (!h || h.lastKind === null) return false;
+  const sinceFailure = Date.now() - h.lastFailureAt;
+  if (h.lastKind === 'model_not_found') return sinceFailure < retiredModelDemotionMs();
+  return h.consecutive >= circuitThreshold() && sinceFailure < circuitOpenMs();
+}
+
 export function recordSuccess(provider: AiProvider, model: string): void {
   const s = getProviderState(provider);
   s.consecutiveFailures = 0;
   s.lastSuccessAt = new Date().toISOString();
-  s.workingModel = model;
+  s.workingModel = model; // informational (admin status); no longer reorders the chain
+  modelHealth.delete(healthKey(provider, model));
   void evaluateAlerts();
 }
 
 export function recordFailure(failure: ProviderFailure): void {
   const s = getProviderState(failure.provider);
+  const key = healthKey(failure.provider, failure.model);
+  const h = modelHealth.get(key) ?? { consecutive: 0, lastFailureAt: 0, lastKind: null };
+  modelHealth.set(key, { consecutive: h.consecutive + 1, lastFailureAt: Date.now(), lastKind: failure.kind });
   s.consecutiveFailures += 1;
   s.lastFailureAt = new Date().toISOString();
   s.lastFailure = { ...failure, message: trim(failure.message) };
@@ -249,6 +292,7 @@ export async function evaluateAlerts(): Promise<void> {
 /** Test helper. */
 export function _resetAiHealthForTests(): void {
   state.clear();
+  modelHealth.clear();
   lastDownAlertAt = 0;
   downAlerted = false;
 }

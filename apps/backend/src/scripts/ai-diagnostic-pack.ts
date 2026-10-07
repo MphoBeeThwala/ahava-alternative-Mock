@@ -18,6 +18,7 @@
  */
 import fs from 'fs';
 import path from 'path';
+import { execSync } from 'child_process';
 import { analyzeSymptoms, type TriageResult } from '../services/aiTriage';
 import { assessDeterministicRisk } from '../services/triageSafety';
 import {
@@ -30,6 +31,16 @@ import {
 const args = process.argv.slice(2);
 const flag = (n: string) => args.includes(`--${n}`);
 const opt = (n: string) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1] : undefined; };
+
+/** Which code produced a report. Two runs of "the same" pack were once indistinguishable. */
+function codeVersion(): string {
+  const git = (cmd: string) => execSync(cmd, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+  try {
+    return `${git('git rev-parse --short HEAD')}${git('git status --porcelain') ? ' (local uncommitted changes)' : ''}`;
+  } catch {
+    return process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) ?? 'unknown';
+  }
+}
 
 const casesPath = path.resolve(
   opt('cases') ?? process.env.AI_PACK_PATH ?? path.join(process.cwd(), '..', '..', 'docs', 'diagnostic-test-pack', 'ahava-diagnostic-test-cases.json'),
@@ -105,6 +116,7 @@ async function main(): Promise<number> {
   }
 
   const outcomes: CaseOutcome[] = [];
+  const runStartedAt = new Date().toISOString();
   for (const c of cases) {
     for (const stage of stages) {
       if (stage === 2 && !c.input.labs.some((l) => l.withholdUntilStage) && !c.input.stages) continue;
@@ -125,7 +137,8 @@ async function main(): Promise<number> {
       const outcome: CaseOutcome = {
         id: c.id, stage, machine, modelUsed: result.modelUsed, seconds: (Date.now() - started) / 1000,
         conditions: result.possibleConditions,
-        failures: (result.providerFailures ?? []).map((f) => `${f.provider}/${f.model}=${f.kind}${f.status ? `(${f.status})` : ''}`),
+        // Include the reason: "timeout" alone cannot tell a silent connection from a slow answer.
+        failures: (result.providerFailures ?? []).map((f) => `${f.provider}/${f.model}=${f.kind}${f.status ? `(${f.status})` : ''}: ${f.message.slice(0, 120)}`),
       };
       if (judged && machine.aiAnswered) outcome.judgement = await judge(c, result);
       outcomes.push(outcome);
@@ -133,7 +146,10 @@ async function main(): Promise<number> {
     }
   }
 
-  const report = renderReport(outcomes, { generatedAt: new Date().toISOString(), judged, mode: floorOnly ? 'floor-only (deterministic rules, no AI)' : 'full engine' });
+  const report = renderReport(outcomes, {
+    generatedAt: new Date().toISOString(), startedAt: runStartedAt, codeVersion: codeVersion(), judged,
+    mode: floorOnly ? 'floor-only (deterministic rules, no AI)' : 'full engine',
+  });
   const out = opt('out');
   if (out) { fs.writeFileSync(out, report); console.log(`\nReport written to ${out}`); } else console.log(`\n${report}`);
   const stage1 = outcomes.filter((o) => o.stage === 1);
