@@ -3129,3 +3129,5 @@ Changes:
 4. **Test runs cannot spend production credit.** A full pack run now refuses to start on the loaded production keys unless separate test keys are set (`AI_PACK_ANTHROPIC_API_KEY`, `AI_PACK_GEMINI_API_KEY`: only those are used when either is set) or `AI_PACK_ALLOW_PRODUCTION_KEYS=1` is set on purpose. It prints how many calls it will make, stops at once on a `billing` failure and writes a partial report that says so, and the scoring judge defaults to the cheaper `claude-sonnet-5-5` at medium effort (`AI_PACK_JUDGE_MODEL`, `AI_PACK_JUDGE_EFFORT`; reports show which judge scored them).
 
 Not done: a periodic one-token canary call to find an empty account before a patient does. The model-list probe does not use credit, so it keeps passing while the balance is zero. Also not done: raising the Gemini quota (a free-tier key will rate-limit the fallback under load; enable billing on that key).
+
+Cheaper runs: `npm run ai-pack:quick` (pack 1) and `npm run ai-pack:set2-quick` (set 2) do stage 1 only, which is about half the calls of `ai-pack:full` / `ai-pack:set2`; use them first and the full versions only when the stage-2 behaviour matters.
