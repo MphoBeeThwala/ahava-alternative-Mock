@@ -3080,3 +3080,13 @@ Patients can sign in or sign up with Google. Staff cannot, ever. The feature is 
 
 Tests added: 14 unit (settings parsing including typos and the date arithmetic) and 11 integration against a real Postgres (the age limit and its exact edge, inactivity removing a person whole, a person's last activity being the later of readings and outcomes, "off", idempotence, the audit entry, the last-run record, consent records untouched), plus 2 frontend.
 
+## 47. ML service database connections are now budgeted per replica, 2026-10-07
+
+**Finding.** Production logs showed about 24 ML worker processes (3 copies of 8) and roughly 110 to 120 database connections dropped at each deploy. Each worker opens its own pool, and psycopg2 opens a pool's minimum at creation (which `ensure_schema()` triggers at import). With the old defaults (5 minimum, 30 maximum per worker) that is about 120 connections held open all the time and a theoretical 720, against a Postgres that allows about 100 by default. Past the limit new connections are refused and `db.py` falls back to in-memory history, which would silently lose patient readings on every restart. It also meant `int(os.getenv(...))` on a bad value crashed the service at import.
+
+**Change.** `db.pool_settings()` sizes the pool from `ML_DB_CONNECTIONS_PER_REPLICA` (default 20) divided among `ML_SERVICE_WORKERS`, so adding workers can never add connections. Minimum is 1. `ML_DB_POOL_MIN` / `ML_DB_POOL_MAX` still override, with a warning when an override exceeds the budget. Bad values fall back to safe defaults with a warning instead of crashing. Effective numbers are logged at start-up. See `apps/ml-service/README.md`.
+
+**To do in Railway (cannot be done from the repo).** Lower `ML_SERVICE_WORKERS` (2 or 3 per replica is plenty) and check `SHOW max_connections;` against `replicas x ML_DB_CONNECTIONS_PER_REPLICA`. Remove the unused `SYNTHEA_JAVA` variable from the ML service.
+
+**Tests.** 20 new ML-service tests (the budget shared among workers, workers never adding connections, overrides and warnings, nonsense values, and the real pool being created with the computed sizes); three deliberate breaks of the logic were each caught. Not verified: the real connection count in production, which needs the two Railway checks above.
+

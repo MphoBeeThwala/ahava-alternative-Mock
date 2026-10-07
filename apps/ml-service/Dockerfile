@@ -24,5 +24,7 @@ EXPOSE 8000
 # no-DATABASE_URL fallback is a per-process in-memory dict, so a second
 # worker in that mode would silently split a user's history across
 # processes. Defaults to 1 (unchanged local/dev behaviour); set to the
-# container's CPU count in production.
+# container's CPU count in production. Each worker has its own database pool, but
+# the pool size is derived from ML_DB_CONNECTIONS_PER_REPLICA divided by the
+# worker count (db.py pool_settings), so more workers never means more connections.
 CMD ["sh", "-c", "python -m uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${ML_SERVICE_WORKERS:-1}"]

@@ -60,3 +60,20 @@ for **shadow** scoring (`GET /research/models`, `POST /research/shadow-predict`)
 serves none. Optional: `RESEARCH_MODEL_DIR` (default `research/artifacts`). Full guide:
 `docs/RESEARCH_DATA_PIPELINE.md`.
 
+## Database connections
+
+Every uvicorn worker is a separate process with its own connection pool, and each pool opens its minimum at start-up.
+Fixed per-worker sizes therefore multiply with workers and replicas (5 per worker x 8 workers x 3 replicas = 120
+connections held open, against a Postgres that allows about 100 by default). Past the limit new connections are refused
+and the service quietly falls back to in-memory history, losing readings on restart.
+
+So the pool is sized from a **budget per replica**, shared out among that replica's workers:
+
+- `ML_DB_CONNECTIONS_PER_REPLICA` (default `20`): connections one replica may hold in total.
+- `ML_SERVICE_WORKERS` (default `1`): workers per replica. Adding workers never adds connections; each just gets a smaller share.
+- `ML_DB_POOL_MIN` (default `1`) and `ML_DB_POOL_MAX` (default: budget divided by workers) override per worker.
+  An override that would exceed the budget is allowed but logged as a warning.
+
+Size it so that `replicas x ML_DB_CONNECTIONS_PER_REPLICA` stays well under the database's `max_connections`
+(`SHOW max_connections;`), leaving room for the backend. The effective numbers are logged at start-up (`[db] Connection pool created ...`).
+
