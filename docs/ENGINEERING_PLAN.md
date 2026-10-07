@@ -3090,3 +3090,22 @@ Tests added: 14 unit (settings parsing including typos and the date arithmetic) 
 
 **Tests.** 20 new ML-service tests (the budget shared among workers, workers never adding connections, overrides and warnings, nonsense values, and the real pool being created with the computed sizes); three deliberate breaks of the logic were each caught. Not verified: the real connection count in production, which needs the two Railway checks above.
 
+
+## 48. "AI analysis did not run" again: streaming, per-provider budgets, a sweep for lost retries, and a pack runner, 2026-10-07
+
+**Incident.** Two emergency-level cases sat for hours on the doctor screen as "AI ANALYSIS DID NOT RUN": Opus 5.5 and Sonnet 5.5 both `timeout`, both Gemini models `overloaded`. The 2 h 43 m and 1 h 16 m ages mean the 2 min / 10 min / 30 min / 2 h re-analyses were failing too, so this was persistent, not a blip.
+
+**What I can and cannot say.** The logs were not available to me, so the root cause is not proven. What the code allowed, and is now fixed:
+1. **One hard 90 s cap on a non-streamed call.** An answer that would have finished at 100 s was killed, and the same slow path was then tried again on the same model. Claude is now streamed: a model that keeps sending (including keep-alive pings) is not cut off; a connection silent for `AI_PROVIDER_IDLE_TIMEOUT_MS` (40 s) is. The per-call ceiling is `AI_PROVIDER_TIMEOUT_MS` (150 s).
+2. **A timeout was retried on the same model**, doubling the wait. Only brief trouble (busy, rate-limited, 5xx, network) is retried now.
+3. **The fallback model was asked to do the same slow work.** After a timeout or overload the next model runs at `AI_CLAUDE_FALLBACK_EFFORT` (medium).
+4. **Claude could use 6+ minutes before Gemini was tried** (the budget was checked per model, not per call). Each provider now has its own budget (Claude 200 s, Gemini 120 s) and a call is capped to what is left.
+5. **A retry chain that dies is never restarted.** It lives in Redis (which was broken until recently) or a process timer. `services/aiTriageSweep.ts` runs every 10 minutes and re-queues a case that is still waiting for a doctor, still labelled "AI unavailable", and idle longer than the longest normal gap (150 min). It re-queues as a *held* re-analysis: the AI may add a diagnosis but can never make the case less urgent than the level it was held at, because the sweep does not have the original vitals.
+
+If the real cause is the network path from the server to the provider, none of this helps by itself; the smoke test below shows it in seconds.
+
+**Tools.** `npm run ai-pack -- --smoke` makes one tiny call to each model in the order production tries them and prints the time and the failure kind, with no retry or fallback. `npm run ai-pack -- --judge [--stage2]` runs the 20-case pack in `docs/diagnostic-test-pack/` through the real engine and writes a scored report; `--floor-only` needs no keys. Images are not sent (the pack ships descriptions, not files).
+
+**What the safety rules alone achieve on the pack (measured, `--floor-only`).** 10 of 20 cases reach the minimum safe level without AI. The other 10 (03, 04, 07, 08, 09, 12, 13, 14, 18, 20) are only caught if the AI answers: DKA on an SGLT2 inhibitor, Addisonian crisis, HELLP with normal BP, TTP, TEN, ludwig's angina and others. When the AI is down these get SATS 2 or 3 (measured through the real no-AI fallback, with the doctor banner), which is below the minimum safe level for all 10. This is why availability is a safety property, and it is an open decision whether the no-AI hold level should be 2.
+
+**Not done.** The pack has not been run against live providers (no keys in the build environment). Pack scoring of diagnosis and must-detect items uses an AI judge and needs clinician spot-checks.

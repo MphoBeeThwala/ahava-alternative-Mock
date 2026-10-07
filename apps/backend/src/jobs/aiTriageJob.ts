@@ -35,6 +35,13 @@ export interface AiTriageJobData {
   patient?: DeterministicRiskPatient;
   /** 0 for the first analysis; n for the nth automatic re-analysis after the AI was unavailable. */
   retryAttempt?: number;
+  /**
+   * Set when a case is re-queued by the sweeper, which does not have the
+   * original vitals or patient context. The AI's answer may then add a
+   * diagnosis and reasoning, but never make the case LESS urgent than the
+   * level it was already held at.
+   */
+  holdUrgency?: boolean;
 }
 
 /**
@@ -76,7 +83,7 @@ async function loadAiFiles(attachments: StoredTriageAttachment[]): Promise<AiInp
 }
 
 export async function processAiTriageJob(data: AiTriageJobData): Promise<void> {
-  const { caseId, patientId, symptoms, patientContext, vitalsSnapshot, patient, retryAttempt = 0 } = data;
+  const { caseId, patientId, symptoms, patientContext, vitalsSnapshot, patient, retryAttempt = 0, holdUrgency = false } = data;
 
   const triageCase = await prisma.triageCase.findUnique({ where: { id: caseId } });
   if (!triageCase) {
@@ -124,6 +131,7 @@ export async function processAiTriageJob(data: AiTriageJobData): Promise<void> {
     patient,
   });
   const unavailable = isUnavailableResult(result);
+  if (holdUrgency) result.triageLevel = Math.min(result.triageLevel, triageCase.aiTriageLevel) as TriageResult["triageLevel"];
 
   const now = new Date();
   // A re-analysis must not restart the patient's clock: the SLA runs from when

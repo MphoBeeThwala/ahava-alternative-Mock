@@ -1,0 +1,2204 @@
+{
+  "packVersion": "1.0.0",
+  "createdOn": "2026-10-06",
+  "purpose": "Blind test set for the Ahava AI triage / diagnostic assistant and ML early-warning engine. Feed ONLY the `input` block to the engine. Score against `answerKey`, which must never be sent to the engine.",
+  "provenance": {
+    "rule": "Every diagnosis, vital sign, lab value and image comes from a peer-reviewed, open-access case report (PubMed / PMC). Nothing clinical is invented.",
+    "constructedFields": "`patientNarrative` and `clinicianNote` are written for this test in plain words from the published facts; they are not the patient's or author's own words. A value of null means the source did not report it - do not fill it in with a guess.",
+    "images": "Images are the figures in the source article. Download them from the PMC link. They are clinical photos and scans, not phone pictures - to simulate a phone upload, photograph the figure on a screen with a phone.",
+    "licence": "All sources are open access. Check the licence on each article page before redistributing images outside internal testing.",
+    "contamination": "All sources were published Jul 2025 - Sep 2026 to reduce the chance the underlying LLM has seen them in training. Cases published before mid-2026 may still be known to newer models."
+  },
+  "triageScale": "SATS acuity: 1 = Red/emergency, 2 = Orange/very urgent, 3 = Yellow/urgent, 4 = Green/routine. `minimumAcceptableLevel` is the least urgent level that is still safe; anything numerically higher is an under-triage failure.",
+  "cases": [
+    {
+      "id": "AHV-DX-01",
+      "discipline": [
+        "Infectious disease",
+        "Neurology",
+        "Immunology"
+      ],
+      "patient": {
+        "ageYears": 53,
+        "sex": "F",
+        "heightCm": null,
+        "weightKg": null,
+        "pregnant": false
+      },
+      "input": {
+        "patientNarrative": "I've had a headache for three weeks and it keeps getting worse. I get fevers on and off, I'm nauseous and vomiting, and my vision has gone blurry. My family says for the last five days I keep falling asleep and I can't remember things from earlier in the day. I've had a lot of infections over the years - ear infections that needed the hospital, shingles twice and once it paralysed my face, pneumonia twice, and an ear infection doctors called malignant. For about two years I've had diarrhoea roughly once a month.",
+        "clinicianNote": "53F, controlled hypertension. 3/52 progressive headache, intermittent fever, N/V, blurred vision; 5/7 somnolence and recent memory loss. ~20-year history of recurrent otitis, recurrent zoster with Ramsay Hunt, malignant otitis externa, 2x pneumonia, intermittent diarrhoea. Mother died of an unspecified bone marrow disorder. No steroids or immunosuppressants.",
+        "vitals": {
+          "hr": null,
+          "rr": null,
+          "sbp": null,
+          "dbp": null,
+          "tempC": null,
+          "spo2": null,
+          "gcs": null
+        },
+        "labs": [
+          {
+            "name": "CSF appearance",
+            "value": "clear"
+          },
+          {
+            "name": "CSF white cells",
+            "value": 61,
+            "unit": "cells/uL",
+            "note": "92% lymphocytes"
+          },
+          {
+            "name": "CSF protein",
+            "value": 108,
+            "unit": "mg/dL"
+          },
+          {
+            "name": "CSF glucose",
+            "value": 32,
+            "unit": "mg/dL",
+            "note": "serum glucose 100 mg/dL, ratio 0.32"
+          },
+          {
+            "name": "CSF lactate",
+            "value": 4.8,
+            "unit": "mmol/L"
+          },
+          {
+            "name": "Cryptococcal antigen (CSF and serum)",
+            "value": "positive",
+            "withholdUntilStage": 2
+          },
+          {
+            "name": "HIV serology",
+            "value": "negative"
+          },
+          {
+            "name": "Haemoglobin",
+            "value": 10.0,
+            "unit": "g/dL"
+          },
+          {
+            "name": "White cell count",
+            "value": 640,
+            "unit": "/uL"
+          },
+          {
+            "name": "Absolute neutrophil count",
+            "value": 300,
+            "unit": "/uL"
+          },
+          {
+            "name": "Absolute lymphocyte count",
+            "value": 170,
+            "unit": "/uL"
+          },
+          {
+            "name": "Platelets",
+            "value": 230000,
+            "unit": "/uL"
+          },
+          {
+            "name": "CRP",
+            "value": 3,
+            "unit": "mg/L"
+          },
+          {
+            "name": "IgG",
+            "value": 4.0,
+            "unit": "g/L",
+            "ref": "7-16"
+          },
+          {
+            "name": "IgM",
+            "value": 0.2,
+            "unit": "g/L",
+            "ref": "0.4-2.3"
+          },
+          {
+            "name": "CD4 count",
+            "value": 188,
+            "unit": "cells/uL"
+          }
+        ],
+        "images": []
+      },
+      "answerKey": {
+        "finalDiagnosis": "Cryptococcal meningitis in an HIV-negative adult, revealing late-onset combined immunodeficiency (LOCID phenotype of CVID): hypogammaglobulinaemia + CD4 lymphopenia",
+        "acceptableAlternatives": [
+          "Cryptococcal meningitis (credit only if the engine also asks why an HIV-negative patient is immunocompromised)"
+        ],
+        "keyDifferentials": [
+          "TB meningitis",
+          "HIV-associated cryptococcal meningitis (excluded by negative HIV)",
+          "Bacterial meningitis",
+          "Haematological malignancy / marrow failure"
+        ],
+        "minimumAcceptableLevel": 2,
+        "mustDetect": [
+          "Altered consciousness + headache + fever = meningitis until proven otherwise",
+          "Severe neutropenia (ANC 300)",
+          "Pattern of 20 years of recurrent infections = immunodeficiency"
+        ],
+        "pitfall": "Nearly two decades of recurrent infections were treated one at a time without a unifying diagnosis. An engine that stops at 'cryptococcal meningitis' and assumes HIV misses the real disease.",
+        "outcome": "Amphotericin B then fluconazole; IVIG replacement and filgrastim. Survived, no opportunistic infections over 12 months.",
+        "imagesAvailable": false
+      },
+      "source": {
+        "citation": "Martinez Evangelista VJ et al. Cureus 2026;18(7):e112980",
+        "pmid": "42621176",
+        "pmcid": "PMC13487075",
+        "doi": "10.7759/cureus.112980",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC13487075/"
+      }
+    },
+    {
+      "id": "AHV-DX-02",
+      "discipline": [
+        "Cardiothoracic surgery",
+        "Neurology",
+        "Emergency medicine"
+      ],
+      "patient": {
+        "ageYears": 87,
+        "sex": "F",
+        "heightCm": null,
+        "weightKg": 46,
+        "pregnant": false
+      },
+      "input": {
+        "patientNarrative": "I was sitting at home reading this afternoon and my left arm suddenly went weak - I couldn't lift it. My left leg feels a bit weak too. I don't have any chest pain or back pain. I take tablets for blood pressure.",
+        "clinicianNote": "87F, hypertensive. Sudden L arm weakness at rest, onset 14:30. NIHSS 5 (L upper limb paralysis, mild L leg weakness). Painless. Note: BP measured in both arms.",
+        "vitals": {
+          "hr": null,
+          "rr": null,
+          "sbp": 92,
+          "dbp": 74,
+          "tempC": null,
+          "spo2": null,
+          "gcs": null,
+          "notes": "BP right arm 92/74, left arm 140/74"
+        },
+        "labs": [
+          {
+            "name": "D-dimer",
+            "value": 331,
+            "unit": "ug/mL",
+            "ref": "0.1-0.9",
+            "note": "drawn 4 h after thrombolysis at the first hospital"
+          },
+          {
+            "name": "ECG",
+            "value": "sinus rhythm, no arrhythmia history"
+          }
+        ],
+        "images": [
+          {
+            "type": "MRI brain (DWI)",
+            "shows": "Right frontal acute infarct; later scan shows right watershed infarcts and a new left cerebellar infarct",
+            "sourceFigure": "Fig. 1"
+          },
+          {
+            "type": "MR angiography",
+            "shows": "Low signal in proximal right vertebral artery",
+            "sourceFigure": "Fig. 2"
+          },
+          {
+            "type": "CT aortogram",
+            "shows": "Intimal entry in the ascending aorta, false-lumen thrombus, brachiocephalic true lumen compressed",
+            "sourceFigure": "Fig. 3",
+            "withholdUntilStage": 2
+          },
+          {
+            "type": "Carotid ultrasound",
+            "shows": "Dissection flap extending into the right common carotid",
+            "sourceFigure": "Fig. 4",
+            "withholdUntilStage": 2
+          }
+        ]
+      },
+      "answerKey": {
+        "finalDiagnosis": "Stanford type A acute aortic dissection presenting as acute ischaemic stroke, without chest pain",
+        "keyDifferentials": [
+          "Cardioembolic ischaemic stroke",
+          "Large-vessel atherothrombotic stroke"
+        ],
+        "minimumAcceptableLevel": 2,
+        "mustDetect": [
+          "Inter-arm BP difference of 48 mmHg in an acute stroke = aortic dissection until excluded",
+          "Thrombolysis is contraindicated if dissection is suspected",
+          "Markedly raised D-dimer"
+        ],
+        "pitfall": "The first hospital gave alteplase for stroke. The dissection was found only after transfer. Painless dissection presenting as stroke is a known trap.",
+        "outcome": "Thrombolysis caused fibrinogen < 50 mg/dL and new embolic infarcts. Surgery delayed 38 h until fibrinogen recovered; ascending aorta and partial arch replaced. Discharged NIHSS 2, independent at 5 years.",
+        "imagesAvailable": true
+      },
+      "source": {
+        "citation": "Kosuga T et al. BMC Cardiovasc Disord 2025;25:782",
+        "pmid": "41174502",
+        "pmcid": "PMC12577336",
+        "doi": "10.1186/s12872-025-05258-7",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC12577336/"
+      }
+    },
+    {
+      "id": "AHV-DX-03",
+      "discipline": [
+        "Dermatology",
+        "Haematology",
+        "Pharmacology"
+      ],
+      "patient": {
+        "ageYears": 64,
+        "sex": "M",
+        "heightCm": null,
+        "weightKg": null,
+        "pregnant": false
+      },
+      "input": {
+        "patientNarrative": "I had a stem cell transplant for leukaemia about five weeks ago. A red bumpy rash started on my chest and spread over two days to my legs. Now there are big blisters on my belly, my mouth is so painful I can't eat, my eyes are red and sore, and it hurts badly down below. The skin is coming off when they touch it.",
+        "clinicianNote": "64M, AML, allogeneic HSCT 5 weeks ago. Started trimethoprim-sulfamethoxazole on day +18 during febrile neutropenia. Day +31: maculopapular rash, trunk, ~18% BSA, no mucosa - treated as acute skin GVHD with topical then IV methylprednisolone. Day +35: tense blisters on abdomen, severe oral pain. Day +37: near-total skin involvement, Nikolsky positive, conjunctival ulcers, erosions of glans. No diarrhoea; bilirubin and LFTs normal throughout.",
+        "vitals": {
+          "hr": null,
+          "rr": null,
+          "sbp": null,
+          "dbp": null,
+          "tempC": 37.7,
+          "spo2": null,
+          "gcs": null,
+          "notes": "Heart rate > 120 bpm (exact value not reported; SCORTEN criterion met)"
+        },
+        "labs": [
+          {
+            "name": "CRP",
+            "value": 31,
+            "unit": "mg/L"
+          },
+          {
+            "name": "Absolute neutrophil count",
+            "value": 6.4,
+            "unit": "x10^9/L"
+          },
+          {
+            "name": "Platelets",
+            "value": 50,
+            "unit": "x10^9/L"
+          },
+          {
+            "name": "Creatinine",
+            "value": 130,
+            "unit": "umol/L"
+          },
+          {
+            "name": "Urea",
+            "value": 14.6,
+            "unit": "mmol/L"
+          },
+          {
+            "name": "Glucose",
+            "value": ">14",
+            "unit": "mmol/L"
+          },
+          {
+            "name": "Bilirubin / liver enzymes",
+            "value": "normal"
+          },
+          {
+            "name": "Skin biopsy",
+            "value": "full-thickness epidermal necrosis with subepidermal blister; sparse dermal infiltrate",
+            "withholdUntilStage": 2
+          }
+        ],
+        "images": [
+          {
+            "type": "Clinical photographs (serial)",
+            "shows": "Progression from discrete trunk papules to confluent erythema, tense bullae and widespread epidermal detachment",
+            "sourceFigure": "Clinical-course figure in source"
+          },
+          {
+            "type": "Histology",
+            "shows": "Full-thickness epidermal necrosis, subepidermal blister",
+            "sourceFigure": "Histology figure in source",
+            "withholdUntilStage": 2
+          }
+        ]
+      },
+      "answerKey": {
+        "finalDiagnosis": "Toxic epidermal necrolysis caused by trimethoprim-sulfamethoxazole (ALDEN score 5, probable), SCORTEN 5",
+        "keyDifferentials": [
+          "Severe acute cutaneous graft-versus-host disease (stage 4)",
+          "Stevens-Johnson syndrome (less than 10% BSA)",
+          "Staphylococcal scalded skin syndrome"
+        ],
+        "minimumAcceptableLevel": 2,
+        "mustDetect": [
+          "Stop the culprit drug (TMP-SMX) immediately",
+          "Mucosal involvement at three sites + Nikolsky sign = SJS/TEN",
+          "Burns-unit level supportive care"
+        ],
+        "pitfall": "Initially treated as GVHD. The engine should recognise that drug exposure 13 days earlier, rapid blistering and multi-site mucosal disease without gut or liver involvement point away from GVHD.",
+        "outcome": "TMP-SMX stopped; IVIG, steroids, ruxolitinib, burns-type care. Re-epithelialised by day +65 without sequelae.",
+        "imagesAvailable": true
+      },
+      "source": {
+        "citation": "Tiskevicius T et al. J Clin Med 2026;15(12):4730",
+        "pmid": "42355898",
+        "pmcid": "PMC13302030",
+        "doi": "10.3390/jcm15124730",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC13302030/",
+        "licence": "CC BY 4.0"
+      }
+    },
+    {
+      "id": "AHV-DX-04",
+      "discipline": [
+        "Haematology",
+        "Infectious disease"
+      ],
+      "patient": {
+        "ageYears": 46,
+        "sex": "F",
+        "heightCm": null,
+        "weightKg": null,
+        "pregnant": false
+      },
+      "input": {
+        "patientNarrative": "For two months I've been more and more tired. Now I have little red spots all over my arms and legs, and I've been vomiting and constipated. I'm otherwise healthy and not on any medicines. The clinic did an HIV test and it was negative.",
+        "clinicianNote": "46F, no history. 2/12 progressive fatigue, new petechiae on limbs, vomiting, constipation. Exam: long-standing molluscum contagiosum lesions on groin and limbs. Local screen (HIV, HBV, HCV, QuantiFERON) reported negative.",
+        "vitals": {
+          "hr": null,
+          "rr": null,
+          "sbp": null,
+          "dbp": null,
+          "tempC": null,
+          "spo2": null,
+          "gcs": null
+        },
+        "labs": [
+          {
+            "name": "Haemoglobin",
+            "value": 89,
+            "unit": "g/L"
+          },
+          {
+            "name": "Platelets",
+            "value": 12,
+            "unit": "x10^9/L"
+          },
+          {
+            "name": "Absolute lymphocyte count",
+            "value": 1.25,
+            "unit": "x10^9/L"
+          },
+          {
+            "name": "Creatinine",
+            "value": 1.43,
+            "unit": "mg/dL"
+          },
+          {
+            "name": "LDH",
+            "value": 1082,
+            "unit": "IU/L"
+          },
+          {
+            "name": "Total bilirubin",
+            "value": 1.3,
+            "unit": "mg/dL"
+          },
+          {
+            "name": "Haptoglobin",
+            "value": "undetectable"
+          },
+          {
+            "name": "Blood smear",
+            "value": "schistocytes present"
+          },
+          {
+            "name": "Coagulation (PT, aPTT)",
+            "value": "normal"
+          },
+          {
+            "name": "ADAMTS13 activity",
+            "value": "<0.2",
+            "unit": "IU/dL",
+            "withholdUntilStage": 2
+          },
+          {
+            "name": "Anti-ADAMTS13 inhibitor",
+            "value": 79,
+            "unit": "IU/mL",
+            "withholdUntilStage": 2
+          }
+        ],
+        "images": []
+      },
+      "answerKey": {
+        "finalDiagnosis": "Acquired immune thrombotic thrombocytopenic purpura (iTTP) associated with undiagnosed advanced HIV (the initial HIV screen was a false negative; stored sample later confirmed HIV at onset)",
+        "acceptableAlternatives": [
+          "Thrombotic thrombocytopenic purpura / thrombotic microangiopathy (full credit only if HIV is flagged for re-testing)"
+        ],
+        "keyDifferentials": [
+          "Haemolytic uraemic syndrome",
+          "DIC (excluded by normal coagulation)",
+          "Evans syndrome",
+          "ITP (excluded by haemolysis and schistocytes)"
+        ],
+        "minimumAcceptableLevel": 2,
+        "mustDetect": [
+          "MAHA + platelets 12 = TTP emergency, needs plasma exchange",
+          "Do not transfuse platelets unless bleeding",
+          "Molluscum contagiosum in an adult is a clue to immunodeficiency - repeat the HIV test"
+        ],
+        "pitfall": "The negative HIV result was accepted. The patient later developed PJP, CMV, toxoplasmosis and a TTP relapse before HIV was found.",
+        "outcome": "Plasma exchange, caplacizumab, steroids. Later HIV-RNA 1.5 million, CD4 135. ADAMTS13 normalised only after antiretroviral therapy.",
+        "imagesAvailable": false
+      },
+      "source": {
+        "citation": "Rao S et al. Ann Hematol 2026;105(2):37",
+        "pmid": "41555103",
+        "pmcid": "PMC12816110",
+        "doi": "10.1007/s00277-026-06733-7",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC12816110/",
+        "licence": "CC BY 4.0"
+      }
+    },
+    {
+      "id": "AHV-DX-05",
+      "discipline": [
+        "Paediatrics",
+        "Paediatric cardiology"
+      ],
+      "patient": {
+        "ageYears": 0.5,
+        "sex": "F",
+        "heightCm": 68,
+        "weightKg": 7.8,
+        "pregnant": false
+      },
+      "input": {
+        "patientNarrative": "My six-month-old daughter has been grunting and breathing fast for two days and keeps vomiting (not green). She cries a lot and seems to have tummy pain. Two days ago the clinic said it was pneumonia and gave antibiotic syrup but she's worse. When she was four months old she was in hospital for nine days with a fever they never explained, and ten days after that she had a seizure, so now she takes epilepsy medicine.",
+        "clinicianNote": "6/12 F. Second presentation in 48 h. Earlier visit: WBC 13.7, Hb 9.5, platelets 576 - treated as CAP with azithromycin. Past: age 4/12, 9 days of fever without source, CRP 178, WBC 18.1, Hb 8.9, platelets 293, sterile pyuria, malaria film negative; echo day 8 reported normal apart from bovine arch; treated with IV antibiotics and antimalarial. Seizure 10 days later -> labelled epilepsy. Today: abdominal US excludes intussusception but shows free fluid, large bilateral pleural effusions and dilated heart chambers.",
+        "vitals": {
+          "hr": 172,
+          "rr": 43,
+          "sbp": 48,
+          "dbp": 29,
+          "tempC": 34.1,
+          "spo2": null,
+          "gcs": null
+        },
+        "labs": [
+          {
+            "name": "White cell count",
+            "value": 15.2,
+            "unit": "x10^9/L",
+            "note": "48% lymphocytes"
+          },
+          {
+            "name": "Haemoglobin",
+            "value": 8.2,
+            "unit": "g/dL"
+          },
+          {
+            "name": "Platelets",
+            "value": 357,
+            "unit": "x10^9/L"
+          },
+          {
+            "name": "Echocardiogram",
+            "value": "LVEF 13%; LMCA 6.1 mm (Z +11.4), LAD 4.0 mm (Z +10.7); giant proximal left coronary aneurysm with two thrombi; severe MR and TR",
+            "withholdUntilStage": 2
+          }
+        ],
+        "images": [
+          {
+            "type": "Chest X-ray (serial)",
+            "shows": "Normal heart at 4 months vs cardiothoracic ratio 0.69 with pulmonary oedema at 6 months",
+            "sourceFigure": "Fig. 1"
+          },
+          {
+            "type": "Echocardiogram",
+            "shows": "Severe LA/LV dilation, MR/TR, giant coronary aneurysm with intraluminal thrombus",
+            "sourceFigure": "Figs. 2-3",
+            "withholdUntilStage": 2
+          }
+        ]
+      },
+      "answerKey": {
+        "finalDiagnosis": "Missed incomplete Kawasaki disease (at 4 months) leading to giant coronary artery aneurysms with thrombosis, ischaemic cardiomyopathy and cardiogenic shock",
+        "keyDifferentials": [
+          "Viral myocarditis",
+          "Dilated cardiomyopathy",
+          "Anomalous left coronary artery from pulmonary artery (ALCAPA)",
+          "Septic shock"
+        ],
+        "minimumAcceptableLevel": 1,
+        "mustDetect": [
+          "Shock in an infant (BP 48/29, HR 172, hypothermia)",
+          "Infant < 6 months with fever >= 7 days and high CRP meets AHA criteria for incomplete Kawasaki workup even without classic signs",
+          "Respiratory distress + cardiomegaly is cardiac, not pneumonia"
+        ],
+        "pitfall": "Every encounter was explained by a common infection. A paediatric test: the engine must apply infant thresholds (AH-47), not adult ones, and must not anchor on 'pneumonia'.",
+        "outcome": "Died of refractory cardiogenic shock within 12 hours of ICU admission.",
+        "imagesAvailable": true
+      },
+      "source": {
+        "citation": "Hailegiorgies YT. BMC Pediatr 2026;26(1)",
+        "pmid": "41857544",
+        "pmcid": "PMC13122887",
+        "doi": "10.1186/s12887-026-06753-2",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC13122887/",
+        "licence": "CC BY 4.0"
+      }
+    },
+    {
+      "id": "AHV-DX-06",
+      "discipline": [
+        "Neurology",
+        "Psychiatry",
+        "Gynaecology"
+      ],
+      "patient": {
+        "ageYears": 21,
+        "sex": "F",
+        "heightCm": null,
+        "weightKg": null,
+        "pregnant": false
+      },
+      "input": {
+        "patientNarrative": "(Told by her mother) My daughter is a university student and was perfectly healthy. Ten days ago she got a terrible headache. This week she's become confused, she sees things that aren't there, and she's aggressive, which is not like her at all. She had two fits where her whole body shook. The first doctor said it was psychosis and gave her antipsychotic medicine. Nobody in our family has mental illness.",
+        "clinicianNote": "21F, previously well. 10/7 severe headache then 1/52 progressive confusion, hallucinations, aggression. Two GTC seizures. Started on antipsychotics elsewhere for presumed acute psychosis. On arrival disoriented, agitated, GCS 10/15, no focal deficit.",
+        "vitals": {
+          "hr": null,
+          "rr": null,
+          "sbp": null,
+          "dbp": null,
+          "tempC": null,
+          "spo2": null,
+          "gcs": 10
+        },
+        "labs": [
+          {
+            "name": "White cell count",
+            "value": 29.8,
+            "unit": "x10^9/L",
+            "note": "87% neutrophils"
+          },
+          {
+            "name": "Sodium",
+            "value": 135,
+            "unit": "mmol/L"
+          },
+          {
+            "name": "Potassium",
+            "value": 2.7,
+            "unit": "mmol/L"
+          },
+          {
+            "name": "CRP",
+            "value": 7.8,
+            "unit": "mg/dL"
+          },
+          {
+            "name": "CSF white cells",
+            "value": 12,
+            "unit": "cells/uL",
+            "note": "lymphocytic"
+          },
+          {
+            "name": "CSF protein",
+            "value": 68,
+            "unit": "mg/dL"
+          },
+          {
+            "name": "EEG",
+            "value": "diffuse slowing with intermittent rhythmic delta"
+          },
+          {
+            "name": "CSF anti-NMDA receptor IgG",
+            "value": "positive",
+            "withholdUntilStage": 2
+          }
+        ],
+        "images": [
+          {
+            "type": "MRI brain (FLAIR)",
+            "shows": "Left temporal lobe hyperintensity",
+            "sourceFigure": "Brain MRI figure"
+          },
+          {
+            "type": "MRI pelvis",
+            "shows": "Left ovarian teratoma",
+            "sourceFigure": "Pelvic MRI figure",
+            "withholdUntilStage": 2
+          }
+        ]
+      },
+      "answerKey": {
+        "finalDiagnosis": "Anti-NMDA receptor encephalitis secondary to a left ovarian teratoma",
+        "keyDifferentials": [
+          "HSV encephalitis (left temporal change - must be covered empirically)",
+          "Primary psychotic disorder",
+          "Neuroleptic malignant syndrome (she received antipsychotics)",
+          "Bacterial meningitis"
+        ],
+        "minimumAcceptableLevel": 1,
+        "mustDetect": [
+          "New psychosis + seizures + reduced GCS = encephalitis, not psychiatry",
+          "Look for ovarian teratoma in a young woman",
+          "Start empirical aciclovir pending HSV PCR"
+        ],
+        "pitfall": "Misdiagnosed as primary psychosis and given antipsychotics, which can worsen this disease.",
+        "outcome": "Steroids, partial plasmapheresis, teratoma excised day 15. Full neurological and psychiatric recovery at 1 month.",
+        "imagesAvailable": true
+      },
+      "source": {
+        "citation": "Moin-Ud-Din-Arshad M et al. Ann Med Surg 2026;88(5):2897-2900",
+        "pmid": "42078602",
+        "pmcid": "PMC13132316",
+        "doi": "10.1097/MS9.0000000000004441",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC13132316/"
+      }
+    },
+    {
+      "id": "AHV-DX-07",
+      "discipline": [
+        "Endocrinology",
+        "Infectious disease"
+      ],
+      "patient": {
+        "ageYears": 40,
+        "sex": "F",
+        "heightCm": null,
+        "weightKg": null,
+        "pregnant": false
+      },
+      "input": {
+        "patientNarrative": "For five months I've had stomach pains on and off and I keep vomiting. My muscles and joints ache, I get low fevers, I sweat at night and I've lost a lot of weight. My skin has got darker over the months. I've been to clinics and casualty many times - they gave me stomach tablets and medicine for some kind of rheumatism but nobody told me what's wrong. For two weeks I've been so weak I can hardly stand and I can't keep food down. No cough.",
+        "clinicianNote": "40F, Ethiopia (TB-endemic). 5/12 intermittent abdominal pain, recurrent non-bloody vomiting, myalgia, arthralgia, low-grade fever, night sweats, weight loss, progressive skin darkening. Multiple visits: PPIs; empirical treatment for an unspecified rheumatological condition. 2/52 worse fatigue and vomiting. Chronically ill, dehydrated; subtle diffuse hyperpigmentation of face and buccal mucosa. No respiratory symptoms.",
+        "vitals": {
+          "hr": 108,
+          "rr": null,
+          "sbp": 86,
+          "dbp": 50,
+          "tempC": null,
+          "spo2": null,
+          "gcs": null
+        },
+        "labs": [
+          {
+            "name": "Random glucose",
+            "value": 64,
+            "unit": "mg/dL"
+          },
+          {
+            "name": "Sodium",
+            "value": 128,
+            "unit": "mmol/L"
+          },
+          {
+            "name": "Potassium",
+            "value": 7.71,
+            "unit": "mmol/L"
+          },
+          {
+            "name": "Creatinine",
+            "value": 1.15,
+            "unit": "mg/dL"
+          },
+          {
+            "name": "Haemoglobin",
+            "value": 11.7,
+            "unit": "g/dL",
+            "note": "MCV 74.4"
+          },
+          {
+            "name": "ESR",
+            "value": 94,
+            "unit": "mm/h"
+          },
+          {
+            "name": "HIV serology",
+            "value": "negative"
+          },
+          {
+            "name": "Chest X-ray",
+            "value": "normal"
+          },
+          {
+            "name": "Morning cortisol",
+            "value": "markedly low (value not reported)",
+            "withholdUntilStage": 2
+          },
+          {
+            "name": "ACTH",
+            "value": "elevated (value not reported)",
+            "withholdUntilStage": 2
+          }
+        ],
+        "images": [
+          {
+            "type": "CT abdomen, adrenal protocol",
+            "shows": "Bilateral enlarged hypo-attenuating adrenals (R 3.2 x 2.4 cm, L 2.5 x 1.9 cm) with punctate calcification and rim enhancement",
+            "sourceFigure": "CT figure",
+            "withholdUntilStage": 2
+          }
+        ]
+      },
+      "answerKey": {
+        "finalDiagnosis": "Primary adrenal insufficiency (Addisonian crisis) due to probable bilateral adrenal tuberculosis",
+        "keyDifferentials": [
+          "Autoimmune adrenalitis",
+          "Bilateral adrenal haemorrhage",
+          "Adrenal metastases / lymphoma",
+          "Peptic ulcer disease (the repeated wrong label)"
+        ],
+        "minimumAcceptableLevel": 1,
+        "mustDetect": [
+          "Potassium 7.71 = immediate cardiac risk: ECG, calcium gluconate",
+          "Hypotension + hyponatraemia + hyperkalaemia + hypoglycaemia = adrenal crisis: give hydrocortisone, do not wait for cortisol result",
+          "Hyperpigmentation can be subtle on darker skin"
+        ],
+        "pitfall": "Five months of GI labels. Empirical treatment for 'rheumatism' (possibly steroids) may have masked it. A test of whether the engine reads the electrolyte pattern over the presenting complaint.",
+        "outcome": "Hyperkalaemia treated; prednisolone + fludrocortisone + anti-TB therapy. Vomiting resolved, gained 5 kg in one month.",
+        "imagesAvailable": true
+      },
+      "source": {
+        "citation": "Garuma MT et al. IDCases 2026;45:e02708",
+        "pmid": "42568851",
+        "pmcid": "PMC13448186",
+        "doi": "10.1016/j.idcr.2026.e02708",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC13448186/"
+      }
+    },
+    {
+      "id": "AHV-DX-08",
+      "discipline": [
+        "Infectious disease / travel medicine",
+        "Critical care",
+        "Haematology"
+      ],
+      "patient": {
+        "ageYears": 61,
+        "sex": "M",
+        "heightCm": null,
+        "weightKg": 100,
+        "pregnant": false
+      },
+      "input": {
+        "patientNarrative": "I've felt unwell for four or five days - sweating, feverish, I measured 38.4 at home. Today I suddenly got terrible pain all over my stomach, 10 out of 10, and I keep vomiting. I came back from three weeks in Angola one or two weeks ago. I didn't take malaria tablets. I have diabetes and poor circulation in my legs.",
+        "clinicianNote": "61M, T2DM on oral agents, peripheral arterial disease with claudication. 4-5/7 malaise, diaphoresis, fever. Today sudden severe diffuse abdominal pain, repeated vomiting, agitation, confusion. Returned from Angola 1-2 weeks ago, no chemoprophylaxis. Cold, mottled skin over trunk and all limbs, marked peripheral cyanosis, profuse sweating, tachypnoea. No bleeding. Four-limb BPs asymmetric. Capillary glucose 110 mg/dL.",
+        "vitals": {
+          "hr": 95,
+          "rr": null,
+          "sbp": 194,
+          "dbp": 106,
+          "tempC": 38.5,
+          "spo2": 97,
+          "gcs": null,
+          "notes": "BP L arm 194/106, R arm 195/105, L leg 202/105, R leg 111/90. Tachypnoeic and confused."
+        },
+        "labs": [
+          {
+            "name": "pH",
+            "value": 7.3
+          },
+          {
+            "name": "pCO2",
+            "value": 18,
+            "unit": "mmHg"
+          },
+          {
+            "name": "Bicarbonate",
+            "value": 8.9,
+            "unit": "mmol/L"
+          },
+          {
+            "name": "Lactate",
+            "value": 11.1,
+            "unit": "mmol/L"
+          },
+          {
+            "name": "Creatinine",
+            "value": 2.06,
+            "unit": "mg/dL",
+            "note": "baseline 0.9"
+          },
+          {
+            "name": "Urea",
+            "value": 91,
+            "unit": "mg/dL"
+          },
+          {
+            "name": "CRP",
+            "value": 251,
+            "unit": "mg/L"
+          },
+          {
+            "name": "Procalcitonin",
+            "value": 92,
+            "unit": "ng/mL"
+          },
+          {
+            "name": "Platelets",
+            "value": 9000,
+            "unit": "/uL"
+          },
+          {
+            "name": "White cell count",
+            "value": 4300,
+            "unit": "/uL"
+          },
+          {
+            "name": "Haemoglobin",
+            "value": 15.9,
+            "unit": "g/dL"
+          },
+          {
+            "name": "D-dimer",
+            "value": ">12800",
+            "unit": "ng/mL"
+          },
+          {
+            "name": "INR",
+            "value": 1.18
+          },
+          {
+            "name": "aPTT",
+            "value": 41.1,
+            "unit": "s"
+          },
+          {
+            "name": "Fibrinogen",
+            "value": 489,
+            "unit": "mg/dL"
+          },
+          {
+            "name": "Total bilirubin",
+            "value": 3.2,
+            "unit": "mg/dL"
+          },
+          {
+            "name": "AST / ALT",
+            "value": "201 / 82",
+            "unit": "U/L"
+          },
+          {
+            "name": "LDH",
+            "value": 827,
+            "unit": "U/L"
+          },
+          {
+            "name": "Lipase",
+            "value": 110,
+            "unit": "U/L"
+          },
+          {
+            "name": "Troponin",
+            "value": 42.4,
+            "unit": "pg/mL"
+          },
+          {
+            "name": "Thin film",
+            "value": "frequent ring forms, parasitaemia > 25%",
+            "withholdUntilStage": 2
+          }
+        ],
+        "images": [
+          {
+            "type": "Clinical photograph",
+            "shows": "Diffuse patchy violaceous mottling of the trunk",
+            "sourceFigure": "Fig. 1"
+          },
+          {
+            "type": "Clinical photograph",
+            "shows": "Marked peripheral cyanosis",
+            "sourceFigure": "Fig. 2"
+          }
+        ]
+      },
+      "answerKey": {
+        "finalDiagnosis": "Severe imported Plasmodium falciparum malaria (parasitaemia > 25%) complicated by thrombotic-predominant DIC and multi-organ failure",
+        "keyDifferentials": [
+          "Bacterial septic shock with DIC (high procalcitonin is misleading)",
+          "Acute mesenteric ischaemia",
+          "Aortic dissection (asymmetric BP)"
+        ],
+        "minimumAcceptableLevel": 1,
+        "mustDetect": [
+          "Fever after travel to sub-Saharan Africa = malaria until a film says otherwise",
+          "Lactate 11, mottling, confusion = shock despite high BP readings",
+          "IV artesunate without delay"
+        ],
+        "pitfall": "A normal heart rate and very high arm BPs can falsely reassure a vitals-only model. The leg BP of 111/90 and mottling are the clue to arterial thrombosis.",
+        "outcome": "IV artesunate, ventilation, vasopressors, dialysis, heparin. Parasitaemia cleared, but right femoropopliteal thrombosis needed above-knee amputation; died later of nosocomial infection.",
+        "imagesAvailable": true
+      },
+      "source": {
+        "citation": "Gisca E et al. Cureus 2026;18(2):e104046",
+        "pmid": "41883905",
+        "pmcid": "PMC13010318",
+        "doi": "10.7759/cureus.104046",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC13010318/"
+      }
+    },
+    {
+      "id": "AHV-DX-09",
+      "discipline": [
+        "Ophthalmology",
+        "Rheumatology"
+      ],
+      "patient": {
+        "ageYears": 70,
+        "sex": "M",
+        "heightCm": null,
+        "weightKg": null,
+        "pregnant": false
+      },
+      "input": {
+        "patientNarrative": "For six months my right ear and jaw joint have hurt. Doctors said ear infection, then something about a long bone in my neck, then my teeth - nothing helped. Now my jaw hurts when I chew and I have to stop eating. A week ago I suddenly lost the sight in my right eye. It didn't hurt. I have diabetes, high blood pressure and heart disease.",
+        "clinicianNote": "70M, T2DM, HTN, IHD. 6/12 R ear and TMJ pain - treated as otitis externa, then Eagle syndrome (elongated styloid on imaging), then dental. Now jaw claudication and sudden painless R visual loss 1/52. Tender, prominent R temporal artery with reduced pulse; scalp tenderness. R VA counting fingers, marked RAPD. R disc swollen 360 degrees with splinter haemorrhages; L disc normal. ESR and CRP raised (values not reported).",
+        "vitals": {
+          "hr": null,
+          "rr": null,
+          "sbp": null,
+          "dbp": null,
+          "tempC": null,
+          "spo2": null,
+          "gcs": null
+        },
+        "labs": [
+          {
+            "name": "ESR",
+            "value": "elevated (value not reported)"
+          },
+          {
+            "name": "CRP",
+            "value": "elevated (value not reported)"
+          },
+          {
+            "name": "OCT",
+            "value": "right optic disc swelling; right macula normal"
+          }
+        ],
+        "images": [
+          {
+            "type": "Clinical photograph (phone-style)",
+            "shows": "Prominent, tender right temporal artery",
+            "sourceFigure": "Fig. 1"
+          },
+          {
+            "type": "Fundus photographs",
+            "shows": "Right optic disc pallor and blurred margins (AAION); left normal",
+            "sourceFigure": "Fig. 2"
+          },
+          {
+            "type": "Histology",
+            "shows": "Temporal artery: intimal hyperplasia, transmural inflammation, multinucleated giant cells",
+            "sourceFigure": "Fig. 3",
+            "withholdUntilStage": 2
+          }
+        ]
+      },
+      "answerKey": {
+        "finalDiagnosis": "Giant cell arteritis (biopsy-proven, bilateral) with arteritic anterior ischaemic optic neuropathy, right eye",
+        "keyDifferentials": [
+          "Non-arteritic AION (diabetic patient)",
+          "Central retinal artery occlusion",
+          "Temporomandibular joint disorder (the long-running wrong label)"
+        ],
+        "minimumAcceptableLevel": 2,
+        "mustDetect": [
+          "Over-50 + jaw claudication + sudden vision loss = GCA: high-dose steroids same day to save the other eye",
+          "Do not wait for biopsy to treat"
+        ],
+        "pitfall": "Jaw claudication was read as ear/TMJ pain for six months. GCA is rare in the source region, so it was not considered.",
+        "outcome": "IV methylprednisolone, oral prednisolone, methotrexate, then tocilizumab. Right eye progressed to no light perception.",
+        "imagesAvailable": true
+      },
+      "source": {
+        "citation": "Al Jabri NSA, Al Belushi FWM. Oman J Ophthalmol 2026;19(2):256-258",
+        "pmid": "42516340",
+        "pmcid": "PMC13404712",
+        "doi": "10.4103/ojo.ojo_392_25",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC13404712/"
+      }
+    },
+    {
+      "id": "AHV-DX-10",
+      "discipline": [
+        "HIV medicine",
+        "Oncology",
+        "Cardiology"
+      ],
+      "patient": {
+        "ageYears": 27,
+        "sex": "M",
+        "heightCm": null,
+        "weightKg": null,
+        "pregnant": false
+      },
+      "input": {
+        "patientNarrative": "I found out recently I have HIV and haven't started treatment yet. For five days my chest feels tight and I get short of breath. I'm tired and feverish, it hurts to swallow and my stomach hurts. I've noticed small purple spots on top of my left foot, on the roof of my mouth and on my gum above my front teeth.",
+        "clinicianNote": "27M, recently diagnosed advanced HIV, ART-naive (2/52 ago CD4 139, 8.7%; VL 144,000). 5/7 chest tightness, dyspnoea, fatigue, fever, dysphagia, odynophagia, abdominal pain. Oral thrush, splenomegaly, three small violaceous lesions (L foot dorsum, hard palate, labial frenum). CT: diffuse tree-in-bud nodules, generalised lymphadenopathy, splenomegaly.",
+        "vitals": {
+          "hr": 141,
+          "rr": null,
+          "sbp": 104,
+          "dbp": 71,
+          "tempC": 38.2,
+          "spo2": 96,
+          "gcs": null
+        },
+        "labs": [
+          {
+            "name": "Haemoglobin",
+            "value": 7.0,
+            "unit": "g/dL"
+          },
+          {
+            "name": "Sodium",
+            "value": 127,
+            "unit": "mmol/L"
+          },
+          {
+            "name": "AST / ALT",
+            "value": "84 / 68",
+            "unit": "U/L"
+          },
+          {
+            "name": "Alkaline phosphatase",
+            "value": 382,
+            "unit": "U/L"
+          },
+          {
+            "name": "Total bilirubin",
+            "value": 0.3,
+            "unit": "mg/dL"
+          },
+          {
+            "name": "CD4 count",
+            "value": 139,
+            "unit": "cells/uL"
+          },
+          {
+            "name": "HIV-1 RNA",
+            "value": 144000,
+            "unit": "copies/mL"
+          },
+          {
+            "name": "Beta-D-glucan",
+            "value": ">500",
+            "unit": "pg/mL"
+          },
+          {
+            "name": "Serum cryptococcal antigen",
+            "value": "negative"
+          },
+          {
+            "name": "Histoplasma urine and serum antigen",
+            "value": "positive",
+            "withholdUntilStage": 2
+          }
+        ],
+        "images": [
+          {
+            "type": "Clinical photograph (phone-style)",
+            "shows": "Violaceous raised lesions on the labial frenulum / upper gum",
+            "sourceFigure": "Fig. 1"
+          },
+          {
+            "type": "Endoscopy (EGD)",
+            "shows": "Multiple pedunculated violaceous gastric nodules (10-30 mm)",
+            "sourceFigure": "Fig. 2",
+            "withholdUntilStage": 2
+          },
+          {
+            "type": "Echocardiogram",
+            "shows": "Large circumferential pericardial effusion",
+            "sourceFigure": "Fig. 3",
+            "withholdUntilStage": 3
+          },
+          {
+            "type": "CT chest (serial)",
+            "shows": "Progressive bilateral consolidation",
+            "sourceFigure": "Fig. 4"
+          }
+        ],
+        "stages": {
+          "2": "After starting ART on day 4: haematemesis and melaena on day 14.",
+          "3": "Day 22: worsening dyspnoea and tachycardia; echo shows large effusion with early tamponade. 700 mL cloudy orange fluid drained. HIV RNA now 232 copies/mL."
+        }
+      },
+      "answerKey": {
+        "finalDiagnosis": "Kaposi sarcoma (mucocutaneous, visceral gastric and pericardial) with KS-associated immune reconstitution inflammatory syndrome after ART; co-existing disseminated histoplasmosis",
+        "acceptableAlternatives": [
+          "Kaposi sarcoma in advanced HIV (stage 1); credit KS-IRIS at stage 3"
+        ],
+        "keyDifferentials": [
+          "Bacillary angiomatosis",
+          "Disseminated TB",
+          "PJP",
+          "Lymphoma / primary effusion lymphoma"
+        ],
+        "minimumAcceptableLevel": 2,
+        "mustDetect": [
+          "Violaceous oral lesions in advanced HIV = Kaposi sarcoma",
+          "Up to 40% of visceral KS has few skin lesions",
+          "Corticosteroids worsen KS-IRIS"
+        ],
+        "pitfall": "Steroids were started for presumed myopericarditis before cytology showed KS - steroids are associated with worse KS-IRIS mortality.",
+        "outcome": "Liposomal doxorubicin; discharged to rehab, readmitted with respiratory failure, splenic and renal infarcts; died.",
+        "imagesAvailable": true
+      },
+      "source": {
+        "citation": "Sturd NA et al. Open Forum Infect Dis 2026;13(6):ofag363",
+        "pmid": "42338986",
+        "pmcid": "PMC13284416",
+        "doi": "10.1093/ofid/ofag363",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC13284416/"
+      }
+    },
+    {
+      "id": "AHV-DX-11",
+      "discipline": [
+        "Paediatric ophthalmology",
+        "Paediatric oncology"
+      ],
+      "patient": {
+        "ageYears": 1.8,
+        "sex": "F",
+        "heightCm": null,
+        "weightKg": null,
+        "pregnant": false
+      },
+      "input": {
+        "patientNarrative": "In some photos of my daughter (she's 22 months) her right eye looks white in the middle instead of black or red. I can see it sometimes in normal light too. She's playing and eating normally. She hasn't had her vaccinations.",
+        "clinicianNote": "22/12 F, unvaccinated. Parent reports white pupillary reflex right eye. Otherwise well. (Stage 2 findings - ultrasound/EUA - are withheld.)",
+        "vitals": {
+          "hr": null,
+          "rr": null,
+          "sbp": null,
+          "dbp": null,
+          "tempC": null,
+          "spo2": null,
+          "gcs": null
+        },
+        "labs": [
+          {
+            "name": "Ocular ultrasound / EUA with RetCam",
+            "value": "bilateral intraocular retinoblastoma, Group E; right retinal detachment and secondary glaucoma with iris neovascularisation; left phthisis bulbi",
+            "withholdUntilStage": 2
+          },
+          {
+            "name": "CT orbits",
+            "value": "bilateral intraocular masses with calcification",
+            "withholdUntilStage": 2
+          },
+          {
+            "name": "Bone marrow aspirate and lumbar puncture",
+            "value": "normal",
+            "withholdUntilStage": 2
+          }
+        ],
+        "images": [
+          {
+            "type": "Clinical photograph (phone-style)",
+            "shows": "Leukocoria - white pupil in the right eye",
+            "sourceFigure": "Presentation photo in source"
+          },
+          {
+            "type": "Ocular ultrasound / RetCam",
+            "shows": "Intraocular tumour",
+            "sourceFigure": "US and RetCam figures",
+            "withholdUntilStage": 2
+          }
+        ]
+      },
+      "answerKey": {
+        "finalDiagnosis": "Bilateral retinoblastoma, International Classification Group E (clinical/imaging diagnosis; no histology was obtained)",
+        "keyDifferentials": [
+          "Coats disease",
+          "Persistent fetal vasculature",
+          "Congenital cataract",
+          "Toxocariasis"
+        ],
+        "minimumAcceptableLevel": 4,
+        "requiredAction": "Low physiological acuity but URGENT specialist referral (ophthalmology within days). Reassurance or 'monitor' is a failure.",
+        "mustDetect": [
+          "Leukocoria in a child = retinoblastoma until proven otherwise",
+          "A well-appearing child is not a low-risk child here"
+        ],
+        "pitfall": "Tests whether low acuity is confused with low risk. In the source, refusal of enucleation and 14 months lost to follow-up led to bilateral fungating orbital masses with dural metastases.",
+        "outcome": "One chemotherapy cycle, then lost to follow-up; returned at age 3 with IRSS stage IV disease; long-term palliative chemotherapy and radiotherapy.",
+        "imagesAvailable": true
+      },
+      "source": {
+        "citation": "Susanty A et al. Am J Case Rep 2026;27:e951652",
+        "pmid": "42210589",
+        "pmcid": "PMC13228095",
+        "doi": "10.12659/AJCR.951652",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC13228095/"
+      }
+    },
+    {
+      "id": "AHV-DX-12",
+      "discipline": [
+        "Endocrinology",
+        "Emergency medicine"
+      ],
+      "patient": {
+        "ageYears": 51,
+        "sex": "M",
+        "heightCm": null,
+        "weightKg": null,
+        "pregnant": false
+      },
+      "input": {
+        "patientNarrative": "For about a week I've felt weak, with indigestion, heartburn, bloating, and I feel full after a few bites. I'm passing a lot of urine, I'm always thirsty and I've lost weight. I vomited twice yesterday. My sugar was only 8.9 this morning so I don't think it's my diabetes. Ten days ago my doctor added a new diabetes tablet, empagliflozin, to my metformin.",
+        "clinicianNote": "51M, long-standing poorly controlled T2DM (HbA1c 10.4-11%, FPG 272 mg/dL 3/52 ago), HTN on perindopril and amlodipine. Empagliflozin added to metformin 10 days ago. 1/52 weakness, dyspepsia, reflux, bloating, early satiety, polyuria, polydipsia, weight loss, reduced intake; 2 vomits in 24 h. No fever. Dehydrated, mild tachycardia, GCS 15, abdomen soft and non-tender.",
+        "vitals": {
+          "hr": null,
+          "rr": null,
+          "sbp": null,
+          "dbp": null,
+          "tempC": null,
+          "spo2": null,
+          "gcs": 15,
+          "notes": "Haemodynamically stable, mild tachycardia (rate not reported)"
+        },
+        "labs": [
+          {
+            "name": "Venous pH",
+            "value": 7.16
+          },
+          {
+            "name": "Bicarbonate",
+            "value": 9,
+            "unit": "mmol/L"
+          },
+          {
+            "name": "Glucose",
+            "value": 160,
+            "unit": "mg/dL",
+            "note": "8.9 mmol/L"
+          },
+          {
+            "name": "Lactate",
+            "value": 1.4,
+            "unit": "mmol/L"
+          },
+          {
+            "name": "Anion gap",
+            "value": 23
+          },
+          {
+            "name": "Sodium / Potassium / Chloride",
+            "value": "135 / 5.8 / 103",
+            "unit": "mmol/L"
+          },
+          {
+            "name": "Creatinine",
+            "value": 1.35,
+            "unit": "mg/dL"
+          },
+          {
+            "name": "BUN",
+            "value": 24,
+            "unit": "mg/dL"
+          },
+          {
+            "name": "Urine ketones",
+            "value": "positive"
+          },
+          {
+            "name": "Haematocrit",
+            "value": 47,
+            "unit": "%"
+          },
+          {
+            "name": "Procalcitonin",
+            "value": "normal"
+          }
+        ],
+        "images": [
+          {
+            "type": "Chest X-ray",
+            "shows": "Normal - a deliberate negative image",
+            "sourceFigure": "Fig. 1"
+          }
+        ]
+      },
+      "answerKey": {
+        "finalDiagnosis": "SGLT2-inhibitor-associated euglycaemic diabetic ketoacidosis",
+        "keyDifferentials": [
+          "Gastroparesis / dyspepsia (the presenting complaint)",
+          "Lactic acidosis (excluded, lactate 1.4)",
+          "Alcoholic or starvation ketoacidosis",
+          "Pancreatitis"
+        ],
+        "minimumAcceptableLevel": 2,
+        "mustDetect": [
+          "Normal-ish glucose does NOT exclude DKA on an SGLT2 inhibitor",
+          "pH 7.16 / HCO3 9 / AG 23 / ketones = DKA",
+          "Stop empagliflozin"
+        ],
+        "pitfall": "The patient himself dismisses diabetes because his sugar is 8.9. An engine that keys on glucose will under-triage.",
+        "outcome": "ICU, IV fluids with dextrose, insulin infusion. Resolved by day 4; empagliflozin stopped, discharged on insulin glargine.",
+        "imagesAvailable": true
+      },
+      "source": {
+        "citation": "Serrano Reyes JC et al. Cureus 2026;18(8):e114492",
+        "pmid": "42732326",
+        "pmcid": "PMC13570715",
+        "doi": "10.7759/cureus.114492",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC13570715/"
+      }
+    },
+    {
+      "id": "AHV-DX-13",
+      "discipline": [
+        "Obstetrics",
+        "Ophthalmology",
+        "Neurology"
+      ],
+      "patient": {
+        "ageYears": 30,
+        "sex": "F",
+        "heightCm": null,
+        "weightKg": null,
+        "pregnant": true,
+        "gestationWeeks": 24
+      },
+      "input": {
+        "patientNarrative": "I'm 24 weeks pregnant with my first baby. Since yesterday my vision has gone very blurry in both eyes - I can only count fingers close up. My blood pressure has been normal. My sister died in her seventh month of pregnancy with something similar.",
+        "clinicianNote": "30F primigravida, 24/40, consanguineous parents. 24 h sudden bilateral blurred vision; VA CF at 0.5 m both eyes. Fundus: bilateral exudative macular retinal detachment. Pallor, scleral icterus. Normotensive throughout admission. Family history: sister died in 7th month of pregnancy with similar features.",
+        "vitals": {
+          "hr": 97,
+          "rr": 18,
+          "sbp": 116,
+          "dbp": 78,
+          "tempC": null,
+          "spo2": 98,
+          "gcs": null
+        },
+        "labs": [
+          {
+            "name": "Haemoglobin",
+            "value": 6.3,
+            "unit": "g/dL"
+          },
+          {
+            "name": "White cell count",
+            "value": 10400,
+            "unit": "/uL"
+          },
+          {
+            "name": "Platelets",
+            "value": 13000,
+            "unit": "/uL"
+          },
+          {
+            "name": "Blood film",
+            "value": "microangiopathic haemolysis with schistocytes"
+          },
+          {
+            "name": "LDH",
+            "value": ">4500",
+            "unit": "U/L"
+          },
+          {
+            "name": "AST / ALT",
+            "value": "135 / 62",
+            "unit": "U/L"
+          },
+          {
+            "name": "Total bilirubin",
+            "value": 2.4,
+            "unit": "mg/dL"
+          },
+          {
+            "name": "Urea / Creatinine",
+            "value": "103 / 1.7",
+            "unit": "mg/dL"
+          },
+          {
+            "name": "PT / INR / aPTT",
+            "value": "normal"
+          },
+          {
+            "name": "D-dimer",
+            "value": 6.1,
+            "unit": "mg/dL"
+          },
+          {
+            "name": "Direct Coombs",
+            "value": "negative"
+          },
+          {
+            "name": "Uric acid",
+            "value": 10.9,
+            "unit": "mg/dL"
+          },
+          {
+            "name": "Urine protein",
+            "value": "2+, ACR 559 mg/g"
+          }
+        ],
+        "images": [
+          {
+            "type": "Peripheral blood film",
+            "shows": "Schistocytes, spherocytes, polychromasia, nucleated RBCs",
+            "sourceFigure": "Fig. 1"
+          },
+          {
+            "type": "MRI brain (DWI/ADC)",
+            "shows": "Acute infarcts: left MCA, bilateral PCA and PICA territories",
+            "sourceFigure": "Fig. 2",
+            "withholdUntilStage": 2
+          }
+        ],
+        "stages": {
+          "2": "24 h after termination of pregnancy: new right-sided weakness (power 1/5) and expressive aphasia; BP 116/78."
+        }
+      },
+      "answerKey": {
+        "finalDiagnosis": "Complete (Mississippi class I) HELLP syndrome without hypertension, complicated by bilateral exudative retinal detachment and multi-territorial ischaemic strokes",
+        "keyDifferentials": [
+          "Thrombotic thrombocytopenic purpura",
+          "Atypical HUS",
+          "Acute fatty liver of pregnancy (no hypoglycaemia)",
+          "Antiphospholipid syndrome (excluded)"
+        ],
+        "minimumAcceptableLevel": 1,
+        "mustDetect": [
+          "Platelets 13,000 + haemolysis + raised liver enzymes in pregnancy = HELLP even with NORMAL blood pressure",
+          "Pregnancy + new visual loss is an obstetric emergency"
+        ],
+        "pitfall": "Normal BP. A model that requires hypertension for pre-eclampsia/HELLP will miss it (10-15% of HELLP is normotensive).",
+        "outcome": "Pregnancy terminated; retinas reattached spontaneously by day 5 postpartum; stroke on day 3; discharged day 10 with platelets 74,000.",
+        "imagesAvailable": true
+      },
+      "source": {
+        "citation": "Chitkara G et al. Cureus 2026;18(8):e114797",
+        "pmid": "42761979",
+        "pmcid": "PMC13588326",
+        "doi": "10.7759/cureus.114797",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC13588326/"
+      }
+    },
+    {
+      "id": "AHV-DX-14",
+      "discipline": [
+        "Paediatrics",
+        "Toxicology"
+      ],
+      "patient": {
+        "ageYears": null,
+        "ageBand": "preschool child (exact age not in abstract)",
+        "sex": "M",
+        "heightCm": null,
+        "weightKg": null,
+        "pregnant": false
+      },
+      "input": {
+        "patientNarrative": "(Parent, limited English) My little boy had tummy upset and vomiting. A few hours later he went floppy and weak and his breathing became bad. We washed his hair with lice shampoo before this.",
+        "clinicianNote": "Preschool child. GI symptoms followed within hours by neurological and respiratory deterioration. Language barrier; history obtained late. Household anti-lice shampoo applied before onset. Arsenic levels (blood, urine, hair) checked first because the product may contain an organo-arsenical - all normal.",
+        "vitals": {
+          "hr": null,
+          "rr": null,
+          "sbp": null,
+          "dbp": null,
+          "tempC": null,
+          "spo2": null,
+          "gcs": null
+        },
+        "labs": [
+          {
+            "name": "Arsenic (plasma, urine, hair)",
+            "value": "within physiological range"
+          },
+          {
+            "name": "Plasma cholinesterase activity",
+            "value": 313,
+            "unit": "U/L",
+            "ref": "1900-3800",
+            "withholdUntilStage": 2
+          },
+          {
+            "name": "Shampoo analysis / LC-HR-MS",
+            "value": "diazinon in product, plasma and urine",
+            "withholdUntilStage": 2
+          }
+        ],
+        "images": []
+      },
+      "answerKey": {
+        "finalDiagnosis": "Systemic organophosphate (diazinon) poisoning from topical anti-lice shampoo, with intermediate syndrome",
+        "keyDifferentials": [
+          "Gastroenteritis with dehydration",
+          "Botulism",
+          "Guillain-Barre syndrome",
+          "Arsenic poisoning (excluded)"
+        ],
+        "minimumAcceptableLevel": 1,
+        "mustDetect": [
+          "Weakness + respiratory compromise after insecticide exposure = organophosphate toxicity",
+          "Cholinesterase level, atropine, early pralidoxime",
+          "Transdermal exposure counts"
+        ],
+        "pitfall": "Diagnosis delayed by non-specific GI start and a language barrier; pralidoxime not given until day 4.",
+        "outcome": "Late pralidoxime led to gradual recovery but persistent hypotonia, peripheral neuropathy and respiratory dysfunction.",
+        "dataCaveat": "Abstract-only source (no open full text). Vitals and most labs were not reported; do not invent them. Useful for testing how the engine handles sparse input.",
+        "imagesAvailable": false
+      },
+      "source": {
+        "citation": "Aknouche F et al. J Anal Toxicol 2026;50(2)",
+        "pmid": "41128598",
+        "pmcid": null,
+        "doi": "10.1093/jat/bkaf096",
+        "url": "https://pubmed.ncbi.nlm.nih.gov/41128598/"
+      }
+    },
+    {
+      "id": "AHV-DX-15",
+      "discipline": [
+        "Neurosurgery",
+        "Paediatrics",
+        "Infectious disease"
+      ],
+      "patient": {
+        "ageYears": 14,
+        "sex": "M",
+        "heightCm": null,
+        "weightKg": null,
+        "pregnant": false
+      },
+      "input": {
+        "patientNarrative": "My lower back suddenly started hurting really badly and the pain goes down both legs. I have a high fever and there's a swelling on the left side of my back. Over the last three days my legs have got weak and now I can't pass urine. It feels numb around my bottom.",
+        "clinicianNote": "14M, previously healthy. Acute severe LBP radiating to both legs, fever 39 C, left paraspinal swelling. Over 3/7: bilateral leg weakness, urinary retention. Exam: MRC 3/5 paraparesis, saddle hypoaesthesia, focal left lumbar paravertebral tenderness.",
+        "vitals": {
+          "hr": null,
+          "rr": null,
+          "sbp": null,
+          "dbp": null,
+          "tempC": 39.0,
+          "spo2": null,
+          "gcs": null
+        },
+        "labs": [
+          {
+            "name": "White cell count",
+            "value": 17550,
+            "unit": "/mm3",
+            "note": "85% neutrophils"
+          },
+          {
+            "name": "CRP",
+            "value": 303.7,
+            "unit": "mg/L"
+          },
+          {
+            "name": "HIV test",
+            "value": "negative"
+          },
+          {
+            "name": "Intra-operative culture",
+            "value": "methicillin-sensitive Staphylococcus aureus",
+            "withholdUntilStage": 2
+          }
+        ],
+        "images": [
+          {
+            "type": "MRI lumbosacral spine",
+            "shows": "Left L3-L4 facet joint septic arthritis with posterior epidural abscess L2-S2 compressing the cauda equina",
+            "sourceFigure": "Fig. 1",
+            "withholdUntilStage": 2
+          }
+        ]
+      },
+      "answerKey": {
+        "finalDiagnosis": "Lumbar (L3-L4) facet joint septic arthritis complicated by spinal epidural abscess with cauda equina syndrome (MSSA)",
+        "keyDifferentials": [
+          "Vertebral osteomyelitis / discitis",
+          "Transverse myelitis",
+          "Guillain-Barre syndrome",
+          "Mechanical disc herniation (fever excludes as sole cause)"
+        ],
+        "minimumAcceptableLevel": 2,
+        "mustDetect": [
+          "Back pain + fever + new weakness + urinary retention + saddle numbness = emergency MRI and neurosurgery",
+          "Adolescent - apply paediatric/older-child thresholds (AH-47)"
+        ],
+        "pitfall": "Back pain in teenagers is usually benign. The red flags must override the base rate. Also a negation test: the narrative contains no denials that should suppress the flags.",
+        "outcome": "Emergency L3-L5 hemilaminectomy and 6 weeks of antibiotics; full neurological recovery.",
+        "imagesAvailable": true
+      },
+      "source": {
+        "citation": "Benyaich Z et al. Cureus 2026;18(4):e106397 (Case 1)",
+        "pmid": "42083684",
+        "pmcid": "PMC13135855",
+        "doi": "10.7759/cureus.106397",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC13135855/"
+      }
+    },
+    {
+      "id": "AHV-DX-16",
+      "discipline": [
+        "Paediatric surgery",
+        "Paediatrics"
+      ],
+      "patient": {
+        "ageYears": 1.75,
+        "sex": "F",
+        "heightCm": null,
+        "weightKg": null,
+        "pregnant": false
+      },
+      "input": {
+        "patientNarrative": "My daughter is 21 months old. A week ago she got high fevers on and off, runny stools and vomited twice. The clinic said it was a tummy virus. For three days now her stools have blood and mucus in them, like red jelly, and she has crampy tummy pain that keeps coming more often and harder. Today it's very bad and she's lying there tired.",
+        "clinicianNote": "21/12 F, previously healthy. 1/52 intermittent high fever, loose stools, 2 vomits - stool and blood cultures negative, managed as viral gastroenteritis. 3/7 bloody mucoid 'currant jelly' stools and escalating colicky pain. Mildly dehydrated, lethargic. Abdomen mildly distended, RLQ tender, no palpable mass, bowel sounds normal.",
+        "vitals": {
+          "hr": 155,
+          "rr": 28,
+          "sbp": null,
+          "dbp": null,
+          "tempC": 37.6,
+          "spo2": null,
+          "gcs": null
+        },
+        "labs": [
+          {
+            "name": "White cell count",
+            "value": 9.07,
+            "unit": "x10^9/L"
+          },
+          {
+            "name": "Haemoglobin",
+            "value": 10.6,
+            "unit": "g/dL"
+          },
+          {
+            "name": "CRP",
+            "value": 55.69,
+            "unit": "mg/L"
+          },
+          {
+            "name": "Electrolytes",
+            "value": "normal"
+          }
+        ],
+        "images": [
+          {
+            "type": "Abdominal ultrasound",
+            "shows": "Target sign - ileocaecal intussusception",
+            "sourceFigure": "US figure"
+          },
+          {
+            "type": "Intra-operative photograph",
+            "shows": "Reduced intussusception; inflamed appendix",
+            "sourceFigure": "Operative figure",
+            "withholdUntilStage": 2
+          }
+        ]
+      },
+      "answerKey": {
+        "finalDiagnosis": "Ileocolic intussusception with concurrent acute (non-perforated) appendicitis ('appendisception')",
+        "acceptableAlternatives": [
+          "Ileocolic intussusception (full credit for triage; partial for diagnosis)"
+        ],
+        "keyDifferentials": [
+          "Infective dysentery (Shigella, EHEC)",
+          "Meckel diverticulum",
+          "Haemolytic uraemic syndrome"
+        ],
+        "minimumAcceptableLevel": 2,
+        "mustDetect": [
+          "Toddler + colicky pain + currant-jelly stool = intussusception until ultrasound says otherwise",
+          "HR 155 and lethargy in a toddler - use paediatric thresholds"
+        ],
+        "pitfall": "The week of 'gastroenteritis' anchors toward infection. Even after ultrasound confirms intussusception, the appendicitis was only found at surgery.",
+        "outcome": "Operative reduction (viable bowel) and appendicectomy; histology acute appendicitis; discharged day 3.",
+        "imagesAvailable": true
+      },
+      "source": {
+        "citation": "Kilenzi I et al. Int J Surg Case Rep 2026;138(9):3543-3547",
+        "pmid": "42699952",
+        "pmcid": "PMC13544825",
+        "doi": "10.1097/RC9.0000000000000753",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC13544825/"
+      }
+    },
+    {
+      "id": "AHV-DX-17",
+      "discipline": [
+        "Emergency medicine",
+        "Pulmonology",
+        "Obstetrics"
+      ],
+      "patient": {
+        "ageYears": 26,
+        "sex": "F",
+        "heightCm": null,
+        "weightKg": null,
+        "pregnant": "unknown to patient"
+      },
+      "input": {
+        "patientNarrative": "I was walking to work and I just collapsed. The paramedics said I had a fit with froth from my mouth. I burned my arm on something when I fell. I have a bit of lower tummy discomfort. No chest pain, I'm not short of breath, no palpitations, I haven't travelled, I don't smoke or take the pill. I've never been sick before.",
+        "clinicianNote": "26F, previously healthy. Syncope while walking, followed by brief GTC seizure witnessed by EMS; frothy secretions. Friction burn L forearm. Denies chest pain, dyspnoea, palpitations, cough, haemoptysis, travel, OCP, smoking, prior VTE. Alert, GCS 15, diaphoretic. Mild lower abdominal tenderness. No clinical DVT. On 5 L O2.",
+        "vitals": {
+          "hr": 140,
+          "rr": 35,
+          "sbp": 96,
+          "dbp": 63,
+          "tempC": null,
+          "spo2": 98,
+          "gcs": 15,
+          "notes": "SpO2 98% on 5 L/min oxygen"
+        },
+        "labs": [
+          {
+            "name": "pH / pCO2",
+            "value": "7.44 / 30.6 mmHg"
+          },
+          {
+            "name": "Potassium",
+            "value": 2.8,
+            "unit": "mmol/L"
+          },
+          {
+            "name": "Glucose",
+            "value": 14.8,
+            "unit": "mmol/L"
+          },
+          {
+            "name": "Lactate",
+            "value": 4.7,
+            "unit": "mmol/L"
+          },
+          {
+            "name": "Creatine kinase",
+            "value": 551,
+            "unit": "IU/L"
+          },
+          {
+            "name": "Troponin I",
+            "value": 715,
+            "unit": "ng/L"
+          },
+          {
+            "name": "Haemoglobin",
+            "value": 140,
+            "unit": "g/L"
+          },
+          {
+            "name": "Beta-hCG",
+            "value": 975,
+            "unit": "mIU/mL"
+          },
+          {
+            "name": "Pelvic ultrasound",
+            "value": "0.7 cm endometrial cystic lesion - possible early gestational sac"
+          },
+          {
+            "name": "ECG",
+            "value": "sinus tachycardia 130, S1Q3T3",
+            "withholdUntilStage": 2
+          },
+          {
+            "name": "Bedside echo",
+            "value": "right ventricular dilatation, preserved LV",
+            "withholdUntilStage": 2
+          }
+        ],
+        "images": [
+          {
+            "type": "ECG",
+            "shows": "Sinus tachycardia with S1Q3T3",
+            "sourceFigure": "Fig. 1",
+            "withholdUntilStage": 2
+          },
+          {
+            "type": "CT pulmonary angiogram",
+            "shows": "Saddle embolus with near-occlusion of both lobar pulmonary arteries",
+            "sourceFigure": "Figs. 2-5",
+            "withholdUntilStage": 2
+          }
+        ]
+      },
+      "answerKey": {
+        "finalDiagnosis": "Massive (high-risk) saddle pulmonary embolism in early pregnancy, presenting as syncope and seizure",
+        "keyDifferentials": [
+          "Ruptured ectopic pregnancy (positive hCG + abdominal pain + shock)",
+          "First seizure / epilepsy",
+          "Myocarditis",
+          "Vasovagal syncope"
+        ],
+        "minimumAcceptableLevel": 1,
+        "mustDetect": [
+          "HR 140, RR 35, SBP 96, lactate 4.7 after syncope = shock",
+          "Positive pregnancy test - ectopic AND PE both must be excluded",
+          "Troponin 715 should not be explained away by CK"
+        ],
+        "pitfall": "Every consultant had a plausible alternative: implantation bleed, skeletal muscle troponin, not a true seizure. The denial of chest pain and dyspnoea is a negation test (AH-48) - the engine must not let denials lower urgency when vitals are abnormal.",
+        "outcome": "Two cardiac arrests during thrombectomy; systemic alteplase; right atrial thrombus; missed abortion. Extubated day 4, discharged day 10 on rivaroxaban.",
+        "imagesAvailable": true
+      },
+      "source": {
+        "citation": "Alharmoodi S et al. Cureus 2026;18(2):e103237",
+        "pmid": "41822619",
+        "pmcid": "PMC12976449",
+        "doi": "10.7759/cureus.103237",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC12976449/"
+      }
+    },
+    {
+      "id": "AHV-DX-18",
+      "discipline": [
+        "ENT / maxillofacial",
+        "Anaesthesia",
+        "Infectious disease"
+      ],
+      "patient": {
+        "ageYears": 41,
+        "sex": "F",
+        "heightCm": 165,
+        "weightKg": 72,
+        "pregnant": false
+      },
+      "input": {
+        "patientNarrative": "My back tooth on the right has been sore for five days and now the right side of my neck is swollen, red and hot. I have a fever, it hurts to swallow and I can barely get food down. My voice sounds muffled, like I have a potato in my mouth, and lying flat is uncomfortable. I can still swallow my spit and I'm not struggling to breathe.",
+        "clinicianNote": "41F, smoker 15 pack-years, otherwise well. 5/7 right second molar pain, progressive right neck swelling. Fever 38.2 C, odynophagia, dysphagia, muffled voice, mild supine discomfort, difficulty speaking. No stridor or dyspnoea. Pain-limited mouth opening; Mallampati and floor of mouth not assessable. Right submandibular swelling, erythema, warmth, fluctuance.",
+        "vitals": {
+          "hr": 109,
+          "rr": 22,
+          "sbp": 132,
+          "dbp": 86,
+          "tempC": 38.2,
+          "spo2": 98,
+          "gcs": 15
+        },
+        "labs": [
+          {
+            "name": "White cell count",
+            "value": 18.27,
+            "unit": "x10^9/L",
+            "note": "86.1% neutrophils"
+          },
+          {
+            "name": "Haemoglobin",
+            "value": 8.5,
+            "unit": "g/dL",
+            "note": "MCV 68.1 - microcytic"
+          },
+          {
+            "name": "Platelets",
+            "value": 191,
+            "unit": "x10^9/L"
+          },
+          {
+            "name": "Renal, liver, electrolytes, glucose, coagulation",
+            "value": "normal"
+          },
+          {
+            "name": "Pus culture",
+            "value": "Streptococcus agalactiae (Group B), clindamycin-resistant",
+            "withholdUntilStage": 2
+          }
+        ],
+        "images": [
+          {
+            "type": "CT neck (axial and sagittal)",
+            "shows": "Right submandibular collection 3 x 0.6 cm, multiple right sternocleidomastoid collections, bilateral cervical nodes, leftward tracheal deviation",
+            "sourceFigure": "Fig. 1"
+          }
+        ]
+      },
+      "answerKey": {
+        "finalDiagnosis": "Odontogenic deep neck space infection managed as Ludwig's angina: right submandibular abscess with sternocleidomastoid collections and tracheal deviation; sepsis without shock",
+        "keyDifferentials": [
+          "Simple dental abscess / facial cellulitis",
+          "Peritonsillar or parapharyngeal abscess",
+          "Necrotising fasciitis of the neck"
+        ],
+        "minimumAcceptableLevel": 2,
+        "mustDetect": [
+          "Muffled 'hot potato' voice + dysphagia + supine discomfort = threatened airway even with normal SpO2 and no stridor",
+          "Do not send home with oral antibiotics"
+        ],
+        "pitfall": "Normal oxygen saturation and the patient's own 'I'm not struggling to breathe' are the trap. The negation must not cancel the airway red flags.",
+        "outcome": "Emergency incision and drainage with airway backup; ICU intubated 24 h; repeat drainage day 5; 21 days of antibiotics; discharged day 13.",
+        "imagesAvailable": true
+      },
+      "source": {
+        "citation": "Al-Shehab SM, Al-Shehab RA. Cureus 2026;18(7):e112937",
+        "pmid": "42614639",
+        "pmcid": "PMC13482192",
+        "doi": "10.7759/cureus.112937",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC13482192/"
+      }
+    },
+    {
+      "id": "AHV-DX-19",
+      "discipline": [
+        "Cardiology",
+        "Infectious disease / TB"
+      ],
+      "patient": {
+        "ageYears": 32,
+        "sex": "M",
+        "heightCm": null,
+        "weightKg": null,
+        "pregnant": false
+      },
+      "input": {
+        "patientNarrative": "For six days I've had a dry cough that's getting worse, chest pain that's sharp when I breathe in, fevers, night sweats and I'm losing weight. I'm originally from Congo and I came here recently from South Africa. I had the BCG vaccine and a TB sputum test six months ago was negative.",
+        "clinicianNote": "32M, from DRC via South Africa, recent arrival. 6/7 worsening non-productive cough, pleuritic chest pain, fever, night sweats, weight loss. Prior BCG; sputum TB test negative 6/12 ago. Pyrexial, tachycardic, normotensive. Cardiovascular and respiratory exam unremarkable, no signs of heart failure. NEWS 4.",
+        "vitals": {
+          "hr": 128,
+          "rr": 17,
+          "sbp": null,
+          "dbp": null,
+          "tempC": 38.3,
+          "spo2": 100,
+          "gcs": null,
+          "notes": "Normotensive (value not reported)"
+        },
+        "labs": [
+          {
+            "name": "Haemoglobin",
+            "value": 94,
+            "unit": "g/L"
+          },
+          {
+            "name": "White cell count",
+            "value": 7.2,
+            "unit": "x10^9/L"
+          },
+          {
+            "name": "Albumin",
+            "value": 30,
+            "unit": "g/L"
+          },
+          {
+            "name": "CRP",
+            "value": 91,
+            "unit": "mg/L"
+          },
+          {
+            "name": "ACE",
+            "value": 92,
+            "unit": "U/L"
+          },
+          {
+            "name": "D-dimer",
+            "value": 6876,
+            "unit": "ng/mL",
+            "note": "CTPA negative for PE"
+          },
+          {
+            "name": "Troponin T",
+            "value": "<10",
+            "unit": "ng/L"
+          },
+          {
+            "name": "GGT / ALP / ALT",
+            "value": "153 / 132 / 47",
+            "unit": "U/L"
+          },
+          {
+            "name": "ECG",
+            "value": "sinus tachycardia 128; later lateral T-wave inversion"
+          },
+          {
+            "name": "Echocardiogram",
+            "value": "large pericardial effusion, right atrial collapse, respiratory variation of mitral inflow (early tamponade)",
+            "withholdUntilStage": 2
+          },
+          {
+            "name": "Pericardial fluid",
+            "value": "900 mL blood-stained; LDH 399, protein 58.7 g/L (exudate); AFB not seen; M. tuberculosis cultured",
+            "withholdUntilStage": 2
+          },
+          {
+            "name": "EBUS node biopsy",
+            "value": "necrotising granulomatous inflammation",
+            "withholdUntilStage": 2
+          }
+        ],
+        "images": [
+          {
+            "type": "Chest X-ray",
+            "shows": "Enlarged cardiac silhouette, trace fluid in horizontal fissure, no infiltrates or cavities",
+            "sourceFigure": "Fig. 1"
+          },
+          {
+            "type": "ECG",
+            "shows": "Sinus tachycardia, no electrical alternans",
+            "sourceFigure": "Fig. 2"
+          },
+          {
+            "type": "CT thorax",
+            "shows": "Pericardial effusion and mediastinal lymphadenopathy (2.5 cm right paratracheal node)",
+            "sourceFigure": "Fig. 3",
+            "withholdUntilStage": 2
+          }
+        ]
+      },
+      "answerKey": {
+        "finalDiagnosis": "Tuberculous pericarditis with large effusion and early tamponade physiology (HIV-negative)",
+        "keyDifferentials": [
+          "Viral pericarditis",
+          "Pulmonary embolism (excluded by CTPA)",
+          "Pulmonary TB",
+          "Malignant effusion / lymphoma",
+          "Sarcoidosis (raised ACE)"
+        ],
+        "minimumAcceptableLevel": 2,
+        "mustDetect": [
+          "Tachycardia 128 + pleuritic pain + enlarged heart shadow = pericardial effusion until echo says otherwise",
+          "In patients from sub-Saharan Africa, TB causes most large effusions",
+          "A previous negative sputum test does not exclude extrapulmonary TB"
+        ],
+        "pitfall": "Vitals alone (NEWS 4, SpO2 100%) suggest moderate urgency. Danger is visible only if the engine reads the chest X-ray or asks for an echo.",
+        "outcome": "Emergency pericardiocentesis 900 mL; colchicine, ibuprofen, standard anti-TB therapy. Effusion resolved.",
+        "imagesAvailable": true
+      },
+      "source": {
+        "citation": "Shayo W et al. Cureus 2025;17(11):e97684",
+        "pmid": "41450390",
+        "pmcid": "PMC12737411",
+        "doi": "10.7759/cureus.97684",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC12737411/"
+      }
+    },
+    {
+      "id": "AHV-DX-20",
+      "discipline": [
+        "General surgery",
+        "Emergency medicine",
+        "Hepatology"
+      ],
+      "patient": {
+        "ageYears": 63,
+        "sex": "M",
+        "heightCm": null,
+        "weightKg": null,
+        "pregnant": false
+      },
+      "input": {
+        "patientNarrative": "I passed out in a shop while standing, hit my head and was out for about two minutes. I messed myself. I have pain on the left side of my belly and under my right ribs. No chest pain, no fever, no palpitations, I'm not short of breath and I'm not vomiting. I drink one or two cups of whisky most days and have for 30 years.",
+        "clinicianNote": "63M, alcohol use disorder (30 years). Syncope while standing, head strike, ~2 min LOC, faecal incontinence. L-sided and RUQ abdominal pain. Denies chest pain, fever, rigors, palpitations, dyspnoea, N/V, tongue biting. No perineal or genital complaint recorded. Jaundiced. Afebrile. Meets SIRS (HR, WBC).",
+        "vitals": {
+          "hr": 132,
+          "rr": null,
+          "sbp": null,
+          "dbp": null,
+          "tempC": null,
+          "spo2": null,
+          "gcs": null,
+          "notes": "Afebrile (value not reported)"
+        },
+        "labs": [
+          {
+            "name": "White cell count",
+            "value": 12.7,
+            "unit": "x10^9/uL",
+            "note": "84.6% neutrophils, 2.6% immature granulocytes"
+          },
+          {
+            "name": "Haemoglobin",
+            "value": 13.2,
+            "unit": "g/dL"
+          },
+          {
+            "name": "Platelets",
+            "value": 52,
+            "unit": "x10^9/L"
+          },
+          {
+            "name": "Sodium / Potassium / Chloride",
+            "value": "131 / 3.3 / 92",
+            "unit": "mEq/L"
+          },
+          {
+            "name": "Albumin",
+            "value": 2.5,
+            "unit": "g/dL"
+          },
+          {
+            "name": "Total / direct bilirubin",
+            "value": "12.9 / 10.58",
+            "unit": "mg/dL"
+          },
+          {
+            "name": "ALP / AST / ALT",
+            "value": "242 / 467 / 294",
+            "unit": "U/L"
+          },
+          {
+            "name": "Creatinine",
+            "value": 1.59,
+            "unit": "mg/dL",
+            "note": "eGFR 48"
+          },
+          {
+            "name": "Glucose",
+            "value": 132,
+            "unit": "mg/dL"
+          },
+          {
+            "name": "Acetaminophen level",
+            "value": "<2.0",
+            "unit": "ug/mL"
+          },
+          {
+            "name": "Urinalysis",
+            "value": "unremarkable"
+          },
+          {
+            "name": "Head CT / chest X-ray",
+            "value": "no acute abnormality"
+          }
+        ],
+        "images": [
+          {
+            "type": "CT abdomen/pelvis",
+            "shows": "Hepatomegaly 19.9 cm with steatosis",
+            "sourceFigure": "Fig. 1"
+          },
+          {
+            "type": "CT abdomen/pelvis (axial, sagittal)",
+            "shows": "Soft-tissue gas around the anorectal junction extending into the perineum",
+            "sourceFigure": "Figs. 2-3",
+            "withholdUntilStage": 2
+          }
+        ]
+      },
+      "answerKey": {
+        "finalDiagnosis": "Fournier gangrene (perianal abscess with perineal soft-tissue gas) presenting as syncope with sepsis, in alcohol-associated liver disease",
+        "keyDifferentials": [
+          "Alcoholic hepatitis",
+          "Cardiac arrhythmia / seizure as cause of syncope (both excluded)",
+          "Spontaneous bacterial peritonitis",
+          "Alcohol intoxication"
+        ],
+        "minimumAcceptableLevel": 2,
+        "mustDetect": [
+          "Syncope + tachycardia 132 + SIRS + thrombocytopenia = sepsis: find the source",
+          "Examine the perineum in a septic patient with risk factors even without a perineal complaint"
+        ],
+        "pitfall": "No localising complaint; long list of denials. The source appears only on CT. Tests whether the engine asks for a perineal examination.",
+        "outcome": "Urgent incision and drainage of perianal abscess; culture-directed antibiotics; WBC and platelets normalised; liver tests remained abnormal.",
+        "imagesAvailable": true
+      },
+      "source": {
+        "citation": "Kambham A et al. Cureus 2026;18(7):e113187",
+        "pmid": "42632974",
+        "pmcid": "PMC13498670",
+        "doi": "10.7759/cureus.113187",
+        "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC13498670/"
+      }
+    }
+  ]
+}
