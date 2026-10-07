@@ -1,5 +1,6 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import Redis from 'ioredis';
+import { REDIS_NETWORK_OPTIONS } from './redis';
 import crypto from 'crypto';
 import prisma from '../lib/prisma';
 import { verifyWebSocketTicket } from './authSession';
@@ -179,8 +180,8 @@ const ensureRedisPubSub = async () => {
     }
     return;
   }
-  const pub = new Redis(url, { connectTimeout: 3000, maxRetriesPerRequest: null, lazyConnect: true });
-  const sub = new Redis(url, { connectTimeout: 3000, maxRetriesPerRequest: null, lazyConnect: true });
+  const pub = new Redis(url, { ...REDIS_NETWORK_OPTIONS, connectTimeout: 3000, maxRetriesPerRequest: null, lazyConnect: true });
+  const sub = new Redis(url, { ...REDIS_NETWORK_OPTIONS, connectTimeout: 3000, maxRetriesPerRequest: null, lazyConnect: true });
   pub.on('error', (err) => {
     console.warn('[ws] redis pub error:', (err as Error)?.message ?? err);
   });

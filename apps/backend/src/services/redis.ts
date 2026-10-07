@@ -2,6 +2,15 @@ import Redis from 'ioredis';
 
 let redis: Redis | null = null;
 
+/**
+ * Look up both IPv4 and IPv6 (0 = either), so Railway's private network
+ * (`redis.railway.internal`, IPv6-only in older environments) works as well as
+ * a plain IPv4 host. ioredis 5 already defaults to this; it is set explicitly
+ * so the behaviour is pinned here rather than depending on a library default
+ * (ioredis 4 defaulted to IPv4 only). Used by every Redis connection.
+ */
+export const REDIS_NETWORK_OPTIONS = { family: 0 } as const;
+
 // A failed attempt used to permanently lock this out for the process's
 // lifetime (redisInitFailed, now removed) — meaning a transient network
 // blip during startup degraded a replica until someone redeployed it. The
@@ -25,6 +34,7 @@ export const initializeRedis = async (): Promise<Redis> => {
 
   const redisUrl = normalizeRedisUrl(process.env.REDIS_URL || 'redis://localhost:6379');
   const client = new Redis(redisUrl, {
+    ...REDIS_NETWORK_OPTIONS,
     enableReadyCheck: true,
     maxRetriesPerRequest: null, // Required by BullMQ Workers (allows retries on disconnect)
     connectTimeout: 3000,
