@@ -26,7 +26,7 @@ import {
   FailureKind,
   ProviderFailure,
   getAvailableModels,
-  getWorkingModel,
+  isModelDemoted,
   recordFailure,
   recordProbe,
   recordSuccess,
@@ -78,7 +78,12 @@ function floored(name: string, fallback: number, hardMin: number, floor: number)
 }
 
 const timeoutMs = () => floored('AI_PROVIDER_TIMEOUT_MS', 150_000, 2_000, FLOORS.timeout);
-const idleTimeoutMs = () => intEnv('AI_PROVIDER_IDLE_TIMEOUT_MS', 40_000, 2_000);
+// 90 s: Opus at high effort can think silently for a long time on exactly the
+// hardest cases, and a false "timeout" there drops that case to a weaker model.
+// (The second pack run lost one Opus call to a timeout whose cause the report
+// did not record; the report now records it.) A truly hung connection still
+// fails over well inside the per-provider budget.
+const idleTimeoutMs = () => intEnv('AI_PROVIDER_IDLE_TIMEOUT_MS', 90_000, 2_000);
 // Each provider has its own budget, so a slow Claude chain can never eat the
 // time Gemini needs: Claude had been allowed to run for 6+ minutes before
 // Gemini was even tried.
@@ -175,23 +180,24 @@ export function extractJsonObject(text: string): unknown {
 // ---- model chain -----------------------------------------------------------
 
 /**
- * The order models are tried in: the one that last worked, then configured
- * models the provider says it offers, then a newer model discovered from its
- * live model list, then everything else configured as a last resort.
+ * The order models are tried in: the configured order (best model first), with
+ * models the provider says it offers ahead of ones it does not, then a newer
+ * model discovered from its live model list. A model that is actually unhealthy
+ * (retired, or failing repeatedly right now; see aiHealth.isModelDemoted) moves
+ * to the end but is still tried as a last resort. A single slow or failed call
+ * never reorders the chain: it used to, which left every later case on the
+ * second-best model until the process restarted.
  */
 export function effectiveChain(provider: AiProvider): string[] {
   const configured = configuredModels(provider);
   const available = getAvailableModels(provider);
-  const working = getWorkingModel(provider);
   const present = available ? configured.filter((m) => available.includes(m)) : configured;
   const discovered = available ? discoverBestModel(provider, available) : null;
-  const ordered = [
-    ...(working && (!available || available.includes(working)) ? [working] : []),
-    ...present,
-    ...(discovered ? [discovered] : []),
-    ...configured,
+  const ordered = [...new Set([...present, ...(discovered ? [discovered] : []), ...configured])];
+  return [
+    ...ordered.filter((m) => !isModelDemoted(provider, m)),
+    ...ordered.filter((m) => isModelDemoted(provider, m)),
   ];
-  return [...new Set(ordered)];
 }
 
 export function discoverBestModel(provider: AiProvider, available: string[]): string | null {

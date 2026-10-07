@@ -119,12 +119,24 @@ export interface CaseOutcome {
 
 const mark = (ok: boolean) => (ok ? 'PASS' : 'FAIL');
 
-export function renderReport(outcomes: CaseOutcome[], meta: { generatedAt: string; judged: boolean; mode: string }): string {
+export function renderReport(
+  outcomes: CaseOutcome[],
+  meta: { generatedAt: string; judged: boolean; mode: string; startedAt?: string; codeVersion?: string },
+): string {
   const lines: string[] = [];
   const stage1 = outcomes.filter((o) => o.stage === 1);
   const n = stage1.length;
   const count = (f: (o: CaseOutcome) => boolean) => stage1.filter(f).length;
-  lines.push(`# Ahava diagnostic pack run`, '', `Generated ${meta.generatedAt}. Mode: ${meta.mode}. Cases: ${n}.`, '');
+  lines.push(`# Ahava diagnostic pack run`, '', `Generated ${meta.generatedAt}. Mode: ${meta.mode}. Cases: ${n}.`);
+  if (meta.codeVersion || meta.startedAt) {
+    lines.push(`Code version: ${meta.codeVersion ?? 'unknown'}.${meta.startedAt ? ` Run started ${meta.startedAt}.` : ''}`);
+  }
+  const byModel = new Map<string, number>();
+  for (const o of outcomes) byModel.set(o.modelUsed, (byModel.get(o.modelUsed) ?? 0) + 1);
+  if (byModel.size > 1) {
+    lines.push(`Models used: ${[...byModel].map(([m, k]) => `${m} x${k}`).join(', ')} (more than one model answered: check whether a fallback took over part-way).`);
+  }
+  lines.push('');
   lines.push(`## Summary (stage 1: only what the pack says to give first)`, '');
   lines.push(`- AI actually answered: **${count((o) => o.machine.aiAnswered)}/${n}**` + (count((o) => !o.machine.aiAnswered) ? ' (the rest got the "AI unavailable" fallback: that is the failure you saw in production)' : ''));
   lines.push(`- Urgency at or above the minimum safe level: **${count((o) => o.machine.urgencyOk)}/${n}**`);
