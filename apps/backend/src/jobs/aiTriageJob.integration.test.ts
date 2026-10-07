@@ -9,6 +9,7 @@ import prisma from "../lib/prisma";
 import * as aiTriage from "../services/aiTriage";
 import * as queue from "../services/queue";
 import { processAiTriageJob, reanalysisDelaysMs, isUnavailableResult } from "./aiTriageJob";
+import { sweepUnanalysedTriageCases } from "../services/aiTriageSweep";
 
 const PASSWORD = "Str0ng!Passw0rd";
 
@@ -109,6 +110,74 @@ describe("when the AI recovers on a re-analysis", () => {
 
     expect(analyze).not.toHaveBeenCalled();
     expect((await prisma.triageCase.findUniqueOrThrow({ where: { id: c.caseId } })).aiRecommendedAction).toBe("interim");
+  });
+});
+
+describe("a re-analysis queued without the original vitals (holdUrgency)", () => {
+  it("adds the AI's diagnosis but never makes the case less urgent than it was held at", async () => {
+    const c = await newCase("Painful loss of vision in the right eye");
+    await prisma.triageCase.update({ where: { id: c.caseId }, data: { aiTriageLevel: 2 } });
+    jest.spyOn(aiTriage, "analyzeSymptoms").mockResolvedValue({ ...recovered, triageLevel: 4 });
+    jest.spyOn(queue, "addAiTriageJob").mockResolvedValue(true);
+
+    await processAiTriageJob({ ...c, retryAttempt: 1, holdUrgency: true });
+
+    const saved = await prisma.triageCase.findUniqueOrThrow({ where: { id: c.caseId } });
+    expect(saved.aiModel).toBe("claude-opus-5-5");
+    expect(saved.aiTriageLevel).toBe(2);
+  });
+
+  it("still lets a normal re-analysis lower the level, as before", async () => {
+    const c = await newCase("tired");
+    jest.spyOn(aiTriage, "analyzeSymptoms").mockResolvedValue({ ...recovered, triageLevel: 4 });
+
+    await processAiTriageJob({ ...c, retryAttempt: 1 });
+
+    expect((await prisma.triageCase.findUniqueOrThrow({ where: { id: c.caseId } })).aiTriageLevel).toBe(4);
+  });
+});
+
+describe("sweep for cases the AI never analysed (lost or exhausted retry chain)", () => {
+  async function unanalysedCase(idleForMs: number, status: "PENDING_REVIEW" | "ASSIGNED" = "PENDING_REVIEW") {
+    const c = await newCase("Headache, fever and drowsiness for five days", status);
+    // updatedAt is managed by Prisma; set it directly so the case looks idle.
+    await prisma.$executeRaw`UPDATE triage_cases SET "aiModel" = ${aiTriage.AI_UNAVAILABLE_MODEL_LABEL}, "updatedAt" = ${new Date(Date.now() - idleForMs)} WHERE id = ${c.caseId}`;
+    return c;
+  }
+  const hours = (n: number) => n * 3600_000;
+
+  it("re-queues an idle case as a held re-analysis, and leaves recent, claimed and analysed cases alone", async () => {
+    const idle = await unanalysedCase(hours(4));
+    const recent = await unanalysedCase(30 * 60_000);
+    const claimed = await unanalysedCase(hours(4), "ASSIGNED");
+    const analysed = await newCase("cough");
+    const enqueue = jest.spyOn(queue, "addAiTriageJob").mockResolvedValue(true);
+
+    const { requeued } = await sweepUnanalysedTriageCases();
+
+    expect(requeued).toContain(idle.caseId);
+    expect(requeued).not.toContain(recent.caseId);
+    expect(requeued).not.toContain(claimed.caseId);
+    expect(requeued).not.toContain(analysed.caseId);
+    expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ caseId: idle.caseId, retryAttempt: 1, holdUrgency: true }));
+  });
+
+  it("runs the analysis in-process when there is no queue, so the case still gets one", async () => {
+    const idle = await unanalysedCase(hours(4));
+    jest.spyOn(queue, "addAiTriageJob").mockResolvedValue(false);
+    jest.spyOn(aiTriage, "analyzeSymptoms").mockResolvedValue(recovered);
+
+    await sweepUnanalysedTriageCases();
+
+    expect((await prisma.triageCase.findUniqueOrThrow({ where: { id: idle.caseId } })).aiModel).toBe("claude-opus-5-5");
+  });
+
+  it("gives up on a case older than a week", async () => {
+    const old = await unanalysedCase(hours(4));
+    await prisma.$executeRaw`UPDATE triage_cases SET "createdAt" = ${new Date(Date.now() - hours(24 * 8))} WHERE id = ${old.caseId}`;
+    jest.spyOn(queue, "addAiTriageJob").mockResolvedValue(true);
+
+    expect((await sweepUnanalysedTriageCases()).requeued).not.toContain(old.caseId);
   });
 });
 

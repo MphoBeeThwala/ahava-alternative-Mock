@@ -54,16 +54,39 @@ export const configuredModels = (provider: AiProvider): string[] =>
 const intEnv = (name: string, fallback: number, min: number) =>
   Math.max(min, parseInt(process.env[name] ?? '', 10) || fallback);
 
-// A long case with thinking can legitimately run a minute or more. Triage
-// runs in a background job, so a patient is not waiting on this.
-const timeoutMs = () => intEnv('AI_PROVIDER_TIMEOUT_MS', 90_000, 2_000);
-const totalBudgetMs = () => intEnv('AI_PROVIDER_TOTAL_BUDGET_MS', 240_000, 5_000);
+// A long case with thinking can legitimately run a couple of minutes. Triage
+// runs in a background job, so a patient is not waiting on this. Claude is
+// streamed, so what catches a hung connection is the IDLE timeout (no bytes at
+// all for this long); the per-call ceiling only bounds a model that keeps
+// talking. A non-streamed call had one hard cap and gave up on answers that
+// were seconds from finishing.
+const timeoutMs = () => intEnv('AI_PROVIDER_TIMEOUT_MS', 150_000, 2_000);
+const idleTimeoutMs = () => intEnv('AI_PROVIDER_IDLE_TIMEOUT_MS', 40_000, 2_000);
+// Each provider has its own budget, so a slow Claude chain can never eat the
+// time Gemini needs: Claude had been allowed to run for 6+ minutes before
+// Gemini was even tried.
+const chainBudgetMs = (provider: AiProvider) =>
+  process.env.AI_PROVIDER_TOTAL_BUDGET_MS
+    ? intEnv('AI_PROVIDER_TOTAL_BUDGET_MS', 240_000, 5_000)
+    : provider === 'claude'
+      ? intEnv('AI_CLAUDE_BUDGET_MS', 200_000, 5_000)
+      : intEnv('AI_GEMINI_BUDGET_MS', 120_000, 5_000);
 const retryDelayMs = () =>
   process.env.AI_PROVIDER_RETRY_DELAY_MS !== undefined
     ? Math.max(0, parseInt(process.env.AI_PROVIDER_RETRY_DELAY_MS, 10) || 0)
     : 1_500;
 const claudeMaxTokens = () => intEnv('AI_CLAUDE_MAX_TOKENS', 8_192, 1_024);
 const claudeEffort = () => process.env.AI_CLAUDE_EFFORT || 'high';
+// After a model has timed out or been overloaded, the next one is asked to
+// think less: a faster answer from Sonnet beats a second timeout from the
+// same slow path.
+const fallbackEffort = () => process.env.AI_CLAUDE_FALLBACK_EFFORT || 'medium';
+
+interface CallOptions {
+  /** Longest this one call may take, already capped to the chain's remaining budget. */
+  limitMs: number;
+  effort: string;
+}
 
 // ---- shapes ----------------------------------------------------------------
 
@@ -164,7 +187,85 @@ export function discoverBestModel(provider: AiProvider, available: string[]): st
 
 type ClaudeBlock = { type: string; text?: string };
 
-async function callClaudeOnce(model: string, input: ProviderInput): Promise<string> {
+const claudeErrorKind = (type: string | undefined): FailureKind => {
+  switch (type) {
+    case 'overloaded_error': return 'overloaded';
+    case 'rate_limit_error': return 'rate_limited';
+    case 'authentication_error':
+    case 'permission_error': return 'auth';
+    case 'not_found_error': return 'model_not_found';
+    case 'invalid_request_error': return 'bad_request';
+    case 'api_error': return 'server_error';
+    default: return 'unknown';
+  }
+};
+
+/** What a finished Claude message must satisfy, streamed or not. */
+function textOfMessage(blocks: ClaudeBlock[], stopReason: string | undefined): string {
+  if (stopReason === 'refusal') throw new CallError('refusal', 'The model declined this request');
+  if (stopReason === 'max_tokens') throw new CallError('truncated', 'Output was cut off at max_tokens');
+  // Thinking blocks can come first: read the text blocks, not content[0].
+  const text = blocks.filter((b) => b.type === 'text').map((b) => b.text ?? '').join('\n').trim();
+  if (!text) throw new CallError('bad_output', 'Model returned no text content');
+  return text;
+}
+
+/**
+ * Read a streamed Claude message. Every chunk (including the keep-alive
+ * pings) resets `onActivity`, so only a connection that goes silent is cut.
+ */
+async function readClaudeStream(response: Response, onActivity: () => void): Promise<string> {
+  if (!response.body) throw new CallError('bad_output', 'Provider returned an empty stream');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const blocks = new Map<number, ClaudeBlock>();
+  let stopReason: string | undefined;
+  let buffer = '';
+
+  const handle = (raw: string) => {
+    const data = raw.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim()).join('');
+    if (!data) return;
+    let event: {
+      type?: string; index?: number;
+      content_block?: ClaudeBlock; delta?: { type?: string; text?: string; stop_reason?: string };
+      error?: { type?: string; message?: string };
+    };
+    try { event = JSON.parse(data); } catch { return; }
+    switch (event.type) {
+      case 'content_block_start':
+        blocks.set(event.index ?? 0, { type: event.content_block?.type ?? 'text', text: event.content_block?.text ?? '' });
+        break;
+      case 'content_block_delta': {
+        const block = blocks.get(event.index ?? 0);
+        if (block && block.type === 'text' && event.delta?.type === 'text_delta') block.text = (block.text ?? '') + (event.delta.text ?? '');
+        break;
+      }
+      case 'message_delta':
+        if (event.delta?.stop_reason) stopReason = event.delta.stop_reason;
+        break;
+      case 'error':
+        // The provider can fail AFTER sending a 200: treat it like any other failure.
+        throw new CallError(claudeErrorKind(event.error?.type), (event.error?.message ?? 'stream error').slice(0, 300));
+      default:
+    }
+  };
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    onActivity();
+    buffer += decoder.decode(value, { stream: true });
+    let sep: number;
+    while ((sep = buffer.indexOf('\n\n')) !== -1) {
+      handle(buffer.slice(0, sep));
+      buffer = buffer.slice(sep + 2);
+    }
+  }
+  if (buffer.trim()) handle(buffer);
+  return textOfMessage([...blocks.entries()].sort((a, b) => a[0] - b[0]).map(([, b]) => b), stopReason);
+}
+
+async function callClaudeOnce(model: string, input: ProviderInput, opts: CallOptions): Promise<string> {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) throw new CallError('not_configured', 'ANTHROPIC_API_KEY is not configured');
 
@@ -178,50 +279,66 @@ async function callClaudeOnce(model: string, input: ProviderInput): Promise<stri
   }
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs());
-  let response: Response;
+  let abortedFor: 'ceiling' | 'idle' | null = null;
+  const abort = (why: 'ceiling' | 'idle') => { abortedFor = why; controller.abort(); };
+  const ceiling = setTimeout(() => abort('ceiling'), opts.limitMs);
+  let idle = setTimeout(() => abort('idle'), idleTimeoutMs());
+  const onActivity = () => { clearTimeout(idle); idle = setTimeout(() => abort('idle'), idleTimeoutMs()); };
+  const timedOut = () =>
+    new CallError('timeout', abortedFor === 'idle' ? `no data from the provider for ${idleTimeoutMs()}ms` : `timed out after ${opts.limitMs}ms`);
+
   try {
-    response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({
-        model,
-        max_tokens: claudeMaxTokens(),
-        output_config: { effort: claudeEffort() },
-        messages: [{ role: 'user', content }],
-      }),
-      signal: controller.signal,
-    });
-  } catch (err) {
-    const aborted = (err as { name?: string })?.name === 'AbortError';
-    throw new CallError(aborted ? 'timeout' : 'network', aborted ? `timed out after ${timeoutMs()}ms` : String((err as Error)?.message ?? err));
+    let response: Response;
+    try {
+      response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({
+          model,
+          max_tokens: claudeMaxTokens(),
+          stream: true,
+          output_config: { effort: opts.effort },
+          messages: [{ role: 'user', content }],
+        }),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if ((err as { name?: string })?.name === 'AbortError') throw timedOut();
+      throw new CallError('network', String((err as Error)?.message ?? err));
+    }
+    onActivity();
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new CallError(classifyHttpFailure(response.status, body), body.slice(0, 300) || `HTTP ${response.status}`, response.status);
+    }
+
+    try {
+      if ((response.headers.get('content-type') ?? '').includes('text/event-stream')) {
+        return await readClaudeStream(response, onActivity);
+      }
+      // A non-streamed JSON body (older proxies, tests) is read the same way as before.
+      let data: { content?: ClaudeBlock[]; stop_reason?: string };
+      try {
+        data = (await response.json()) as typeof data;
+      } catch (err) {
+        if ((err as { name?: string })?.name === 'AbortError') throw timedOut();
+        throw new CallError('bad_output', 'Provider returned a non-JSON response');
+      }
+      return textOfMessage(data.content ?? [], data.stop_reason);
+    } catch (err) {
+      if ((err as { name?: string })?.name === 'AbortError') throw timedOut();
+      throw err;
+    }
   } finally {
-    clearTimeout(timer);
+    clearTimeout(ceiling);
+    clearTimeout(idle);
   }
-
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new CallError(classifyHttpFailure(response.status, body), body.slice(0, 300) || `HTTP ${response.status}`, response.status);
-  }
-
-  let data: { content?: ClaudeBlock[]; stop_reason?: string };
-  try {
-    data = (await response.json()) as typeof data;
-  } catch {
-    throw new CallError('bad_output', 'Provider returned a non-JSON response');
-  }
-  if (data.stop_reason === 'refusal') throw new CallError('refusal', 'The model declined this request');
-  if (data.stop_reason === 'max_tokens') throw new CallError('truncated', 'Output was cut off at max_tokens');
-
-  // Thinking blocks can come first: read the text blocks, not content[0].
-  const text = (data.content ?? []).filter((b) => b.type === 'text').map((b) => b.text ?? '').join('\n').trim();
-  if (!text) throw new CallError('bad_output', 'Model returned no text content');
-  return text;
 }
 
 // ---- Gemini ----------------------------------------------------------------
 
-async function callGeminiOnce(model: string, input: ProviderInput): Promise<string> {
+async function callGeminiOnce(model: string, input: ProviderInput, opts: CallOptions): Promise<string> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new CallError('not_configured', 'GEMINI_API_KEY is not configured');
 
@@ -242,7 +359,7 @@ async function callGeminiOnce(model: string, input: ProviderInput): Promise<stri
     const result = await Promise.race([
       gen.generateContent(parts),
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new CallError('timeout', `timed out after ${timeoutMs()}ms`)), timeoutMs());
+        timer = setTimeout(() => reject(new CallError('timeout', `timed out after ${opts.limitMs}ms`)), opts.limitMs);
       }),
     ]);
     const text = result.response.text().trim();
@@ -262,6 +379,9 @@ async function callGeminiOnce(model: string, input: ProviderInput): Promise<stri
 
 // ---- the chain runner ------------------------------------------------------
 
+// Not worth starting a call that has less than this left of the chain's budget.
+const MIN_CALL_MS = 5_000;
+
 async function runChain<T>(
   provider: AiProvider,
   input: ProviderInput,
@@ -270,12 +390,19 @@ async function runChain<T>(
   const once = provider === 'claude' ? callClaudeOnce : callGeminiOnce;
   const failures: ProviderFailure[] = [];
   const startedAt = Date.now();
+  const remaining = () => chainBudgetMs(provider) - (Date.now() - startedAt);
+  // Once a model has been slow or busy, ask the next one to think less.
+  let slowPath = false;
 
   for (const model of effectiveChain(provider)) {
-    if (Date.now() - startedAt > totalBudgetMs()) break;
+    if (remaining() < MIN_CALL_MS) break;
     for (let attempt = 0; attempt < 2; attempt++) {
+      if (remaining() < MIN_CALL_MS) break;
       try {
-        const text = await once(model, input);
+        const text = await once(model, input, {
+          limitMs: Math.min(timeoutMs(), remaining()),
+          effort: slowPath ? fallbackEffort() : claudeEffort(),
+        });
         const accepted = accept(text, model);
         recordSuccess(provider, model);
         // Models skipped on the way here are still reported, so "Opus 404'd
@@ -287,10 +414,12 @@ async function runChain<T>(
             ? err
             : new CallError('bad_output', String((err as Error)?.message ?? err));
         const failure: ProviderFailure = { provider, model, kind: e.kind, status: e.status, message: e.message };
-        // One retry for transient trouble on the same model; everything else
-        // moves straight to the next model.
-        if (attempt === 0 && RETRYABLE.has(e.kind)) {
-          await sleep(retryDelayMs());
+        if (e.kind === 'timeout' || e.kind === 'overloaded') slowPath = true;
+        // One retry for brief trouble (a busy or erroring provider) on the same
+        // model. A TIMEOUT is not retried on the same model: the same slow
+        // path would burn the whole budget twice before the next model got a go.
+        if (attempt === 0 && RETRYABLE.has(e.kind) && e.kind !== 'timeout') {
+          await sleep(Math.min(retryDelayMs(), Math.max(0, remaining() - MIN_CALL_MS)));
           continue;
         }
         failures.push(failure);
@@ -301,6 +430,9 @@ async function runChain<T>(
       }
     }
   }
+  if (failures.length === 0 && remaining() < MIN_CALL_MS) {
+    failures.push({ provider, model: 'n/a', kind: 'timeout', message: 'the provider time budget was used up before any model answered' });
+  }
   throw new AiProviderError(provider, failures);
 }
 
@@ -308,6 +440,37 @@ export const runClaude = <T>(input: ProviderInput, accept: (text: string, model:
   runChain('claude', input, accept);
 export const runGemini = <T>(input: ProviderInput, accept: (text: string, model: string) => T) =>
   runChain('gemini', input, accept);
+
+// ---- single-model check ----------------------------------------------------
+
+export interface ModelCheck {
+  provider: AiProvider;
+  model: string;
+  ok: boolean;
+  /** Time until the call finished, whether it worked or not. */
+  ms: number;
+  kind?: FailureKind;
+  status?: number;
+  message?: string;
+}
+
+/**
+ * One tiny real call to one model, with the same code, timeouts and effort the
+ * triage path uses, and no retry or fallback. Answers "is THIS model working
+ * from THIS server, and how long does it take?" (npm run ai-pack -- --smoke).
+ */
+export async function checkModel(provider: AiProvider, model: string, limitMs = 60_000): Promise<ModelCheck> {
+  const started = Date.now();
+  const once = provider === 'claude' ? callClaudeOnce : callGeminiOnce;
+  try {
+    const text = await once(model, { prompt: 'Reply with exactly this JSON and nothing else: {"ok": true}', files: [] }, { limitMs, effort: claudeEffort() });
+    extractJsonObject(text);
+    return { provider, model, ok: true, ms: Date.now() - started };
+  } catch (err) {
+    const e = err instanceof CallError ? err : new CallError('unknown', String((err as Error)?.message ?? err));
+    return { provider, model, ok: false, ms: Date.now() - started, kind: e.kind, status: e.status, message: e.message.slice(0, 200) };
+  }
+}
 
 // ---- probing ---------------------------------------------------------------
 

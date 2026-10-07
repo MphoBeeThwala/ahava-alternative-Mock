@@ -52,6 +52,7 @@ import { getWebSocketRedisHealth, initializeWebSocket } from "./services/websock
 import { getAiHealth } from "./services/aiHealth";
 import { startAiHealthMonitor } from "./services/aiProviders";
 import { startResearchSweepMonitor } from "./services/research/researchSweep";
+import { startAiTriageSweepMonitor } from "./services/aiTriageSweep";
 import prisma from "./lib/prisma";
 import { assertEncryptionKeyConfigured } from "./utils/encryption";
 import { loadEncryptionKeys } from "./lib/keyManagement";
@@ -361,6 +362,7 @@ async function startServer() {
   // human has approved. Off unless RESEARCH_PSEUDONYM_KEY is set. Never in the
   // path of a clinical request. See docs/RESEARCH_DATA_PIPELINE.md.
   startResearchSweepMonitor();
+  startAiTriageSweepMonitor();
 
   // Start server
   server.listen(PORT, () => {
