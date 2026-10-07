@@ -84,6 +84,49 @@ export function stripNegatedSpans(text: string): string {
     return text.replace(NEGATION_TRIGGER, (match) => ' '.repeat(match.length));
 }
 
+// Pregnancy (or the weeks after delivery) changes what a symptom means: the
+// South African maternal care danger signs are an emergency referral whatever
+// the blood pressure reads, because pre-eclampsia, eclampsia and HELLP can
+// present with a normal pressure. The old obstetric patterns only matched
+// "pregnant ... <symptom>" in that word order and missed "my vision has gone
+// blurry" in a woman who said she is 24 weeks pregnant. This reads the
+// pregnancy context and the symptom independently, in either order.
+// Sets a floor (SATS 2) and flags it; it does not diagnose.
+// NEEDS CLINICAL SIGN-OFF (docs/CLINICAL_SIGNOFF_CHECKLIST.md).
+const PREGNANCY_CONTEXT = /\b(?:pregnan\w*|gravid\w*|primigravida|multigravida|antenatal|postpartum|post-partum|postnatal|(?:just )?(?:gave|given) birth|recently delivered|\d{1,2}\s*\/\s*40|\d{1,2}\s*weeks?\s*(?:of\s*)?(?:gestation\w*|pregnan\w*)|gestation\w*)\b/;
+const OBSTETRIC_DANGER_SIGNS: RegExp[] = [
+    /\bsevere headaches?\b/,
+    /\bblurr(?:ed|y|ing)\b/,
+    /\bvisual (?:disturbances?|changes?|loss|symptoms?)\b/,
+    /\bvision (?:changes?|loss|problems?|disturbances?)\b/,
+    /\b(?:loss of|lost|losing) (?:my |her |the )?(?:vision|sight)\b/,
+    /\bflashing lights\b/,
+    /\bspots before (?:my |her |the )?eyes\b/,
+    /\b(?:epigastric|upper abdominal|right upper (?:quadrant|abdomen)|under (?:my|her) (?:right )?ribs)\b.{0,40}\bpains?\b/,
+    /\bpains?\b.{0,40}\b(?:epigastr\w*|upper abdomen|right upper (?:quadrant|abdomen)|under (?:my|her) (?:right )?ribs)\b/,
+    /\bvaginal bleeding\b/,
+    /\b(?:reduced|decreased|less) (?:f(?:e|oe)tal|baby) movements?\b/,
+    /\bswelling of (?:the |my |her )?(?:face|hands)\b/,
+    /\bjaundice\b|\byellow (?:eyes|skin)\b|\bscleral icterus\b/,
+    /\bpersistent vomiting\b/,
+    /\bwaters? (?:have )?broke\b|\bleaking (?:fluid|liquor)\b/,
+    /\bconvulsions?\b|\b(?:had|having|two|three|a) fits?\b/,
+];
+
+// Loss of fetal movement is itself the danger sign, and it is worded as a
+// negation ("no movements", "has not felt the baby move"), which the negation
+// scrubber would erase, so these are matched on the unscrubbed text.
+const ABSENT_FETAL_MOVEMENT: RegExp[] = [
+    /\b(?:no|absent|not feeling) (?:f(?:e|oe)tal|baby(?:'s)?) movements?\b/,
+    /\bbaby (?:is |has )?(?:not moving|stopped moving)\b/,
+    /\b(?:haven'?t|have not|hasn'?t|has not|not) (?:felt|noticed|feeling) (?:the |my )?baby (?:move|moving)\b/,
+];
+
+export function hasObstetricDangerSign(scrubbedLowerText: string, rawLowerText: string = scrubbedLowerText): boolean {
+    if (!PREGNANCY_CONTEXT.test(rawLowerText)) return false;
+    return hasAnyPattern(scrubbedLowerText, OBSTETRIC_DANGER_SIGNS) || hasAnyPattern(rawLowerText, ABSENT_FETAL_MOVEMENT);
+}
+
 export function assessDeterministicRisk(
     symptoms: string,
     vitals?: TriageVitalsSnapshot | null,
@@ -267,6 +310,14 @@ export function assessDeterministicRisk(
     if (minTriageLevel > 2 && hasAnyPattern(negationScrubbedSymptoms, saSpecificPatterns.level2 || [])) {
         cautionFlags.push('SA_HIGH_RISK_CONDITION');
         minTriageLevel = 2;
+    }
+
+    // Pregnancy danger signs (see hasObstetricDangerSign above)
+    // Always flagged (even when another rule already set the floor) so the
+    // doctor sees WHY a pregnant patient is held at this level.
+    if (hasObstetricDangerSign(negationScrubbedSymptoms, normalizedSymptoms)) {
+        hardFlags.push('OBSTETRIC_DANGER_SIGN');
+        if (minTriageLevel > 2) minTriageLevel = 2;
     }
 
     // Level 3 (Urgent): neurological symptoms (see level3Patterns above)
