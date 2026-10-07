@@ -60,17 +60,42 @@ const intEnv = (name: string, fallback: number, min: number) =>
 // all for this long); the per-call ceiling only bounds a model that keeps
 // talking. A non-streamed call had one hard cap and gave up on answers that
 // were seconds from finishing.
-const timeoutMs = () => intEnv('AI_PROVIDER_TIMEOUT_MS', 150_000, 2_000);
+// A stale or mistyped environment variable must not be able to cripple triage:
+// production once ran with AI_PROVIDER_TIMEOUT_MS=12000 (the old hard-coded
+// default), so Opus and Sonnet "timed out" on every case. These variables can
+// raise a limit freely but cannot push it below a floor that real clinical
+// cases need. (Tests may use small values; the floor is off under NODE_ENV=test.)
+const FLOORS = { timeout: 90_000, budget: 120_000 } as const;
+const warned = new Set<string>();
+function floored(name: string, fallback: number, hardMin: number, floor: number): number {
+  const configured = intEnv(name, fallback, hardMin);
+  if (process.env.NODE_ENV === 'test' || configured >= floor) return configured;
+  if (!warned.has(name)) {
+    warned.add(name);
+    console.error(`[aiProviders] ${name}=${configured} is too low for clinical cases; using ${floor} instead. Remove the variable to use the default.`);
+  }
+  return floor;
+}
+
+const timeoutMs = () => floored('AI_PROVIDER_TIMEOUT_MS', 150_000, 2_000, FLOORS.timeout);
 const idleTimeoutMs = () => intEnv('AI_PROVIDER_IDLE_TIMEOUT_MS', 40_000, 2_000);
 // Each provider has its own budget, so a slow Claude chain can never eat the
 // time Gemini needs: Claude had been allowed to run for 6+ minutes before
 // Gemini was even tried.
 const chainBudgetMs = (provider: AiProvider) =>
   process.env.AI_PROVIDER_TOTAL_BUDGET_MS
-    ? intEnv('AI_PROVIDER_TOTAL_BUDGET_MS', 240_000, 5_000)
+    ? floored('AI_PROVIDER_TOTAL_BUDGET_MS', 240_000, 5_000, FLOORS.budget)
     : provider === 'claude'
-      ? intEnv('AI_CLAUDE_BUDGET_MS', 200_000, 5_000)
-      : intEnv('AI_GEMINI_BUDGET_MS', 120_000, 5_000);
+      ? floored('AI_CLAUDE_BUDGET_MS', 200_000, 5_000, FLOORS.budget)
+      : floored('AI_GEMINI_BUDGET_MS', 120_000, 5_000, FLOORS.budget);
+
+/** The limits actually in force (after the floors), for the smoke test and tests. */
+export const effectiveLimits = () => ({
+  perCallMs: timeoutMs(),
+  idleMs: idleTimeoutMs(),
+  claudeBudgetMs: chainBudgetMs('claude'),
+  geminiBudgetMs: chainBudgetMs('gemini'),
+});
 const retryDelayMs = () =>
   process.env.AI_PROVIDER_RETRY_DELAY_MS !== undefined
     ? Math.max(0, parseInt(process.env.AI_PROVIDER_RETRY_DELAY_MS, 10) || 0)
