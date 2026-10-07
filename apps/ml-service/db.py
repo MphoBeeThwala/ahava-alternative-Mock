@@ -36,20 +36,71 @@ _memory_context: dict[str, ContextualProfile] = {}
 # ---------------------------------------------------------------------------
 _pool: Optional[psycopg2.pool.ThreadedConnectionPool] = None
 
+# Every uvicorn worker is its own process with its own pool, and psycopg2 opens
+# `minconn` connections the moment the pool is created (which happens at import,
+# in ensure_schema). Fixed per-worker sizes therefore multiply: 5 per worker x 8
+# workers x 3 replicas = 120 connections held open all day, against a Postgres
+# that allows about 100 by default. Past that, new connections are refused and
+# this service silently falls back to in-memory history. So the size is derived
+# from a budget PER REPLICA instead, divided among that replica's workers.
+DEFAULT_CONNECTIONS_PER_REPLICA = 20
+
+
+def _whole_number(env, name: str, default: int, warnings: List[str]) -> int:
+    raw = (env.get(name) or "").strip()
+    if raw == "":
+        return default
+    if not raw.isdigit() or int(raw) < 1:
+        warnings.append(f"{name}={raw!r} is not a whole number of at least 1; using {default}")
+        return default
+    return int(raw)
+
+
+def pool_settings(env=None) -> dict:
+    """
+    Per-worker pool size. `ML_DB_CONNECTIONS_PER_REPLICA` (default 20) is shared out among the
+    `ML_SERVICE_WORKERS` workers, so adding workers can never add connections. `ML_DB_POOL_MAX` and
+    `ML_DB_POOL_MIN` still override per worker; an override that would exceed the budget is allowed
+    but warned about. Pure function of the environment, so it is testable without a database.
+    """
+    env = os.environ if env is None else env
+    warnings: List[str] = []
+    workers = _whole_number(env, "ML_SERVICE_WORKERS", 1, warnings)
+    budget = _whole_number(env, "ML_DB_CONNECTIONS_PER_REPLICA", DEFAULT_CONNECTIONS_PER_REPLICA, warnings)
+    derived_max = max(1, budget // workers)
+    explicit_max = (env.get("ML_DB_POOL_MAX") or "").strip() != ""
+    max_conn = _whole_number(env, "ML_DB_POOL_MAX", derived_max, warnings)
+    min_conn = min(_whole_number(env, "ML_DB_POOL_MIN", 1, warnings), max_conn)
+    if workers > budget:
+        warnings.append(
+            f"{workers} workers exceed the connection budget of {budget} per replica; each gets 1 connection, "
+            f"so a replica can hold {workers}. Lower ML_SERVICE_WORKERS or raise ML_DB_CONNECTIONS_PER_REPLICA"
+        )
+    elif explicit_max and workers * max_conn > budget:
+        warnings.append(
+            f"ML_DB_POOL_MAX={max_conn} x {workers} workers can hold {workers * max_conn} connections, "
+            f"over the budget of {budget} per replica"
+        )
+    return {"min": min_conn, "max": max_conn, "workers": workers, "budget": budget, "warnings": warnings}
+
 
 def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
     global _pool
     if _pool is None:
         if not _db_url:
             raise RuntimeError("DATABASE_URL environment variable not set")
-        min_conn = int(os.getenv("ML_DB_POOL_MIN", "5"))
-        max_conn = int(os.getenv("ML_DB_POOL_MAX", "30"))
+        cfg = pool_settings()
+        for w in cfg["warnings"]:
+            logger.warning("[db] %s", w)
         _pool = psycopg2.pool.ThreadedConnectionPool(
-            minconn=min_conn,
-            maxconn=max_conn,
+            minconn=cfg["min"],
+            maxconn=cfg["max"],
             dsn=_db_url,
         )
-        logger.info("[db] Connection pool created min=%s max=%s", min_conn, max_conn)
+        logger.info(
+            "[db] Connection pool created min=%s max=%s (budget %s per replica across %s workers)",
+            cfg["min"], cfg["max"], cfg["budget"], cfg["workers"],
+        )
     return _pool
 
 
