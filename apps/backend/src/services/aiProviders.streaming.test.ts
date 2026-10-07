@@ -17,6 +17,7 @@ jest.mock('./evidenceProvider', () => ({
 
 import { analyzeSymptoms } from './aiTriage';
 import { _resetAiHealthForTests } from './aiHealth';
+import { effectiveLimits } from './aiProviders';
 
 const CASE = 'Headache for three weeks, fever, vomiting, drowsy for five days, recurrent infections for twenty years.';
 const answer = {
@@ -179,4 +180,32 @@ describe('timeouts', () => {
     expect(result.uncertaintyFlags).toContain('AI_ANALYSIS_UNAVAILABLE');
     expect(result.providerFailures?.map((f) => f.kind)).toEqual(['timeout', 'timeout']);
   }, 15_000);
+});
+
+describe('a stale environment variable cannot cripple triage', () => {
+  const nodeEnv = process.env.NODE_ENV;
+  afterEach(() => { process.env.NODE_ENV = nodeEnv; });
+
+  it('raises AI_PROVIDER_TIMEOUT_MS=12000 (the old hard-coded value) to the floor outside tests, and says so', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.AI_PROVIDER_TIMEOUT_MS = '12000';
+    process.env.AI_CLAUDE_BUDGET_MS = '20000';
+    const limits = effectiveLimits();
+    expect(limits.perCallMs).toBe(90_000);
+    expect(limits.claudeBudgetMs).toBe(120_000);
+    expect(console.error).toHaveBeenCalledWith(expect.stringMatching(/AI_PROVIDER_TIMEOUT_MS=12000 is too low/));
+  });
+
+  it('lets a higher value through untouched', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.AI_PROVIDER_TIMEOUT_MS = '300000';
+    expect(effectiveLimits().perCallMs).toBe(300_000);
+  });
+
+  it('uses the defaults when nothing is set', () => {
+    process.env.NODE_ENV = 'production';
+    delete process.env.AI_PROVIDER_TIMEOUT_MS;
+    delete process.env.AI_CLAUDE_BUDGET_MS;
+    expect(effectiveLimits()).toMatchObject({ perCallMs: 150_000, claudeBudgetMs: 200_000, geminiBudgetMs: 120_000 });
+  });
 });

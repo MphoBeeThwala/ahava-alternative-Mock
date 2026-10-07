@@ -21,7 +21,7 @@ import path from 'path';
 import { analyzeSymptoms, type TriageResult } from '../services/aiTriage';
 import { assessDeterministicRisk } from '../services/triageSafety';
 import {
-  checkModel, configuredModels, effectiveChain, extractJsonObject, runClaude,
+  checkModel, configuredModels, effectiveChain, effectiveLimits, extractJsonObject, runClaude,
 } from '../services/aiProviders';
 import {
   buildCaseInput, renderReport, scoreSafety, type CaseOutcome, type Judgement, type PackCase,
@@ -37,12 +37,15 @@ const casesPath = path.resolve(
 
 async function smoke(): Promise<number> {
   console.log('Configured keys: claude=%s gemini=%s', !!process.env.ANTHROPIC_API_KEY, !!process.env.GEMINI_API_KEY);
+  const env = (n: string) => (process.env[n] ? `${n}=${process.env[n]}` : null);
+  console.log('AI variables set here:', ['AI_PROVIDER_TIMEOUT_MS', 'AI_PROVIDER_IDLE_TIMEOUT_MS', 'AI_PROVIDER_TOTAL_BUDGET_MS', 'AI_CLAUDE_BUDGET_MS', 'AI_GEMINI_BUDGET_MS', 'AI_CLAUDE_MODELS', 'AI_GEMINI_MODELS', 'AI_CLAUDE_EFFORT', 'AI_CLAUDE_MAX_TOKENS'].map(env).filter(Boolean).join(', ') || 'none');
+  console.log('Limits in force:', JSON.stringify(effectiveLimits()));
   let bad = 0;
   for (const provider of ['claude', 'gemini'] as const) {
     if (!(provider === 'claude' ? process.env.ANTHROPIC_API_KEY : process.env.GEMINI_API_KEY)) continue;
     console.log(`\n${provider}: order tried in production = ${effectiveChain(provider).join(' > ')} (configured: ${configuredModels(provider).join(', ')})`);
     for (const model of effectiveChain(provider)) {
-      const r = await checkModel(provider, model);
+      const r = await checkModel(provider, model, effectiveLimits().perCallMs);
       if (!r.ok) bad++;
       console.log(`  ${r.ok ? 'OK  ' : 'FAIL'} ${model.padEnd(28)} ${(r.ms / 1000).toFixed(1)}s${r.ok ? '' : `  ${r.kind}${r.status ? ` ${r.status}` : ''}: ${r.message}`}`);
     }
