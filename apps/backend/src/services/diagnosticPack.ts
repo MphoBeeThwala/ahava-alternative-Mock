@@ -98,6 +98,32 @@ export function scoreSafety(
   };
 }
 
+/**
+ * Which API keys a pack run may spend. The first live runs used the production
+ * keys (loaded by `railway run`) and used up the credit that patients' cases
+ * depend on: every later case then failed with "credit balance is too low". A full
+ * run now needs either separate test keys (AI_PACK_ANTHROPIC_API_KEY and/or
+ * AI_PACK_GEMINI_API_KEY, from a workspace with its own spend limit) or an explicit
+ * AI_PACK_ALLOW_PRODUCTION_KEYS=1. Floor-only runs and the smoke test are cheap or
+ * free and always allowed.
+ */
+export function packKeyPolicy(
+  env: Record<string, string | undefined>,
+  opts: { floorOnly: boolean; smoke: boolean },
+): { testMode: boolean; allowed: boolean } {
+  const testMode = !!(env.AI_PACK_ANTHROPIC_API_KEY || env.AI_PACK_GEMINI_API_KEY);
+  const allowed = opts.floorOnly || opts.smoke || testMode || env.AI_PACK_ALLOW_PRODUCTION_KEYS === '1';
+  return { testMode, allowed };
+}
+
+/** How many engine runs a pack run will make (stage 2 only for cases that have later results). */
+export function plannedRuns(cases: PackCase[], stage2: boolean): number {
+  return cases.reduce(
+    (total, c) => total + 1 + (stage2 && (c.input.labs.some((l) => l.withholdUntilStage) || c.input.stages) ? 1 : 0),
+    0,
+  );
+}
+
 export interface Judgement {
   /** 'full' = final diagnosis (or the key's accepted answer) is in the top 3; 'partial' = acceptable alternative; 'none'. */
   diagnosis: 'full' | 'partial' | 'none';
@@ -121,7 +147,13 @@ const mark = (ok: boolean) => (ok ? 'PASS' : 'FAIL');
 
 export function renderReport(
   outcomes: CaseOutcome[],
-  meta: { generatedAt: string; judged: boolean; mode: string; startedAt?: string; codeVersion?: string },
+  meta: {
+    generatedAt: string; judged: boolean; mode: string; startedAt?: string; codeVersion?: string;
+    /** Set when the run stopped before the end (e.g. a provider ran out of credit). */
+    aborted?: string;
+    /** Which model and effort scored the answers, so runs with different judges are not compared blindly. */
+    judge?: string;
+  },
 ): string {
   const lines: string[] = [];
   const stage1 = outcomes.filter((o) => o.stage === 1);
@@ -131,6 +163,8 @@ export function renderReport(
   if (meta.codeVersion || meta.startedAt) {
     lines.push(`Code version: ${meta.codeVersion ?? 'unknown'}.${meta.startedAt ? ` Run started ${meta.startedAt}.` : ''}`);
   }
+  if (meta.judged && meta.judge) lines.push(`Judge: ${meta.judge}.`);
+  if (meta.aborted) lines.push('', `**RUN STOPPED EARLY: ${meta.aborted}**`);
   const byModel = new Map<string, number>();
   for (const o of outcomes) byModel.set(o.modelUsed, (byModel.get(o.modelUsed) ?? 0) + 1);
   if (byModel.size > 1) {

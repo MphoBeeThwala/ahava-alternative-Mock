@@ -8,7 +8,7 @@ import { app } from "../index";
 import prisma from "../lib/prisma";
 import * as aiTriage from "../services/aiTriage";
 import * as queue from "../services/queue";
-import { processAiTriageJob, reanalysisDelaysMs, isUnavailableResult } from "./aiTriageJob";
+import { processAiTriageJob, reanalysisDelaysMs, isUnavailableResult, prolongedOutageAttempts } from "./aiTriageJob";
 import { sweepUnanalysedTriageCases } from "../services/aiTriageSweep";
 
 const PASSWORD = "Str0ng!Passw0rd";
@@ -197,5 +197,76 @@ describe("retry schedule", () => {
   it("recognises an unavailable result by its flag, not its text", () => {
     expect(isUnavailableResult(unavailable)).toBe(true);
     expect(isUnavailableResult(recovered)).toBe(false);
+  });
+});
+
+describe("a case that stays without an AI analysis (a prolonged outage)", () => {
+  const original = process.env.AI_UNAVAILABLE_ESCALATE_AFTER_ATTEMPTS;
+  afterEach(() => {
+    if (original === undefined) delete process.env.AI_UNAVAILABLE_ESCALATE_AFTER_ATTEMPTS; else process.env.AI_UNAVAILABLE_ESCALATE_AFTER_ATTEMPTS = original;
+  });
+
+  it("is raised to SATS 2 after the second failed re-analysis, flagged, and the reason is on the case", async () => {
+    const c = await newCase("Painful loss of vision in the right eye");
+    jest.spyOn(aiTriage, "analyzeSymptoms").mockResolvedValue(unavailable);
+    jest.spyOn(queue, "addAiTriageJob").mockResolvedValue(true);
+
+    await processAiTriageJob({ ...c, retryAttempt: 2 });
+
+    const saved = await prisma.triageCase.findUniqueOrThrow({ where: { id: c.caseId } });
+    expect(saved.aiTriageLevel).toBe(2);
+    expect(saved.aiReasoning).toMatch(/raised to SATS 2/);
+    const audit = await prisma.auditLog.findFirst({ where: { resourceId: c.caseId, action: "AI_TRIAGE_DECISION" } });
+    expect(JSON.stringify(audit?.metadata)).toContain("AI_UNAVAILABLE_PROLONGED");
+  });
+
+  it("does not touch the shared analyser result, and leaves earlier attempts at the hold level", async () => {
+    const c = await newCase("tired");
+    jest.spyOn(aiTriage, "analyzeSymptoms").mockResolvedValue(unavailable);
+    jest.spyOn(queue, "addAiTriageJob").mockResolvedValue(true);
+
+    await processAiTriageJob({ ...c, retryAttempt: 1 });
+    expect((await prisma.triageCase.findUniqueOrThrow({ where: { id: c.caseId } })).aiTriageLevel).toBe(3);
+
+    await processAiTriageJob({ ...c, retryAttempt: 2 });
+    expect(unavailable.triageLevel).toBe(3);
+    expect(unavailable.uncertaintyFlags).not.toContain("AI_UNAVAILABLE_PROLONGED");
+    expect(unavailable.reasoning).not.toMatch(/raised to SATS 2/);
+  });
+
+  it("can be switched off", async () => {
+    process.env.AI_UNAVAILABLE_ESCALATE_AFTER_ATTEMPTS = "0";
+    const c = await newCase("tired");
+    jest.spyOn(aiTriage, "analyzeSymptoms").mockResolvedValue(unavailable);
+    jest.spyOn(queue, "addAiTriageJob").mockResolvedValue(true);
+
+    await processAiTriageJob({ ...c, retryAttempt: 3 });
+
+    expect((await prisma.triageCase.findUniqueOrThrow({ where: { id: c.caseId } })).aiTriageLevel).toBe(3);
+  });
+
+  it("never changes a real AI answer: when the AI recovers on a late attempt, its level stands", async () => {
+    const c = await newCase("tired");
+    jest.spyOn(aiTriage, "analyzeSymptoms").mockResolvedValue({ ...recovered, triageLevel: 4 });
+    jest.spyOn(queue, "addAiTriageJob").mockResolvedValue(true);
+
+    await processAiTriageJob({ ...c, retryAttempt: 3 });
+
+    const saved = await prisma.triageCase.findUniqueOrThrow({ where: { id: c.caseId } });
+    expect(saved.aiTriageLevel).toBe(4);
+    expect(saved.aiModel).toBe("claude-opus-5-5");
+  });
+
+  it("reads its setting safely: default 2, 0 means off, rubbish means the default", () => {
+    delete process.env.AI_UNAVAILABLE_ESCALATE_AFTER_ATTEMPTS;
+    expect(prolongedOutageAttempts()).toBe(2);
+    process.env.AI_UNAVAILABLE_ESCALATE_AFTER_ATTEMPTS = "0";
+    expect(prolongedOutageAttempts()).toBe(0);
+    process.env.AI_UNAVAILABLE_ESCALATE_AFTER_ATTEMPTS = "5";
+    expect(prolongedOutageAttempts()).toBe(5);
+    process.env.AI_UNAVAILABLE_ESCALATE_AFTER_ATTEMPTS = "soon";
+    expect(prolongedOutageAttempts()).toBe(2);
+    process.env.AI_UNAVAILABLE_ESCALATE_AFTER_ATTEMPTS = "-1";
+    expect(prolongedOutageAttempts()).toBe(2);
   });
 });

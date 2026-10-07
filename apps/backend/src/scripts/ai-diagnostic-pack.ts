@@ -3,18 +3,25 @@
  * (analyzeSymptoms: the same prompt, provider chain, guardrails and fallback a
  * patient's case gets) and score it against the answer key.
  *
- *   npm run ai-pack -- --smoke                 each configured model: one tiny call, with latency
- *   npm run ai-pack -- --floor-only            no network: only the deterministic safety rules
- *   npm run ai-pack -- --judge                 stage 1 of every case, AI-judged diagnosis scoring
- *   npm run ai-pack -- --judge --stage2        also re-run with the withheld results added
- *   npm run ai-pack -- --only AHV-DX-05,AHV-DX-07 --out report.md
+ *   npm run ai-pack:smoke                      each configured model: one tiny call, with latency
+ *   npm run ai-pack:floor                      no network: only the deterministic safety rules
+ *   npm run ai-pack:full                       pack 1, stage 1 and 2, AI-judged scoring
+ *   npm run ai-pack:set2                       the blind set 2, same settings
+ *   (more options: --only AHV-DX-05,AHV-DX-07  --out report.md  --cases <file>  --judge  --stage2)
  *
- * It needs the provider keys, so run it where they are, for example
- * `railway run --service backend npm run ai-pack -- --smoke`. It never writes
- * to the database. Images are not sent: the pack ships descriptions of the
- * figures, not the files, and describing an image in text would leak the answer.
- * The answer key is never sent to the engine; with --judge it goes to a
- * separate model call that only scores.
+ * It needs provider keys, and a full run makes dozens of long AI calls. DO NOT
+ * spend the production credit on it: an early run did, and every patient case then
+ * failed with "credit balance is too low". Use separate test keys from a workspace
+ * with its own spend limit:
+ *   AI_PACK_ANTHROPIC_API_KEY, AI_PACK_GEMINI_API_KEY   (only these keys are used when either is set)
+ * or knowingly accept the risk with AI_PACK_ALLOW_PRODUCTION_KEYS=1 (e.g. under
+ * `railway run`). The judge is cheaper than the engine by default:
+ *   AI_PACK_JUDGE_MODEL (default claude-sonnet-5-5), AI_PACK_JUDGE_EFFORT (default medium).
+ * The run stops at once if a provider reports no credit left. It never writes to
+ * the database. Images are not sent: the pack ships descriptions of the figures,
+ * not the files, and describing an image in text would leak the answer. The
+ * answer key is never sent to the engine; with --judge it goes to a separate
+ * model call that only scores.
  */
 import fs from 'fs';
 import path from 'path';
@@ -25,12 +32,24 @@ import {
   checkModel, configuredModels, effectiveChain, effectiveLimits, extractJsonObject, runClaude,
 } from '../services/aiProviders';
 import {
-  buildCaseInput, renderReport, scoreSafety, type CaseOutcome, type Judgement, type PackCase,
+  buildCaseInput, packKeyPolicy, plannedRuns, renderReport, scoreSafety,
+  type CaseOutcome, type Judgement, type PackCase,
 } from '../services/diagnosticPack';
 
 const args = process.argv.slice(2);
 const flag = (n: string) => args.includes(`--${n}`);
 const opt = (n: string) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1] : undefined; };
+
+// Test keys replace the production ones completely (a missing test key means that
+// provider is simply not used), so a test run cannot reach the production credit.
+if (process.env.AI_PACK_ANTHROPIC_API_KEY || process.env.AI_PACK_GEMINI_API_KEY) {
+  const setOrDelete = (name: string, value: string | undefined) => { if (value) process.env[name] = value; else delete process.env[name]; };
+  setOrDelete('ANTHROPIC_API_KEY', process.env.AI_PACK_ANTHROPIC_API_KEY);
+  setOrDelete('GEMINI_API_KEY', process.env.AI_PACK_GEMINI_API_KEY);
+}
+
+const JUDGE_MODEL = process.env.AI_PACK_JUDGE_MODEL || 'claude-sonnet-5-5';
+const JUDGE_EFFORT = process.env.AI_PACK_JUDGE_EFFORT || 'medium';
 
 /** Which code produced a report. Two runs of "the same" pack were once indistinguishable. */
 function codeVersion(): string {
@@ -87,7 +106,11 @@ Output ONLY JSON: {"diagnosis":"full|partial|none","mustDetect":[{"item":"<verba
 
 async function judge(c: PackCase, r: { possibleConditions: string[]; recommendedAction: string; reasoning: string }): Promise<Judgement | undefined> {
   try {
-    const ran = await runClaude({ prompt: JUDGE_PROMPT(c, r.possibleConditions, r.recommendedAction, r.reasoning), files: [] }, (text) => extractJsonObject(text) as Judgement);
+    const ran = await runClaude(
+      { prompt: JUDGE_PROMPT(c, r.possibleConditions, r.recommendedAction, r.reasoning), files: [] },
+      (text) => extractJsonObject(text) as Judgement,
+      { models: [JUDGE_MODEL], effort: JUDGE_EFFORT },
+    );
     const j = ran.value;
     return {
       diagnosis: (['full', 'partial', 'none'] as const).includes(j.diagnosis) ? j.diagnosis : 'none',
@@ -114,11 +137,31 @@ async function main(): Promise<number> {
     console.error('No ANTHROPIC_API_KEY or GEMINI_API_KEY here. Run where the keys are (railway run ...), or use --floor-only.');
     return 2;
   }
+  if (!packKeyPolicy(process.env, { floorOnly, smoke: false }).allowed) {
+    console.error([
+      'REFUSING TO RUN: a full pack run makes dozens of long AI calls and would spend the PRODUCTION API credit',
+      'that patients\' cases depend on (an earlier run used it all up, and every case then failed).',
+      '',
+      'Use separate test keys from a workspace or project with its own spend limit. In PowerShell:',
+      '  $env:AI_PACK_ANTHROPIC_API_KEY = "sk-ant-..."      (and optionally  $env:AI_PACK_GEMINI_API_KEY = "...")',
+      'then run the same command again. Only the test keys are used when either is set.',
+      '',
+      'Or, knowingly, spend the production credit:   $env:AI_PACK_ALLOW_PRODUCTION_KEYS = "1"',
+    ].join('\n'));
+    return 2;
+  }
+  if (!floorOnly) {
+    const runs = plannedRuns(cases, flag('stage2'));
+    console.log(`Plan: ${cases.length} cases, ${runs} engine runs${judged ? ` plus ${runs} judge calls (${JUDGE_MODEL}, ${JUDGE_EFFORT} effort)` : ''}. This spends API credit: check the usage page of the provider afterwards.`);
+  }
 
   const outcomes: CaseOutcome[] = [];
   const runStartedAt = new Date().toISOString();
+  let aborted: string | undefined;
   for (const c of cases) {
+    if (aborted) break;
     for (const stage of stages) {
+      if (aborted) break;
       if (stage === 2 && !c.input.labs.some((l) => l.withholdUntilStage) && !c.input.stages) continue;
       const input = buildCaseInput(c, stage);
       const started = Date.now();
@@ -143,12 +186,19 @@ async function main(): Promise<number> {
       if (judged && machine.aiAnswered) outcome.judgement = await judge(c, result);
       outcomes.push(outcome);
       console.log(`${c.id} s${stage}: needs ${machine.minimumLevel}, got ${machine.level} ${machine.safetyPass ? 'PASS' : 'FAIL'} ${machine.aiAnswered ? '' : '(NO AI ANSWER)'} ${outcome.failures.join(' ')}`);
+      // An empty account fails every remaining case the same way (and a quiet fallback to the
+      // other provider would measure the wrong model): stop now instead of burning the whole run.
+      if ((result.providerFailures ?? []).some((f) => f.kind === 'billing')) {
+        aborted = 'a provider reports that its account has no credit left (billing). Every remaining case would fail the same way, or be answered by the fallback provider, so the run was stopped. Add credit, then run again.';
+        console.error(`\nSTOPPING: ${aborted}`);
+      }
     }
   }
 
   const report = renderReport(outcomes, {
     generatedAt: new Date().toISOString(), startedAt: runStartedAt, codeVersion: codeVersion(), judged,
     mode: floorOnly ? 'floor-only (deterministic rules, no AI)' : 'full engine',
+    judge: `${JUDGE_MODEL}, ${JUDGE_EFFORT} effort`, aborted,
   });
   const out = opt('out');
   if (out) { fs.writeFileSync(out, report); console.log(`\nReport written to ${out}`); } else console.log(`\n${report}`);
