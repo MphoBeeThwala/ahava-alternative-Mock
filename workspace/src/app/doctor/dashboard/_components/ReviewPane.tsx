@@ -5,6 +5,7 @@ import { StatusBadge } from '../../../../components/ui/StatusBadge';
 import { EmptyState } from '../../../../components/ui/EmptyState';
 import { Icon } from '../../../../components/ui/Icon';
 import { triageLevelToAcuity, ageFromDateOfBirth } from '../_lib';
+import { ClinicalPlanPanel } from './ClinicalPlanPanel';
 
 function KbdChip({ children }: { children: string }) {
   return (
@@ -182,6 +183,8 @@ export function ReviewPane({
             </div>
             {tc.aiModel && <p className="mt-2 text-[10px] text-[var(--ink-3)]">Model: {tc.aiModel}</p>}
           </div>
+
+          {tc.aiStructuredPlan && <ClinicalPlanPanel record={tc.aiStructuredPlan} />}
 
           <div className="rounded-[var(--radius)] border border-[var(--border)] p-4">
             <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--ink-3)]">In the patient&apos;s own words</p>
