@@ -1,0 +1,121 @@
+{
+  "kind": "weak",
+  "synthetic": true,
+  "note": "SYNTHETIC. Written to reproduce the failures of the original output (septic shock without criteria, no ART timing, no TB decision, thin workup, a dose, 0.92 confidence). Replace with a real model output using `pnpm eval:clinical:live -- --record`.",
+  "expect": {
+    "maxSection": {
+      "investigations": 0.3,
+      "management": 0.5,
+      "safety": 0.6
+    },
+    "lintIncludes": [
+      "art_timing",
+      "cotrimoxazole",
+      "tb_treatment_decision",
+      "bone_marrow",
+      "haematology_referral",
+      "ampho_renal",
+      "cortisol"
+    ],
+    "blockedIncludes": [
+      "septic shock"
+    ]
+  },
+  "output": {
+    "triageLevel": 1,
+    "triageConfidence": 0.9,
+    "severity": {
+      "summary": "Septic shock with multi-organ dysfunction in advanced HIV.",
+      "redFlags": [
+        "confusion"
+      ]
+    },
+    "leadingDiagnosis": {
+      "name": "Disseminated histoplasmosis with secondary HLH",
+      "probability": 0.92,
+      "confirmationStatus": "clinical_only",
+      "rationale": "Skin papules, pancytopenia, very high ferritin at CD4 9."
+    },
+    "differential": [
+      {
+        "name": "Disseminated TB",
+        "probability": 0.25,
+        "evidenceFor": [
+          "endemic setting",
+          "CD4 9"
+        ],
+        "evidenceAgainst": [
+          "GeneXpert negative",
+          "TB-LAM negative"
+        ]
+      },
+      {
+        "name": "Cryptococcosis",
+        "probability": 0.2,
+        "evidenceFor": [
+          "CD4 9",
+          "confusion"
+        ],
+        "evidenceAgainst": [
+          "no headache reported"
+        ]
+      }
+    ],
+    "mustNotMiss": [
+      {
+        "name": "Cryptococcal meningitis",
+        "why": "confusion at CD4 9",
+        "howToExclude": "CrAg and lumbar puncture"
+      }
+    ],
+    "investigations": {
+      "bedsideStat": [
+        {
+          "test": "Blood cultures",
+          "rationale": "needed for diagnosis"
+        }
+      ],
+      "first24h": [
+        {
+          "test": "Urine LAM",
+          "rationale": "needed for diagnosis"
+        }
+      ],
+      "definitive": []
+    },
+    "management": {
+      "immediate": [
+        {
+          "action": "Start liposomal amphotericin B 3 mg/kg daily",
+          "rationale": "indicated",
+          "guidelineSource": "SA guideline: verify"
+        }
+      ],
+      "targeted": [],
+      "supportive": [
+        {
+          "action": "IV fluids",
+          "rationale": "indicated",
+          "guidelineSource": "SA guideline: verify"
+        }
+      ]
+    },
+    "existingTreatmentDecisions": [],
+    "timingDecisions": [],
+    "prophylaxis": [],
+    "escalation": {
+      "escalateIf": [
+        "deterioration in consciousness"
+      ],
+      "redFlags": [
+        "seizure"
+      ],
+      "referral": []
+    },
+    "questionAnswers": [],
+    "evidenceSources": [
+      "Patient Symptoms"
+    ],
+    "uncertaintyFlags": []
+  }
+}

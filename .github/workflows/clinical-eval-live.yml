@@ -1,0 +1,64 @@
+name: Clinical evaluation (live model)
+
+# Runs the gold clinical cases (and optionally the published AHV-DX pack) through
+# the REAL triage engine and scores each section against the rubric. It spends
+# API credit, so it is manual: Actions > "Clinical evaluation (live model)" > Run.
+# It uses separate TEST keys (repository secrets AI_PACK_ANTHROPIC_API_KEY and/or
+# AI_PACK_GEMINI_API_KEY from a workspace with its own spend limit), never the
+# production keys. Fails the run if a section falls below eval/thresholds.json or
+# more than the allowed amount below eval/baseline.json.
+#
+# To make it nightly once the test keys are in place, add:
+#   schedule:
+#     - cron: "17 2 * * *"
+
+on:
+  workflow_dispatch:
+    inputs:
+      pack:
+        description: "Also run the published AHV-DX cases: none | set1 | set2 | all"
+        default: "none"
+        required: false
+
+jobs:
+  live-eval:
+    name: Score gold cases against the live engine
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      POOLED_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ahava_ci
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ahava_ci
+      AI_PACK_ANTHROPIC_API_KEY: ${{ secrets.AI_PACK_ANTHROPIC_API_KEY }}
+      AI_PACK_GEMINI_API_KEY: ${{ secrets.AI_PACK_GEMINI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @ahava-healthcare/api prisma:generate
+
+      - name: Live clinical evaluation
+        run: |
+          PACK="${{ github.event.inputs.pack }}"
+          ARGS="--out clinical-eval-report.md"
+          if [ -n "$PACK" ] && [ "$PACK" != "none" ]; then ARGS="$ARGS --pack $PACK"; fi
+          pnpm --filter @ahava-healthcare/api eval:clinical:live -- $ARGS
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clinical-eval-report
+          path: apps/backend/clinical-eval-report.md
+          if-no-files-found: ignore
