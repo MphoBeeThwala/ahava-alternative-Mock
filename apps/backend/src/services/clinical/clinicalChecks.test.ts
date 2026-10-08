@@ -130,8 +130,18 @@ describe('blocked terms', () => {
     'Escalate if the patient progresses to septic shock.',
     'At risk of septic shock; recheck lactate.',
     'Not in septic shock by Sepsis-3 criteria.',
+    'Sepsis-3 septic shock criteria cannot be assessed without lactate and vasopressor status.',
+    'Septic shock criteria are unknown at present.',
+    'Septic shock unlikely at this MAP.',
   ])('allows a non-assertion: %s', (text) => {
     expect(findBlockedTerms(text, checks)).toHaveLength(0);
+  });
+  it.each([
+    'Patient meets septic shock criteria and needs ICU.',
+    'Septic shock secondary to disseminated infection.',
+    'Treat as septic shock.',
+  ])('still blocks an assertion: %s', (text) => {
+    expect(findBlockedTerms(text, checks)).toHaveLength(1);
   });
   it('allows the term once the criteria are genuinely met', () => {
     const met = evaluateClinicalChecks({ ...hivCase, lactateMmol: 5, vasopressorsRequired: true });

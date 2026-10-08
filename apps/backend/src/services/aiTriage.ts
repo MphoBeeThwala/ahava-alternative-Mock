@@ -10,6 +10,13 @@ import {
     runGemini,
 } from './aiProviders';
 import type { ProviderFailure } from './aiHealth';
+import type { ClinicalFindings } from './clinical/clinicalChecks';
+import { calibrateConfidence } from './clinical/calibration';
+import { validateClinicalPlan, deriveLegacyFields, type PlanValidation } from './clinical/clinicalPlan';
+import {
+    assessPlan, buildRecord, prepareClinicalContext, type ClinicalContext, type PlanAssessment, type StructuredPlanRecord,
+} from './clinical/clinicalPipeline';
+import { buildPlanPromptSections, buildRepairPrompt, PLAN_JSON_TEMPLATE } from './clinical/planPrompt';
 
 dotenv.config();
 
@@ -49,6 +56,8 @@ export interface TriageRequest {
     patient?: DeterministicRiskPatient; // AH-47: age/height, so assessDeterministicRisk never silently applies the adult chart
     patientId?: string; // For audit and explicit case isolation instruction
     caseId?: string; // Generated per triage request to prevent cross-case blending
+    /** Extra structured values (labs etc.) that are already structured upstream. Feeds the deterministic checks. */
+    findings?: ClinicalFindings;
 }
 
 export interface TriageResult {
@@ -56,7 +65,10 @@ export interface TriageResult {
     possibleConditions: string[];
     recommendedAction: string;
     reasoning: string;
-    confidence: number; // 0-1 calibrated confidence (required for guardrails)
+    /** 0-1 DIAGNOSTIC confidence, after the calibration caps (docs/CONFIDENCE_CALIBRATION.md). */
+    confidence: number;
+    /** 0-1 confidence in the urgency level, kept separate from diagnostic confidence. */
+    triageConfidence?: number;
     uncertaintyFlags: string[]; // machine-readable uncertainty reasons
     evidenceSources: string[]; // restricted to approved clinical sources
     requiresDoctorReview: boolean; // fail-safe for uncertain or high-risk outputs
@@ -66,6 +78,8 @@ export interface TriageResult {
     modelUsed: string;
     /** What went wrong with the AI providers for this case, if anything (no patient data). */
     providerFailures?: ProviderFailure[];
+    /** Tiered clinician-only plan with the checks, lint and flags behind it. Absent for legacy or unavailable results. */
+    plan?: StructuredPlanRecord;
 }
 
 const SA_EPIDEMIOLOGICAL_CONTEXT = `
@@ -130,8 +144,7 @@ ${safeMedicalContext}
 `
         : '';
 
-    return `${basePrompt}${patientSection}${contextSection}${SA_EPIDEMIOLOGICAL_CONTEXT}
-Output ONLY valid JSON with the following structure:`;
+    return `${basePrompt}${patientSection}${contextSection}${SA_EPIDEMIOLOGICAL_CONTEXT}`;
 }
 
 const ALLOWED_EVIDENCE_SOURCES = new Set([
@@ -336,24 +349,82 @@ function validateTriageResult(parsed: unknown, source: string): TriageResult {
     };
 }
 
-const TRIAGE_PROMPT_END = `{
-  "triageLevel": number (1-5, where 1 is critical/ER, 5 is basic home care),
-  "possibleConditions": ["string", "string"],
-  "recommendedAction": "string (Advice for the patient/nurse)",
-  "reasoning": "string (Medical reasoning that cites the specific supplied findings)",
-  "confidence": "number (0 to 1)",
-  "uncertaintyFlags": ["string"],
-  "evidenceSources": ["StatPearls/NCBI" | "SATS" | "WHO" | "Patient Symptoms" | "Patient Vitals" | "Patient Risk Profile"],
-  "requiresDoctorReview": "boolean"
+function parseAnswer(text: string, model: string, questions: string[]): ParsedAnswer {
+    const raw = extractJsonObject(text);
+    const validation = validateClinicalPlan(raw, questions);
+    if (validation.plan) return { text, model, validation, legacy: null };
+    // Not the structured plan: accept the older flat shape (still a valid triage answer),
+    // or throw so the chain tries the next model, exactly as before.
+    return { text, model, validation, legacy: validateTriageResult(raw, model) };
 }
+
+/** Turn the (possibly repaired) model answer into a TriageResult, with calibrated confidence and the clinician plan. */
+function buildCandidate(
+    parsed: ParsedAnswer,
+    assessment: PlanAssessment | null,
+    clinical: ClinicalContext,
+    fullSymptoms: string,
+    noReferenceEvidence: boolean,
+    rounds: number,
+): TriageResult {
+    if (!assessment || !parsed.validation.plan) {
+        // Older flat shape. Still never let an uncalibrated 0.9 through.
+        const legacy = parsed.legacy!;
+        const cal = calibrateConfidence({
+            modelTriageConfidence: legacy.confidence,
+            modelDiagnosticConfidence: legacy.confidence,
+            claimedConfirmation: 'clinical_only',
+            alternativeProbabilities: [],
+            caseText: fullSymptoms,
+            noReferenceEvidence,
+        });
+        return {
+            ...legacy,
+            confidence: cal.diagnostic.value,
+            triageConfidence: cal.triage.value,
+            uncertaintyFlags: [...new Set([...legacy.uncertaintyFlags, 'NO_STRUCTURED_PLAN'])],
+        };
+    }
+    const record = buildRecord(assessment, clinical, { schemaIssuesRemaining: parsed.validation.issues, repairRounds: rounds });
+    const plan = record.plan;
+    const derived = deriveLegacyFields(plan);
+    const flagCodes = [...new Set(record.reviewerFlags.filter((f) => f.severity === 'high').map((f) => f.code))];
+    return {
+        triageLevel: plan.triageLevel,
+        possibleConditions: derived.possibleConditions,
+        recommendedAction: derived.recommendedAction,
+        reasoning: derived.reasoning,
+        confidence: record.calibration.diagnostic.value,
+        triageConfidence: record.calibration.triage.value,
+        uncertaintyFlags: [...new Set([...plan.uncertaintyFlags, ...flagCodes])],
+        evidenceSources: sanitizeEvidenceSources(plan.evidenceSources),
+        requiresDoctorReview: true,
+        modelUsed: parsed.model,
+        plan: record,
+    };
+}
+
+const TRIAGE_PROMPT_END = `${PLAN_JSON_TEMPLATE}
 
 IMPORTANT: Output only the raw JSON object, no markdown formatting.
 CRITICAL SAFETY RULES:
 - Case isolation is mandatory: never use information from any other case or prior patient.
 - Use only the provided symptoms, investigation results, attachments and explicit reference context.
 - Do NOT use internet/general web knowledge beyond these allowed references.
-- If uncertain, set low confidence, add uncertaintyFlags, and set requiresDoctorReview=true.
+- If uncertain, set low probabilities, add uncertaintyFlags, and say what would resolve the uncertainty.
+- This is a draft for a reviewing doctor; it is never shown to the patient as advice.
 DISCLAIMER: This is for informational purposes only.`;
+
+/** Rounds of targeted re-prompting after the first answer (schema gaps, missing required elements, unsupported terms). */
+const repairRounds = () => Math.max(0, Math.min(2, parseInt(process.env.AI_PLAN_REPAIR_ROUNDS ?? '1', 10) || 0));
+
+interface ParsedAnswer {
+    text: string;
+    model: string;
+    validation: PlanValidation;
+    /** Set when the model answered in the older flat shape instead of the structured plan. */
+    legacy: TriageResult | null;
+}
 
 // Main function: Claude chain, then Gemini chain, then an honest "unavailable".
 export async function analyzeSymptoms(request: TriageRequest): Promise<TriageResult> {
@@ -395,42 +466,57 @@ export async function analyzeSymptoms(request: TriageRequest): Promise<TriageRes
             ).join('');
         }
 
-        const prompt = buildTriagePrompt(request, symptomsForModel, medicalContext, request.patientContext ?? null) + TRIAGE_PROMPT_END;
+        // Deterministic layer first: what the numbers say, which tests cannot
+        // rule disease out, which questions the case asks, and which elements
+        // the plan must cover. The model is told all of it before it writes.
+        const clinical = prepareClinicalContext({
+            caseText: fullSymptoms,
+            vitals: request.vitalsSnapshot,
+            structured: request.findings,
+        });
+        const prompt = `${buildTriagePrompt(request, symptomsForModel, medicalContext, request.patientContext ?? null)}
+
+${buildPlanPromptSections({ checks: clinical.checks, limitations: clinical.limitations, questions: clinical.questions, required: clinical.required })}
+
+Output ONLY valid JSON with the following structure:
+${TRIAGE_PROMPT_END}`;
 
         const files: AiInputFile[] = [...(request.files ?? [])];
         if (request.imageBase64) {
             const m = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/is.exec(request.imageBase64);
             if (m) files.unshift({ fileName: 'symptom-photo', mimeType: m[1].toLowerCase(), base64: m[2] });
         }
-        const input = { prompt, files };
-        const accept = (text: string, model: string) => validateTriageResult(extractJsonObject(text), model);
 
         const failures: ProviderFailure[] = [];
-        let candidate: TriageResult | null = null;
-
-        if (process.env.ANTHROPIC_API_KEY) {
-            try {
-                const ran = await runClaude(input, accept);
-                candidate = ran.value;
-                failures.push(...ran.failures);
-            } catch (error) {
-                if (error instanceof AiProviderError) failures.push(...error.failures);
-                else failures.push({ provider: 'claude', model: 'n/a', kind: 'unknown', message: String((error as Error)?.message ?? error) });
+        const ask = async (promptText: string): Promise<ParsedAnswer | null> => {
+            const input = { prompt: promptText, files };
+            const accept = (text: string, model: string): ParsedAnswer => parseAnswer(text, model, clinical.questions);
+            if (process.env.ANTHROPIC_API_KEY) {
+                try {
+                    const ran = await runClaude(input, accept);
+                    failures.push(...ran.failures);
+                    return ran.value;
+                } catch (error) {
+                    if (error instanceof AiProviderError) failures.push(...error.failures);
+                    else failures.push({ provider: 'claude', model: 'n/a', kind: 'unknown', message: String((error as Error)?.message ?? error) });
+                }
             }
-        }
-
-        if (!candidate && process.env.GEMINI_API_KEY) {
-            try {
-                const ran = await runGemini(input, accept);
-                candidate = ran.value;
-                failures.push(...ran.failures);
-            } catch (error) {
-                if (error instanceof AiProviderError) failures.push(...error.failures);
-                else failures.push({ provider: 'gemini', model: 'n/a', kind: 'unknown', message: String((error as Error)?.message ?? error) });
+            if (process.env.GEMINI_API_KEY) {
+                try {
+                    const ran = await runGemini(input, accept);
+                    failures.push(...ran.failures);
+                    return ran.value;
+                } catch (error) {
+                    if (error instanceof AiProviderError) failures.push(...error.failures);
+                    else failures.push({ provider: 'gemini', model: 'n/a', kind: 'unknown', message: String((error as Error)?.message ?? error) });
+                }
             }
-        }
+            return null;
+        };
 
-        if (!candidate) {
+        let parsed = await ask(prompt);
+
+        if (!parsed) {
             const noProvider = !process.env.ANTHROPIC_API_KEY && !process.env.GEMINI_API_KEY;
             const reason = noProvider
                 ? 'no AI provider is configured'
@@ -442,10 +528,40 @@ export async function analyzeSymptoms(request: TriageRequest): Promise<TriageRes
             return unavailable;
         }
 
+        // Validate, lint and (at most `repairRounds`) re-prompt once with exactly what is wrong.
+        const evaluate = (p: ParsedAnswer): { assessment: PlanAssessment | null; issues: string[] } => {
+            if (!p.validation.plan) {
+                return { assessment: null, issues: ['The answer did not use the required structured plan format. Return the complete structured JSON described above.'] };
+            }
+            const assessment = assessPlan(p.validation.plan, p.validation.issues, clinical, fullSymptoms, { noReferenceEvidence: !hasEvidence });
+            return { assessment, issues: assessment.repairIssues };
+        };
+        let current = evaluate(parsed);
+        let rounds = 0;
+        for (let round = 0; round < repairRounds() && current.issues.length > 0; round++) {
+            rounds += 1;
+            const repaired = await ask(buildRepairPrompt({ originalPrompt: prompt, previousAnswer: parsed.text, issues: current.issues }));
+            if (!repaired) break; // keep the first answer; the gaps are flagged for the doctor
+            const next = evaluate(repaired);
+            const betterShape = !!next.assessment && !current.assessment;
+            if (betterShape || (!!next.assessment === !!current.assessment && next.issues.length < current.issues.length)) {
+                parsed = repaired;
+                current = next;
+            }
+        }
+
+        const candidate = buildCandidate(parsed, current.assessment, clinical, fullSymptoms, !hasEvidence, rounds);
+
         const guarded = mergeGuardrails(candidate, fullSymptoms, request, inputTruncated);
         if (!hasEvidence) {
             guarded.confidence = Math.min(guarded.confidence, 0.5);
             guarded.uncertaintyFlags = [...new Set([...guarded.uncertaintyFlags, 'NO_PEER_REVIEW_CONTEXT'])];
+        }
+        if (guarded.plan && guarded.triageLevel !== guarded.plan.plan.triageLevel) {
+            guarded.plan.reviewerFlags.push({
+                code: 'TRIAGE_RAISED_BY_RULES', severity: 'info',
+                message: `The model rated this SATS ${guarded.plan.plan.triageLevel}; the deterministic safety rules raised it to SATS ${guarded.triageLevel}.`,
+            });
         }
         if (failures.length > 0) guarded.providerFailures = failures; // a model failed but another succeeded: still worth knowing
         return guarded;

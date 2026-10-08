@@ -15,6 +15,7 @@ import { analyzeSymptoms, type TriageResult } from "../services/aiTriage";
 import type { AiInputFile } from "../services/aiProviders";
 import { calculateSlaDeadline, getDoctorFee } from "../services/triageSla";
 import { broadcastToUsers } from "../services/websocket";
+import { Prisma } from "@prisma/client";
 import prisma from "../lib/prisma";
 import { hashValue, writeClinicalAudit } from "../services/clinicalAudit";
 import {
@@ -168,6 +169,8 @@ export async function processAiTriageJob(data: AiTriageJobData): Promise<void> {
       aiRecommendedAction: result.recommendedAction,
       aiPossibleConditions: result.possibleConditions,
       aiReasoning: result.reasoning,
+      // Clinician-only tiered plan (absent for legacy-shape or unavailable results).
+      aiStructuredPlan: result.plan ? (result.plan as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
       slaDeadline,
       doctorFeeCents: feeCents,
       // Found via a real user question, 2026-09-14: this used to stamp every
@@ -192,6 +195,11 @@ export async function processAiTriageJob(data: AiTriageJobData): Promise<void> {
     metadata: {
       triageLevel: result.triageLevel,
       confidence: result.confidence,
+      triageConfidence: result.triageConfidence,
+      diagnosticConfidenceModelValue: result.plan?.calibration.diagnostic.modelValue,
+      confidenceCaps: result.plan?.calibration.diagnostic.appliedCaps,
+      planReviewerFlagCodes: result.plan?.reviewerFlags.map((f) => f.code),
+      planRepairRounds: result.plan?.repairRounds,
       requiresDoctorReview: result.requiresDoctorReview,
       uncertaintyFlags: result.uncertaintyFlags,
       evidenceSources: result.evidenceSources,

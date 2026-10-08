@@ -359,6 +359,10 @@ export function renderChecksForPrompt(c: ClinicalChecks): string {
   return lines.join('\n');
 }
 
+// Wording AFTER the term that makes it a statement about criteria, not a claim:
+// "septic shock criteria are not met", "... cannot be assessed", "... excluded", "... unlikely".
+const NON_ASSERTION_AFTER = /\b(?:not|never)\s+(?:met|present|established|confirmed|assessable|applicable)|\bcriteria\b[^.;\n]{0,60}\b(?:not|cannot|can't|unable|unclear|pending|unmet|absent|unknown)\b|\b(?:cannot|can't|unable to|not possible to)\s+(?:be\s+)?(?:assess|judg|determin|confirm|establish)|\bexcluded\b|\bunlikely\b|\bnot assessable\b/i;
+
 export interface BlockedTerm { term: string; reason: string; excerpt: string }
 
 // Words that make a mention a non-assertion ("no septic shock", "not in septic shock",
@@ -380,7 +384,7 @@ export function findBlockedTerms(text: string, c: ClinicalChecks): BlockedTerm[]
       // A negation or hedge in the same clause makes this a non-assertion.
       const clauseBefore = before.split(/[.;:\n]/).pop() ?? '';
       const clauseAfter = after.split(/[.;\n]/)[0] ?? '';
-      if (NON_ASSERTION.test(clauseBefore) || /\b(?:not|never)\s+(?:met|present|established|confirmed)|\bcriteria (?:are |is )?not\b|\bexcluded\b|\bunlikely\b/i.test(clauseAfter)) continue;
+      if (NON_ASSERTION.test(clauseBefore) || NON_ASSERTION_AFTER.test(clauseAfter)) continue;
       found.push({
         term: 'septic shock',
         reason: `Sepsis-3 septic-shock criteria are ${c.septicShock.status.replace('_', ' ')} (${c.septicShock.reason})`,

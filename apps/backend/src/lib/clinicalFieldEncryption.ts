@@ -32,7 +32,7 @@ export const ENCRYPTED_CLINICAL_FIELDS: Record<string, { text?: string[]; json?:
       'symptoms', 'aiReasoning', 'doctorNotes', 'doctorDiagnosis', 'doctorRecommendations',
       'finalDiagnosis', 'overrideReason', 'followUpRequestMessage', 'patientFollowUpResponse',
     ],
-    json: ['aiPossibleConditions', 'followUpQuestions', 'requestedInvestigations'],
+    json: ['aiPossibleConditions', 'aiStructuredPlan', 'followUpQuestions', 'requestedInvestigations'],
   },
   Visit: { text: ['nurseReport', 'doctorReview'], json: ['treatment'] },
   Prescription: { text: ['diagnosis', 'doctorNotes'], json: ['medications'] },

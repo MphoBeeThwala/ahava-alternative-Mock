@@ -129,3 +129,26 @@ export function mergeFindings(...parts: Array<ClinicalFindings | null | undefine
   }
   return out as ClinicalFindings;
 }
+
+// ---- minimal, verifiable text hints -------------------------------------------
+// NOT the Stage 2 extraction step. These are literal pattern matches where the
+// value must appear verbatim in the case text, used so the CD4-based rules can
+// fire on free-text cases. A structured value always wins over these, and any
+// ambiguity (two different CD4 values) yields "unknown".
+
+/** "CD4 9", "CD4 count: 9 cells/uL", "CD4 of 9". Several different values -> null. */
+export function cd4FromText(text: string): number | null {
+  const values = new Set<number>();
+  const re = /\bCD4(?:\+)?(?:\s+(?:T[- ]?cell\s+)?(?:count|cell count|cells?))?\s*(?:of|is|was|=|:|-)?\s*(\d{1,4})\b(?!\s*%)(?!\s*\/\s*mm)?/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) values.add(Number(m[1]));
+  return values.size === 1 ? [...values][0] : null;
+}
+
+/** HIV status from explicit wording only; "HIV negative" -> false; absent -> null. */
+export function hivFromText(text: string): boolean | null {
+  const t = text.toLowerCase();
+  if (/\bhiv[- ]?(?:negative|neg\b|non-?reactive)|\bhiv[: ]+(?:negative|non-?reactive)/.test(t)) return false;
+  if (/\bhiv[- ]?(?:positive|infected|reactive)|\bhiv[: ]+(?:positive|reactive)|\bliving with hiv\b|\bplhiv\b|\badvanced hiv\b|\bhiv disease\b|\bretroviral\b|\bon art\b|\baids\b|\bcd4\b/.test(t)) return true;
+  return null;
+}

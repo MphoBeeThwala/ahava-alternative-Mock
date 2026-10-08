@@ -506,6 +506,10 @@ model TriageCase {
   aiRecommendedAction String
   aiPossibleConditions Json          // string[]
   aiReasoning       String
+  // Tiered clinician-only plan (investigations, management, decisions on existing
+  // treatment) with the deterministic checks, lint results and reviewer flags.
+  // Never returned to patients. Encrypted like the other clinical JSON fields.
+  aiStructuredPlan  Json?
   
   status            TriageCaseStatus  @default(PENDING_REVIEW)
   doctorNotes       String?
