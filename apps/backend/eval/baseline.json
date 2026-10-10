@@ -1,0 +1,12 @@
+{
+  "updatedAt": "2026-10-10T10:17:52.600Z",
+  "cases": {
+    "HIV-HLH-001": {
+      "diagnosis": 1,
+      "investigations": 1,
+      "management": 1,
+      "calibration": 1,
+      "safety": 1
+    }
+  }
+}
