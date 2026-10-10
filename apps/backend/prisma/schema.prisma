@@ -283,7 +283,11 @@ model Visit {
   nurseReport     String?     // Encrypted - Detailed visit report
   doctorReview    String?
   doctorRating    Int?        // 1-5 stars
-  
+
+  // The patient's own close-out of the visit, after the nurse finishes it.
+  patientConfirmedAt DateTime?
+  patientRating      Int?     // 1-5 stars, optional
+
   // Relations
   booking         Booking     @relation(fields: [bookingId], references: [id])
   nurse           User        @relation("NurseVisits", fields: [nurseId], references: [id])
