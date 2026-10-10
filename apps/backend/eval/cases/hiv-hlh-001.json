@@ -1,8 +1,8 @@
 {
   "id": "HIV-HLH-001",
   "title": "Advanced HIV (CD4 9), disseminated fungal infection with secondary HLH, failing empirical TB treatment",
-  "status": "gold_draft_pending_clinician_review",
-  "source": "Internal test case that exposed weak workup and management (2026-10). Rubric written from the failures listed by the product owner; every item needs clinician sign-off before this case is treated as gold.",
+  "status": "gold_reviewed_signed_document_pending",
+  "source": "Internal test case that exposed weak workup and management (2026-10). Rubric written from the failures listed by the product owner. Clinician review of the rubric reported by the product owner on 2026-10-10 (Dr. Thwala, HPCSA MP0897654); the signed document is not in the repo. Change status to gold_signed_off once it is attached.",
   "input": {
     "caseText": "38 year old woman with advanced HIV, CD4 9, on empirical TB treatment (RHZE) for 6 weeks with no improvement. Fever, new confusion, skin papules, pancytopenia, raised creatinine, ferritin 18000. GeneXpert negative, TB-LAM negative. BP 95/59, sodium 124. Transferred for opinion. Should we continue TB treatment? When should ART be started?",
     "findings": {

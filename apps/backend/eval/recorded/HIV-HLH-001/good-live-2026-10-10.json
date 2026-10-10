@@ -1,8 +1,11 @@
 {
-  "kind": "live",
+  "kind": "good",
   "synthetic": false,
-  "note": "Live output from claude-sonnet-5-5. Doses are already stripped. Promote to \"good\" or \"weak\" only after clinician review.",
-  "expect": {},
+  "note": "Real output from claude-sonnet-5-5 (effort high, 32000 max tokens), 2026-10-10. Doses are already stripped. Promoted from kind \"live\" to \"good\": clinician review reported by the product owner (Dr. Thwala, HPCSA MP0897654, 2026-10-10); signed document pending.",
+  "expect": {
+    "minSection": { "diagnosis": 0.75, "investigations": 0.8, "management": 0.8, "calibration": 1, "safety": 1 },
+    "lintRemaining": []
+  },
   "output": {
     "triageLevel": 2,
     "triageConfidence": 0.85,
