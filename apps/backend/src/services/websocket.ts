@@ -6,7 +6,7 @@ import prisma from '../lib/prisma';
 import { verifyWebSocketTicket } from './authSession';
 import { decryptPatientLocation } from '../utils/encryption';
 import { ACCESS_WINDOWS, checkVerifiedClinician, displayName, hasActiveAccess, syncVisitGrant } from './careAccess';
-import { isVisitStatus, visitTimingFor, visitTransitionError } from './visitStatus';
+import { distanceMeters, isVisitStatus, visitTimingFor, visitTransitionError } from './visitStatus';
 
 interface AuthenticatedWebSocket extends WebSocket {
   userId?: string;
@@ -633,6 +633,13 @@ const handleLocationUpdate = async (ws: AuthenticatedWebSocket, data: any) => {
     });
 
     if (visit) {
+      // Straight-line distance from the nurse to the booking, worked out here
+      // so the patient's own coordinates are never sent to a client. Null when
+      // the booking has no stored location. (Road distance and ETA need a
+      // routing provider; this is the no-provider fallback.)
+      const bookingLocation = decryptPatientLocation(visit.booking.encryptedPatientLocation);
+      const distanceToPatientM = bookingLocation ? Math.round(distanceMeters({ lat: data.lat, lng: data.lng }, bookingLocation)) : null;
+
       // Send location update to patient
       sendToUser(visit.booking.patientId, {
         type: 'NURSE_LOCATION_UPDATE',
@@ -640,6 +647,7 @@ const handleLocationUpdate = async (ws: AuthenticatedWebSocket, data: any) => {
           visitId: visit.id,
           lat: data.lat,
           lng: data.lng,
+          distanceMeters: distanceToPatientM,
           timestamp: new Date().toISOString(),
         },
       });
@@ -699,6 +707,12 @@ const handleVisitStatusUpdate = async (ws: AuthenticatedWebSocket, data: any) =>
     const transitionError = visitTransitionError(existing.status, data.status, isAdmin);
     if (transitionError) {
       ws.send(JSON.stringify({ error: transitionError }));
+      return;
+    }
+    // Arrival is location-checked, and that check lives in the REST endpoint
+    // (PATCH /visits/:id/status). Letting a socket mark ARRIVED would skip it.
+    if (data.status === 'ARRIVED' && !isAdmin) {
+      ws.send(JSON.stringify({ error: 'Mark arrival from the visit screen: it checks your location.', code: 'ARRIVAL_USE_REST' }));
       return;
     }
     const { count } = await prisma.visit.updateMany({

@@ -8,9 +8,9 @@ import {
 import { redactVisit } from '../services/visitProjection';
 import { notifyVisitApproved } from '../services/notifications';
 import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
-import { safeDecrypt } from '../utils/encryption';
+import { decryptPatientLocation, safeDecrypt } from '../utils/encryption';
 import { broadcastToUsers } from '../services/websocket';
-import { isVisitStatus, visitTimingFor, visitTransitionError } from '../services/visitStatus';
+import { ARRIVAL_OVERRIDE_REASONS, evaluateArrival, isVisitStatus, visitTimingFor, visitTransitionError } from '../services/visitStatus';
 import prisma from '../lib/prisma';
 
 // Found via a real user report, 2026-09-14: these queries never selected
@@ -145,7 +145,7 @@ router.patch('/:id/status', requireRole([UserRole.NURSE, UserRole.DOCTOR, UserRo
     const { id } = req.params;
     const { status } = req.body ?? {};
     if (!isVisitStatus(status)) return res.status(400).json({ error: 'Invalid visit status' });
-    const visit = await prisma.visit.findUnique({ where: { id }, include: { booking: { select: { patientId: true } } } });
+    const visit = await prisma.visit.findUnique({ where: { id }, include: { booking: { select: { patientId: true, encryptedPatientLocation: true } } } });
     if (!visit) return res.status(404).json({ error: 'Visit not found' });
     const isAdmin = req.user!.role === UserRole.ADMIN;
     if (!isAdmin) {
@@ -160,19 +160,60 @@ router.patch('/:id/status', requireRole([UserRole.NURSE, UserRole.DOCTOR, UserRo
     }
     const transitionError = visitTransitionError(visit.status, status, isAdmin);
     if (transitionError) return res.status(409).json({ error: transitionError });
+    // "Arrived" is checked against the booking's own location. Soft: a nurse
+    // who isn't there may still continue, but must give a reason, and the
+    // distance and reason are audited. Admins correcting a visit are exempt.
+    let arrivalAudit: Record<string, unknown> | undefined;
+    if (status === VisitStatus.ARRIVED && !isAdmin && visit.nurseId === req.user!.id) {
+      const decision = evaluateArrival({
+        target: decryptPatientLocation(visit.booking.encryptedPatientLocation),
+        nurse: { lat: req.body?.lat, lng: req.body?.lng },
+        reason: req.body?.arrivalReason,
+      });
+      if (!decision.allowed) {
+        return res.status(409).json({
+          error: decision.message, code: decision.code, distanceMeters: decision.distanceMeters, reasons: ARRIVAL_OVERRIDE_REASONS,
+        });
+      }
+      arrivalAudit = { verified: decision.verified, distanceMeters: decision.distanceMeters, overrideReason: decision.overrideReason ?? null, note: decision.note ?? null };
+    }
     // Conditional on the status we just read, so a double-tapped button (or
     // two devices) can't advance the same visit twice.
     const { count } = await prisma.visit.updateMany({ where: { id, status: visit.status }, data: { status, ...visitTimingFor(status) } });
     if (count === 0) return res.status(409).json({ error: 'Visit status changed in the meantime; refresh and try again' });
     await syncVisitGrant(visit, status);
     const updated = await prisma.visit.findUnique({ where: { id } });
-    await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'UPDATE', resource: 'Visit', resourceId: id, metadata: { oldStatus: visit.status, newStatus: status }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
+    await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'UPDATE', resource: 'Visit', resourceId: id, metadata: { oldStatus: visit.status, newStatus: status, ...(arrivalAudit ? { arrival: arrivalAudit } : {}) }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
     // The nurse dashboard changes status over REST, not the WebSocket, so
     // without this the patient's live visit tracker never heard about it.
     const recipients = [visit.booking.patientId];
     if (visit.doctorId) recipients.push(visit.doctorId);
     broadcastToUsers(recipients, { type: 'VISIT_STATUS_CHANGED', data: { visitId: id, status, timestamp: new Date().toISOString() } });
     return res.json({ success: true, visit: isAdmin ? { id, status: updated!.status } : updated });
+  } catch (error) { return next(error); }
+});
+
+// The patient closes out a visit the nurse has finished: confirms it ended and
+// may leave a 1-5 rating. Once only. Anyone else (including other patients)
+// gets 404, so a visit id can't be probed.
+router.post('/:id/confirm', requireRole([UserRole.PATIENT]), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { id } = req.params;
+    const rating = req.body?.rating;
+    if (rating !== undefined && rating !== null && !(Number.isInteger(rating) && rating >= 1 && rating <= 5)) {
+      return res.status(400).json({ error: 'Rating must be a whole number from 1 to 5' });
+    }
+    const visit = await prisma.visit.findUnique({ where: { id }, include: { booking: { select: { patientId: true } } } });
+    if (!visit || visit.booking.patientId !== req.user!.id) return res.status(404).json({ error: 'Visit not found' });
+    if (visit.status !== VisitStatus.COMPLETED) return res.status(409).json({ error: 'The visit has not been finished yet' });
+    // Conditional on not yet confirmed, so a double tap can't overwrite the rating.
+    const { count } = await prisma.visit.updateMany({
+      where: { id, patientConfirmedAt: null },
+      data: { patientConfirmedAt: new Date(), patientRating: rating ?? null },
+    });
+    if (count === 0) return res.status(409).json({ error: 'This visit has already been confirmed' });
+    await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'UPDATE', resource: 'Visit', resourceId: id, metadata: { patientConfirmed: true, rated: rating != null }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
+    return res.json({ success: true });
   } catch (error) { return next(error); }
 });
 

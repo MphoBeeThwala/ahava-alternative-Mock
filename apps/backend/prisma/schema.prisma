@@ -283,7 +283,11 @@ model Visit {
   nurseReport     String?     // Encrypted - Detailed visit report
   doctorReview    String?
   doctorRating    Int?        // 1-5 stars
-  
+
+  // The patient's own close-out of the visit, after the nurse finishes it.
+  patientConfirmedAt DateTime?
+  patientRating      Int?     // 1-5 stars, optional
+
   // Relations
   booking         Booking     @relation(fields: [bookingId], references: [id])
   nurse           User        @relation("NurseVisits", fields: [nurseId], references: [id])
@@ -506,6 +510,10 @@ model TriageCase {
   aiRecommendedAction String
   aiPossibleConditions Json          // string[]
   aiReasoning       String
+  // Tiered clinician-only plan (investigations, management, decisions on existing
+  // treatment) with the deterministic checks, lint results and reviewer flags.
+  // Never returned to patients. Encrypted like the other clinical JSON fields.
+  aiStructuredPlan  Json?
   
   status            TriageCaseStatus  @default(PENDING_REVIEW)
   doctorNotes       String?

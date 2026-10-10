@@ -35,6 +35,8 @@
     "ai-pack:set2-quick": "tsx src/scripts/ai-diagnostic-pack.ts --cases ../../docs/diagnostic-test-pack/ahava-diagnostic-test-cases-set2.json --judge --out report-set2.md",
     "ai-pack:quick": "tsx src/scripts/ai-diagnostic-pack.ts --judge --out report-quick.md",
     "ai-pack:full": "tsx src/scripts/ai-diagnostic-pack.ts --judge --stage2 --out report.md",
+    "eval:clinical": "tsx src/scripts/clinical-eval.ts",
+    "eval:clinical:live": "tsx src/scripts/clinical-eval.ts --live",
     "db:reset": "prisma migrate reset --force",
     "validate:env": "node scripts/validate-env.js"
   },

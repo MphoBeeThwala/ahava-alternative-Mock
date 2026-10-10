@@ -105,7 +105,7 @@ const retryDelayMs = () =>
   process.env.AI_PROVIDER_RETRY_DELAY_MS !== undefined
     ? Math.max(0, parseInt(process.env.AI_PROVIDER_RETRY_DELAY_MS, 10) || 0)
     : 1_500;
-const claudeMaxTokens = () => intEnv('AI_CLAUDE_MAX_TOKENS', 8_192, 1_024);
+const claudeMaxTokens = () => intEnv('AI_CLAUDE_MAX_TOKENS', 16_384, 1_024);
 const claudeEffort = () => process.env.AI_CLAUDE_EFFORT || 'high';
 // After a model has timed out or been overloaded, the next one is asked to
 // think less: a faster answer from Sonnet beats a second timeout from the

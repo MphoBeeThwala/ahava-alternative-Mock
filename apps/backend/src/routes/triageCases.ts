@@ -9,6 +9,13 @@ import { resolveTriageOverride } from '../services/triageReviewValidation';
 
 const router: Router = Router();
 
+// The tiered clinical plan names treatments and tests for the reviewing doctor.
+// It is never part of what a patient is sent.
+function forPatient<T extends Record<string, unknown>>(c: T): Omit<T, 'aiStructuredPlan'> {
+  const { aiStructuredPlan: _omit, ...rest } = c;
+  return rest;
+}
+
 // Get triage cases for user
 router.get('/', authMiddleware, async (req: AuthenticatedRequest, res, next) => {
   try {
@@ -32,7 +39,7 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res, next) => 
         : { id: c.id, status: c.status, createdAt: c.createdAt, aiTriageLevel: c.aiTriageLevel, finalTriageLevel: c.finalTriageLevel, patientId: c.patientId, doctorId: c.doctorId, restricted: 'ACCESS_EXPIRED' });
       return res.json({ success: true, cases: projected });
     }
-    return res.json({ success: true, cases });
+    return res.json({ success: true, cases: role === UserRole.PATIENT ? cases.map(forPatient) : cases });
   } catch (error) { return next(error); }
 });
 
@@ -52,7 +59,7 @@ router.get('/:id', authMiddleware, async (req: AuthenticatedRequest, res, next) 
       }
     }
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'READ', resource: 'TriageCase', resourceId: triageCase.id, metadata: { patientId: triageCase.patientId, doctorId: triageCase.doctorId, status: triageCase.status }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
-    return res.json({ success: true, triageCase });
+    return res.json({ success: true, triageCase: req.user!.role === UserRole.PATIENT ? forPatient(triageCase) : triageCase });
   } catch (error) { return next(error); }
 });
 

@@ -1,0 +1,211 @@
+{
+  "kind": "good",
+  "synthetic": true,
+  "note": "SYNTHETIC. A plan that covers every rubric item. Proves the scorer and guardrails accept a complete plan. Replace with a real model output using `pnpm eval:clinical:live -- --record`.",
+  "expect": {
+    "minSection": {
+      "diagnosis": 0.75,
+      "investigations": 0.8,
+      "management": 0.8,
+      "calibration": 1,
+      "safety": 1
+    },
+    "lintRemaining": []
+  },
+  "output": {
+    "triageLevel": 1,
+    "triageConfidence": 0.9,
+    "severity": {
+      "summary": "Critically ill: advanced HIV (CD4 9) with fever, confusion, hyponatraemia and borderline blood pressure. Sepsis-3 septic shock criteria cannot be assessed without lactate and vasopressor status.",
+      "redFlags": [
+        "reduced consciousness",
+        "sodium 124",
+        "pancytopenia"
+      ]
+    },
+    "leadingDiagnosis": {
+      "name": "Disseminated fungal infection (probable histoplasmosis) with secondary HLH",
+      "probability": 0.9,
+      "confirmationStatus": "clinical_only",
+      "rationale": "Skin papules, pancytopenia, ferritin 18000 and CD4 9 with failure of empirical TB treatment; no tissue or culture confirmation yet."
+    },
+    "differential": [
+      {
+        "name": "Disseminated tuberculosis",
+        "probability": 0.25,
+        "evidenceFor": [
+          "endemic setting",
+          "CD4 9",
+          "HLH trigger"
+        ],
+        "evidenceAgainst": [
+          "GeneXpert and urine LAM negative, which do not exclude TB at this CD4"
+        ]
+      },
+      {
+        "name": "Cryptococcal disease",
+        "probability": 0.2,
+        "evidenceFor": [
+          "CD4 9",
+          "confusion"
+        ],
+        "evidenceAgainst": [
+          "CrAg not yet reported"
+        ]
+      }
+    ],
+    "mustNotMiss": [
+      {
+        "name": "Cryptococcal meningitis",
+        "why": "confusion at CD4 9",
+        "howToExclude": "serum CrAg and lumbar puncture with CSF CrAg"
+      },
+      {
+        "name": "Adrenal insufficiency",
+        "why": "hypotension with hyponatraemia",
+        "howToExclude": "cortisol before steroids"
+      }
+    ],
+    "investigations": {
+      "bedsideStat": [
+        {
+          "test": "Bedside glucose",
+          "rationale": "needed for diagnosis"
+        },
+        {
+          "test": "Lactate and blood gas",
+          "rationale": "needed for diagnosis"
+        },
+        {
+          "test": "Serum sodium and potassium, repeat",
+          "rationale": "needed for diagnosis"
+        },
+        {
+          "test": "Blood cultures including mycobacterial and fungal bottles",
+          "rationale": "needed for diagnosis"
+        }
+      ],
+      "first24h": [
+        {
+          "test": "Serum CrAg",
+          "rationale": "needed for diagnosis"
+        },
+        {
+          "test": "Urine LAM",
+          "rationale": "needed for diagnosis"
+        },
+        {
+          "test": "Urine Histoplasma antigen",
+          "rationale": "needed for diagnosis"
+        },
+        {
+          "test": "Random cortisol",
+          "rationale": "needed for diagnosis"
+        },
+        {
+          "test": "Creatinine, potassium and magnesium baseline",
+          "rationale": "needed for diagnosis"
+        },
+        {
+          "test": "Lumbar puncture with CSF CrAg, culture and Xpert if safe",
+          "rationale": "needed for diagnosis"
+        },
+        {
+          "test": "Ferritin, triglycerides, fibrinogen",
+          "rationale": "needed for diagnosis"
+        }
+      ],
+      "definitive": [
+        {
+          "test": "Bone marrow aspirate and trephine with culture and histology",
+          "rationale": "needed for diagnosis"
+        },
+        {
+          "test": "Skin smear and biopsy of papules for histology and fungal culture",
+          "rationale": "needed for diagnosis"
+        }
+      ]
+    },
+    "management": {
+      "immediate": [
+        {
+          "action": "Liposomal amphotericin B preferred over deoxycholate formulation because of raised creatinine; monitor creatinine, potassium and magnesium daily",
+          "rationale": "indicated",
+          "guidelineSource": "SA guideline: verify"
+        },
+        {
+          "action": "Correct hyponatraemia cautiously and give empirical hydrocortisone if cortisol is low or the patient deteriorates",
+          "rationale": "indicated",
+          "guidelineSource": "SA guideline: verify"
+        }
+      ],
+      "targeted": [
+        {
+          "action": "Haematology referral for HLH management and trigger-directed therapy",
+          "rationale": "indicated",
+          "guidelineSource": "SA guideline: verify"
+        }
+      ],
+      "supportive": [
+        {
+          "action": "Cautious IV fluids with sodium monitoring",
+          "rationale": "indicated",
+          "guidelineSource": "SA guideline: verify"
+        }
+      ]
+    },
+    "existingTreatmentDecisions": [
+      {
+        "treatment": "Empirical TB treatment (RHZE)",
+        "decision": "continue",
+        "reason": "negative GeneXpert and LAM do not exclude TB at CD4 9; stop only if an alternative diagnosis is proven and TB is excluded on culture"
+      }
+    ],
+    "timingDecisions": [
+      {
+        "topic": "ART initiation",
+        "recommendation": "Defer ART until cryptococcal meningitis is excluded and amphotericin has been started; then start within the timeframe in the SA HIV Clinicians Society guideline",
+        "reason": "risk of IRIS and unmasked CNS disease"
+      }
+    ],
+    "prophylaxis": [
+      {
+        "agent": "Cotrimoxazole prophylaxis",
+        "indication": "CD4 below 200"
+      }
+    ],
+    "escalation": {
+      "escalateIf": [
+        "falling GCS",
+        "systolic BP below 90 despite fluids",
+        "rising creatinine"
+      ],
+      "redFlags": [
+        "seizure",
+        "persistent vomiting"
+      ],
+      "referral": [
+        "Haematology",
+        "Infectious diseases"
+      ]
+    },
+    "questionAnswers": [
+      {
+        "question": "Should we continue TB treatment?",
+        "answer": "Yes, continue for now, because the negative tests do not exclude TB at this CD4; revisit when culture and marrow results are back."
+      },
+      {
+        "question": "When should ART be started?",
+        "answer": "Not before cryptococcal meningitis is excluded and antifungal therapy is under way; then early, per the SA HIV Clinicians Society guideline."
+      }
+    ],
+    "evidenceSources": [
+      "Patient Symptoms",
+      "Patient Vitals",
+      "WHO"
+    ],
+    "uncertaintyFlags": [
+      "NO_TISSUE_DIAGNOSIS"
+    ]
+  }
+}

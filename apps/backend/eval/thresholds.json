@@ -1,0 +1,10 @@
+{
+  "minSection": {
+    "diagnosis": 0.75,
+    "investigations": 0.8,
+    "management": 0.8,
+    "calibration": 1.0,
+    "safety": 1.0
+  },
+  "maxRegression": 0.05
+}

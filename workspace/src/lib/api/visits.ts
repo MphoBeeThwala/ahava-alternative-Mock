@@ -23,6 +23,10 @@ export interface Visit {
     scheduledDate?: string;
   };
   doctorId?: string | null;
+  actualStart?: string | null;
+  actualEnd?: string | null;
+  patientConfirmedAt?: string | null;
+  patientRating?: number | null;
   /**
    * Set when the caller may see that the visit exists but not the patient's
    * record: NOT_CLAIMED (unclaimed review), ACCESS_EXPIRED (care access has
@@ -43,8 +47,15 @@ export const visitsApi = {
     const res = await apiClient.get(`/visits/${id}`);
     return res.data;
   },
-  updateStatus: async (id: string, status: string) => {
-    const res = await apiClient.patch(`/visits/${id}/status`, { status });
+  // `extra` carries the nurse's position and, if they are not at the booking,
+  // why (ARRIVED only): the server checks arrival against the booking location.
+  updateStatus: async (id: string, status: string, extra?: { lat?: number; lng?: number; arrivalReason?: string }) => {
+    const res = await apiClient.patch(`/visits/${id}/status`, { status, ...extra });
+    return res.data;
+  },
+  // The patient confirms a finished visit, with an optional 1-5 rating.
+  confirm: async (id: string, rating?: number) => {
+    const res = await apiClient.post(`/visits/${id}/confirm`, rating ? { rating } : {});
     return res.data;
   },
   // BP-calibration reading during an in-progress visit (docs/ENGINEERING_PLAN.md

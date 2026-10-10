@@ -3131,3 +3131,19 @@ Changes:
 Not done: a periodic one-token canary call to find an empty account before a patient does. The model-list probe does not use credit, so it keeps passing while the balance is zero. Also not done: raising the Gemini quota (a free-tier key will rate-limit the fallback under load; enable billing on that key).
 
 Cheaper runs: `npm run ai-pack:quick` (pack 1) and `npm run ai-pack:set2-quick` (set 2) do stage 1 only, which is about half the calls of `ai-pack:full` / `ai-pack:set2`; use them first and the full versions only when the stage-2 behaviour matters.
+
+## 49. Clinical, legal and Information Officer positions recorded, 2026-10-10
+
+Recorded from the product owner's report in a working session. **No signed document or written opinion for any of this is in the repository**: attach them (or links) here, and change "reported" to "confirmed" once they are.
+
+**Clinical.** Dr. Thwala (HPCSA MP0897654, paediatric specialist) is reported to have signed rows 1-5, 8 and 9 of `CLINICAL_SIGNOFF_CHECKLIST.md`, countersigned rows 6, 7, 10 and 11, reviewed the HIV-HLH-001 gold case rubric, and judged the live Sonnet 5.5 recording good. The case status is now `gold_reviewed_signed_document_pending` and the recording is kind `good` (`good-live-2026-10-10.json`). The checklist's "Switching the gates on" section records the code check: only `FRAMINGHAM_LAB_CHART_SIGNED_OFF` still needs setting in Railway, and doing so makes the WHO/Framingham discordance flag an alert trigger. `PAEDIATRIC_TEWS_SIGNED_OFF` was not switched on.
+
+**Legal and Information Officer** (reported as Lukhele DP Attorneys and Conveyancers, acting as both; the Information Officer is Dumisani Lukhele, senior partner, and the firm is reported registered with the Information Regulator; the consent text in the app was reported checked and fine on 2026-10-10):
+- AH-15 consent wording: reported to meet the legal requirements. Not re-checked in code in this pass: confirm the consent text version in the app is the wording that was approved.
+- Google sign-in with linked terms and privacy policy and no tick box: reported as sufficient consent for POPIA.
+- Research data pipeline (§45-46) placement and design: reported as fine.
+- Retention (§6 item 3): reported approved as written: **7 years** for AuditLog, TriageCase, Visit, Prescription and Referral; **2 years** for BiometricReading and HealthAlert; PatientConsent for the life of the account plus **7 years**. The scheduled purge job and export endpoints are still not built.
+
+**Ethics: still open.** The organisation's position is that it follows national and international data-ethics standards, that legal advice is that it is covered, and that all researched data will be peer reviewed by qualified panels. Further investigation of whether a research ethics committee approval is required for validation on patient data was asked for and is not finished. Do not start validation work on patient data until that is answered in writing.
+
+Not changed by this section: no environment variable in any environment, and no code.

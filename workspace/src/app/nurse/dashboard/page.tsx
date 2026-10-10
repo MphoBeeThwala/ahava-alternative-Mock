@@ -15,6 +15,13 @@ import { useVisitWebSocket } from '../../../hooks/useVisitWebSocket';
 
 type VisitStatusFilter = 'ALL' | Visit['status'];
 
+const ARRIVAL_REASON_LABELS: Record<string, string> = {
+    WRONG_PIN: 'The map pin is in the wrong place',
+    GATE_OR_ACCESS: 'I am at the gate / waiting for access',
+    GPS_INACCURATE: 'My GPS is inaccurate',
+    OTHER: 'Another reason',
+};
+
 interface IncomingBooking {
   bookingId: string;
   patientName: string;
@@ -165,6 +172,7 @@ export default function NurseDashboard() {
     // Where to register on the dispatch radar. Kept so the socket can
     // re-register after a page reload or reconnect without asking for GPS again.
     const lastCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
+    const [arrivalPrompt, setArrivalPrompt] = useState<{ visitId: string; message: string; reasons: string[] } | null>(null);
 
     const { send, lastMessage, connected } = useVisitWebSocket(token);
 
@@ -254,13 +262,33 @@ export default function NurseDashboard() {
         }
     };
 
-    const handleVisitStatusUpdate = async (visitId: string, status: string) => {
+    // A fresh position for the arrival check; falls back to the last streamed one.
+    const currentCoords = (): Promise<{ lat: number; lng: number } | null> =>
+        new Promise((resolve) => {
+            const fallback = () => resolve(lastCoordsRef.current);
+            if (typeof navigator === 'undefined' || !navigator.geolocation) return fallback();
+            navigator.geolocation.getCurrentPosition(
+                (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+                fallback,
+                { enableHighAccuracy: true, timeout: 8000, maximumAge: 15_000 },
+            );
+        });
+
+    const handleVisitStatusUpdate = async (visitId: string, status: string, arrivalReason?: string) => {
         try {
-            await visitsApi.updateStatus(visitId, status);
+            const extra = status === 'ARRIVED' ? { ...(await currentCoords() ?? {}), ...(arrivalReason ? { arrivalReason } : {}) } : undefined;
+            await visitsApi.updateStatus(visitId, status, extra);
+            setArrivalPrompt(null);
             loadVisits();
         } catch (error: unknown) {
-            const e = error as { response?: { data?: { error?: string } } };
-            toast.error(e.response?.data?.error || "Failed to update visit status.");
+            const e = error as { response?: { status?: number; data?: { error?: string; code?: string; distanceMeters?: number | null; reasons?: string[] } } };
+            const data = e.response?.data;
+            // Not at the booking (or position unreadable): ask why, then retry with the reason.
+            if (e.response?.status === 409 && (data?.code === 'ARRIVAL_TOO_FAR' || data?.code === 'ARRIVAL_POSITION_UNKNOWN')) {
+                setArrivalPrompt({ visitId, message: data.error ?? 'You do not seem to be at the visit location.', reasons: data.reasons ?? [] });
+                return;
+            }
+            toast.error(data?.error || "Failed to update visit status.");
         }
     };
 
@@ -449,6 +477,29 @@ export default function NurseDashboard() {
                             {loading ? 'Updating…' : (isAvailable ? 'Go offline' : 'Go online')}
                         </button>
                     </Card>
+
+                    {/* Arrival check: not at the booking location, so say why before continuing */}
+                    {arrivalPrompt && (
+                        <Card padding="sm" style={{ borderColor: 'var(--role-nurse)' }}>
+                            <p className="text-[var(--text-eyebrow)] font-bold uppercase text-[var(--role-nurse)]">Confirm arrival</p>
+                            <p className="mt-1 text-sm text-[var(--foreground)]">{arrivalPrompt.message}</p>
+                            <div className="mt-3 flex flex-col gap-2">
+                                {arrivalPrompt.reasons.map((reason) => (
+                                    <button
+                                        key={reason}
+                                        onClick={() => handleVisitStatusUpdate(arrivalPrompt.visitId, 'ARRIVED', reason)}
+                                        className="btn-primary w-full rounded-xl font-bold"
+                                        style={{ minHeight: 'var(--tap-primary)' }}
+                                    >
+                                        {ARRIVAL_REASON_LABELS[reason] ?? reason}
+                                    </button>
+                                ))}
+                                <button onClick={() => setArrivalPrompt(null)} className="w-full rounded-xl font-semibold" style={{ minHeight: 'var(--tap-primary)' }}>
+                                    Cancel
+                                </button>
+                            </div>
+                        </Card>
+                    )}
 
                     {/* Active visit — always-reachable finish action while IN_PROGRESS */}
                     {activeVisit && (

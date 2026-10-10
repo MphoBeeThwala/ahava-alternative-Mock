@@ -1,0 +1,87 @@
+{
+  "version": "0.1.0",
+  "signoff": "pending",
+  "signoffNote": "DRAFT starter rules. Each rule says: when TRIGGER is true for a case, the structured plan must contain every REQUIRES element. A rule never says what the answer is, only that the question must be addressed. Not yet reviewed by a clinician (docs/CLINICAL_SIGNOFF_CHECKLIST.md).",
+  "triggerTypes": {
+    "cd4Below": "CD4 (structured value, or a single unambiguous 'CD4 <n>' in the text) is below value",
+    "text": "any pattern matches the case text (negated spans ignored)",
+    "plan": "any pattern matches the plan's management/investigation/treatment text (checked after generation only)",
+    "predicate": "named built-in: hlhSuspected | hypotension | hyponatraemia | alteredConsciousness | suspectedSepsis | onTbTreatment"
+  },
+  "rules": [
+    {
+      "id": "cd4_below_200",
+      "title": "Advanced HIV disease (CD4 < 200)",
+      "when": { "all": [{ "type": "cd4Below", "value": 200 }] },
+      "sources": ["SA HIV Clinicians Society adult ART guideline", "NDoH ART Clinical Guidelines"],
+      "requires": [
+        { "id": "art_timing", "section": "timingDecisions", "description": "an explicit ART timing decision in timingDecisions (start now / defer / switch, with the reason and what must be excluded first, for example cryptococcal or TB meningitis)", "anyOf": ["\\bART\\b", "antiretroviral", "\\bARVs?\\b"] },
+        { "id": "cotrimoxazole", "section": "prophylaxis", "description": "cotrimoxazole prophylaxis addressed in prophylaxis (indicated, or why not)", "anyOf": ["co-?trimoxazole", "\\bTMP-?SMX\\b", "trimethoprim", "septrin", "bactrim"] },
+        { "id": "tb_status", "section": "any", "description": "TB status addressed (excluded, probable, or on treatment) with the tests used", "anyOf": ["\\bTB\\b", "tubercul"] },
+        { "id": "crag_status", "section": "any", "description": "cryptococcal antigen status addressed (result, or ordered)", "anyOf": ["\\bcrag\\b", "cryptococc"] },
+        { "id": "lam_status", "section": "any", "description": "urine LAM status addressed (result, or ordered)", "anyOf": ["\\bLAM\\b", "lipoarabinomannan"] }
+      ]
+    },
+    {
+      "id": "on_tb_treatment",
+      "title": "Patient is already on TB treatment",
+      "when": { "all": [{ "type": "predicate", "name": "onTbTreatment" }] },
+      "sources": ["South African National TB Management Guidelines (NDoH)"],
+      "requires": [
+        { "id": "tb_treatment_decision", "section": "existingTreatmentDecisions", "decisionFor": "(?:TB|tubercul|RHZE|HRZE|rifampicin|isoniazid|anti-?TB|ATT)", "description": "an explicit continue / stop / modify decision for the existing TB treatment, with the reason, in existingTreatmentDecisions" }
+      ]
+    },
+    {
+      "id": "hlh_suspected",
+      "title": "Suspected haemophagocytic lymphohistiocytosis (HLH)",
+      "when": { "all": [{ "type": "predicate", "name": "hlhSuspected" }] },
+      "sources": ["Henter et al. HLH-2004 diagnostic criteria", "HLH treatment consensus (Histiocyte Society)"],
+      "requires": [
+        { "id": "bone_marrow", "section": "investigations", "description": "bone marrow aspirate/trephine (haemophagocytosis, and culture/histology for infection or malignancy) in investigations", "anyOf": ["bone marrow", "marrow (?:aspirate|biopsy|trephine)", "trephine"] },
+        { "id": "haematology_referral", "section": "any", "description": "haematology referral or discussion", "anyOf": ["ha?ematolog"] },
+        { "id": "hlh_trigger_search", "section": "any", "description": "a search for the trigger (infection, malignancy, autoimmune) since HLH is secondary until proven otherwise", "anyOf": ["trigger", "underlying (?:cause|infection|malignan)", "secondary"] }
+      ]
+    },
+    {
+      "id": "amphotericin_use",
+      "title": "Amphotericin is being recommended",
+      "when": { "all": [{ "type": "plan", "patterns": ["amphotericin"] }] },
+      "sources": ["SA HIV Clinicians Society cryptococcal/OI guidance", "WHO guidelines on cryptococcal disease and histoplasmosis in people with HIV"],
+      "requires": [
+        { "id": "ampho_renal", "section": "any", "description": "renal function (creatinine/eGFR) addressed and monitored", "anyOf": ["creatinine", "renal function", "\\beGFR\\b", "kidney"] },
+        { "id": "ampho_electrolytes", "section": "any", "description": "electrolytes (potassium, magnesium) addressed and monitored", "anyOf": ["potassium", "magnesium", "electrolyte"] },
+        { "id": "ampho_formulation", "section": "any", "description": "formulation choice (liposomal vs deoxycholate) justified against renal function and availability", "anyOf": ["liposomal", "deoxycholate", "lipid complex", "formulation"] }
+      ]
+    },
+    {
+      "id": "altered_consciousness",
+      "title": "Confusion or reduced GCS",
+      "when": { "all": [{ "type": "predicate", "name": "alteredConsciousness" }] },
+      "sources": ["SA Standard Treatment Guidelines and EML (Hospital Level)", "SA HIV Clinicians Society OI guidance"],
+      "requires": [
+        { "id": "lp_consideration", "section": "any", "description": "lumbar puncture considered (done, or why deferred, for example imaging first)", "anyOf": ["lumbar puncture", "\\bLP\\b", "\\bCSF\\b"] },
+        { "id": "glucose_check", "section": "any", "description": "glucose checked (bedside)", "anyOf": ["glucose", "dextrostix", "\\bHGT\\b", "hypoglyc"] },
+        { "id": "sodium_check", "section": "any", "description": "sodium/electrolytes checked", "anyOf": ["sodium", "hyponatr", "electrolyte"] }
+      ]
+    },
+    {
+      "id": "hypotension_hyponatraemia",
+      "title": "Hypotension with hyponatraemia",
+      "when": { "all": [{ "type": "predicate", "name": "hypotension" }, { "type": "predicate", "name": "hyponatraemia" }] },
+      "sources": ["Society for Endocrinology emergency guidance on adrenal crisis (adapt to SA STG)"],
+      "requires": [
+        { "id": "cortisol", "section": "any", "description": "adrenal insufficiency considered: random/baseline cortisol (ideally before steroids) and whether to give empirical hydrocortisone", "anyOf": ["cortisol", "adrenal", "hydrocortisone", "synacthen"] }
+      ]
+    },
+    {
+      "id": "suspected_sepsis",
+      "title": "Suspected sepsis",
+      "when": { "all": [{ "type": "predicate", "name": "suspectedSepsis" }] },
+      "sources": ["Surviving Sepsis Campaign (adapt to SA STG)"],
+      "requires": [
+        { "id": "sepsis_cultures", "section": "investigations", "description": "blood cultures before antimicrobials where this does not delay treatment", "anyOf": ["blood culture"] },
+        { "id": "sepsis_lactate", "section": "investigations", "description": "lactate measured (needed to judge Sepsis-3 shock criteria)", "anyOf": ["lactate"] }
+      ]
+    }
+  ]
+}

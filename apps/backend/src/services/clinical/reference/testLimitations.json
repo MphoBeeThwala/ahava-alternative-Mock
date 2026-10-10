@@ -1,0 +1,110 @@
+{
+  "version": "0.1.0",
+  "signoff": "pending",
+  "signoffNote": "DRAFT. Not yet reviewed by a clinician. Entries state qualitative limitations only; no sensitivity figures are asserted until a reviewer has checked them against the cited sources. See docs/CLINICAL_SIGNOFF_CHECKLIST.md.",
+  "entries": [
+    {
+      "id": "xpert_advanced_hiv",
+      "test": "Xpert MTB/RIF (Ultra) on sputum or other specimen",
+      "aliases": ["genexpert", "gene xpert", "xpert", "mtb/rif", "mtb rif"],
+      "alwaysShowWhenCd4Below": 200,
+      "limitation": "In advanced HIV disease TB is often paucibacillary, extrapulmonary or disseminated, and a sputum specimen may be unobtainable or unrepresentative, so sensitivity is reduced. A single negative result does not exclude TB.",
+      "implication": "Do not treat a negative Xpert as ruling out TB in a patient with CD4 < 200. Say explicitly whether TB treatment continues. Consider additional specimens and tests: urine LAM, blood mycobacterial culture, lymph node or bone marrow aspirate/biopsy, CSF if neurological signs, sputum culture.",
+      "sources": ["WHO Consolidated Guidelines on Tuberculosis, Module 3: Diagnosis", "South African National TB Management Guidelines (NDoH)"],
+      "signoff": "pending"
+    },
+    {
+      "id": "lam_advanced_hiv",
+      "test": "Urine lipoarabinomannan (LF-LAM / TB-LAM)",
+      "aliases": ["tb-lam", "tb lam", "lf-lam", "urine lam", "lam", "lipoarabinomannan", "determine tb"],
+      "alwaysShowWhenCd4Below": 200,
+      "limitation": "Urine LAM performs best in the sickest patients with the lowest CD4 counts, but still misses a substantial proportion of TB. A negative result does not exclude TB. A positive result supports starting treatment but is not specific to a site.",
+      "implication": "A negative LAM must not be read as 'TB excluded'. Pair with other specimens and a clinical decision on TB treatment.",
+      "sources": ["WHO: Lateral flow urine lipoarabinomannan assay to diagnose TB in people living with HIV (policy update)", "South African National TB Management Guidelines (NDoH)"],
+      "signoff": "pending"
+    },
+    {
+      "id": "sputum_smear_hiv",
+      "test": "Sputum AFB smear microscopy",
+      "aliases": ["afb", "sputum smear", "smear microscopy", "ziehl"],
+      "limitation": "Smear microscopy has low sensitivity, particularly in people with HIV, and cannot distinguish M. tuberculosis from non-tuberculous mycobacteria.",
+      "implication": "A negative smear does not exclude TB.",
+      "sources": ["WHO Consolidated Guidelines on Tuberculosis, Module 3: Diagnosis"],
+      "signoff": "pending"
+    },
+    {
+      "id": "tst_igra_hiv",
+      "test": "Tuberculin skin test / interferon-gamma release assay",
+      "aliases": ["mantoux", "tuberculin skin test", "tst", "igra", "quantiferon"],
+      "limitation": "Unreliable in advanced immunosuppression (anergy) and neither test diagnoses active TB disease.",
+      "implication": "A negative result must not be used to exclude TB.",
+      "sources": ["WHO Consolidated Guidelines on Tuberculosis, Module 3: Diagnosis"],
+      "signoff": "pending"
+    },
+    {
+      "id": "empirical_tb_treatment_yield",
+      "test": "TB microbiology taken after empirical TB treatment has started",
+      "aliases": ["empirical tb", "empiric tb", "on tb treatment", "started tb treatment", "rhze", "hrze", "anti-tb", "antituberculous"],
+      "limitation": "Cultures and molecular tests taken after days to weeks of effective TB therapy can be negative in true TB, so they cannot be used on their own either to confirm or to rule out TB.",
+      "implication": "If a patient is not improving on empirical TB treatment, the differential includes drug-resistant TB, non-adherence or malabsorption, TB-IRIS, and a second or different opportunistic infection (for example disseminated fungal disease or non-tuberculous mycobacteria). Give an explicit continue / stop / modify decision with the reason.",
+      "sources": ["South African National TB Management Guidelines (NDoH)", "SA HIV Clinicians Society adult ART/OI guidance"],
+      "signoff": "pending"
+    },
+    {
+      "id": "crag_serum",
+      "test": "Serum or plasma cryptococcal antigen (CrAg lateral flow)",
+      "aliases": ["crag", "cryptococcal antigen", "cryptococcal ag"],
+      "alwaysShowWhenCd4Below": 200,
+      "limitation": "Highly sensitive for cryptococcal disease, but a very high antigen load can produce a false-negative lateral-flow result (prozone effect), and a serum result does not replace CSF testing when there is headache, confusion or meningism.",
+      "implication": "With neurological symptoms, consider lumbar puncture with CSF CrAg and opening pressure whatever the serum result. Positive serum CrAg in an unwell patient warrants CSF evaluation.",
+      "sources": ["SA HIV Clinicians Society / NICD cryptococcal guidance", "WHO guidelines for diagnosing, preventing and managing cryptococcal disease in adults, adolescents and children with HIV"],
+      "signoff": "pending"
+    },
+    {
+      "id": "csf_hiv_cellularity",
+      "test": "CSF cell count and chemistry in advanced HIV",
+      "aliases": ["csf", "lumbar puncture", "cerebrospinal"],
+      "limitation": "In advanced immunosuppression the CSF inflammatory response can be minimal, so a near-normal cell count and protein do not exclude meningitis (cryptococcal, TB or other).",
+      "implication": "Always send CSF CrAg, culture, Xpert/mycobacterial studies as appropriate rather than relying on cell count.",
+      "sources": ["SA HIV Clinicians Society adult OI guidance"],
+      "signoff": "pending"
+    },
+    {
+      "id": "urine_histoplasma_antigen",
+      "test": "Urine (or serum) Histoplasma antigen",
+      "aliases": ["histoplasma antigen", "histoplasma ag", "histoplasmosis antigen"],
+      "limitation": "Most useful in disseminated histoplasmosis in people with AIDS; a negative result does not completely exclude it, and the assay cross-reacts with other endemic fungi (for example Talaromyces, Blastomyces). Availability in South African public laboratories is limited and may require a reference laboratory.",
+      "implication": "In advanced HIV with a disseminated fungal picture, request urine Histoplasma antigen where available alongside culture and histology of marrow or skin lesions; a negative antigen should not stop the work-up.",
+      "sources": ["WHO guidelines for diagnosing and managing disseminated histoplasmosis among people living with HIV", "NICD / NHLS laboratory handbook (check local availability)"],
+      "signoff": "pending"
+    },
+    {
+      "id": "blood_culture_single",
+      "test": "Routine blood cultures",
+      "aliases": ["blood culture", "blood cultures"],
+      "limitation": "Routine bottles do not reliably grow mycobacteria or many fungi; a single set or cultures taken after antimicrobials have a lower yield.",
+      "implication": "In advanced HIV request mycobacterial (and fungal) blood culture specifically, and take two sets before antimicrobials where possible.",
+      "sources": ["NHLS laboratory guidance (check local availability)"],
+      "signoff": "pending"
+    },
+    {
+      "id": "cxr_normal_hiv",
+      "test": "Chest X-ray",
+      "aliases": ["chest x-ray", "chest xray", "cxr"],
+      "alwaysShowWhenCd4Below": 200,
+      "limitation": "A normal or non-specific chest X-ray does not exclude pulmonary TB or Pneumocystis pneumonia in advanced HIV, and disseminated TB can have minimal radiographic change.",
+      "implication": "Do not use a clear chest X-ray to lower suspicion of TB or PJP.",
+      "sources": ["South African National TB Management Guidelines (NDoH)"],
+      "signoff": "pending"
+    },
+    {
+      "id": "malaria_rdt_single",
+      "test": "Malaria rapid test or single smear",
+      "aliases": ["malaria rdt", "malaria smear", "malaria test", "rapid malaria"],
+      "limitation": "A single negative rapid test or smear does not exclude malaria, particularly at low parasitaemia or early illness; some rapid tests can be falsely negative when parasites lack the target antigen.",
+      "implication": "In a patient from or returned from a malaria area with fever, repeat testing and use a second method.",
+      "sources": ["NICD malaria guidelines for South Africa"],
+      "signoff": "pending"
+    }
+  ]
+}

@@ -64,6 +64,15 @@ jobs:
       - name: Unit tests
         run: pnpm --filter @ahava-healthcare/api test
 
+      # Clinical quality gate that needs no model or API key: scores the recorded
+      # outputs under apps/backend/eval through the same post-processing production
+      # uses, and fails if a complete plan stops passing or a thin one stops being
+      # caught (also covered by the unit tests; this step prints the per-section
+      # report). The live-model check is a separate, manual workflow:
+      # .github/workflows/clinical-eval-live.yml
+      - name: Clinical evaluation (offline)
+        run: pnpm --filter @ahava-healthcare/api eval:clinical
+
       - name: Build
         run: pnpm --filter @ahava-healthcare/api build
 

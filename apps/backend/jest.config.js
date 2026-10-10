@@ -8,6 +8,7 @@ module.exports = {
   // — excluded here so unit tests stay fast and infra-free.
   testMatch: ['**/*.test.ts', '**/*.spec.ts'],
   testPathIgnorePatterns: ['/node_modules/', '\\.integration\\.test\\.ts$'],
+  setupFiles: ['<rootDir>/jest.setup-env.js'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
   },

@@ -7,6 +7,8 @@
  * all), and the report. The answer key is never part of the input.
  */
 import type { DeterministicRiskPatient, TriageVitalsSnapshot } from './triageSafety';
+import type { ClinicalFindings } from './clinical/clinicalChecks';
+import { findingsFromLabs, mergeFindings } from './clinical/findingsFromInputs';
 
 export interface PackLab { name: string; value: string | number; unit?: string; note?: string; ref?: string; withholdUntilStage?: number }
 export interface PackCase {
@@ -65,6 +67,20 @@ export function buildCaseInput(c: PackCase, stage: 1 | 2): {
     },
     patient: { ageYears: c.patient.ageYears, heightCm: c.patient.heightCm },
   };
+}
+
+/** Structured values for the deterministic checks: the case's vitals and the labs shown at this stage. */
+export function buildCaseFindings(c: PackCase, stage: 1 | 2): ClinicalFindings {
+  const v = c.input.vitals ?? {};
+  const shown = (c.input.labs ?? []).filter((l) => !l.withholdUntilStage || l.withholdUntilStage <= stage);
+  const num = (x: number | null | undefined) => (typeof x === 'number' ? x : null);
+  return mergeFindings(
+    {
+      ageYears: c.patient.ageYears, sex: c.patient.sex === 'F' ? 'F' : c.patient.sex === 'M' ? 'M' : null,
+      sbp: num(v.sbp), dbp: num(v.dbp), hr: num(v.hr), rr: num(v.rr), tempC: num(v.tempC), spo2: num(v.spo2), gcs: num(v.gcs),
+    },
+    findingsFromLabs(shown),
+  );
 }
 
 export interface MachineScore {

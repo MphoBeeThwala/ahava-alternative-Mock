@@ -9,6 +9,45 @@ export interface UnassignedMonitoringAlert {
   restricted: 'NOT_CLAIMED';
 }
 
+/** Clinician-only structured plan produced by the AI triage pipeline (mirrors apps/backend StructuredPlanRecord). */
+export type PlanCriterion = 'met' | 'not_met' | 'not_assessable';
+export interface PlanTestItem { test: string; rationale: string }
+export interface PlanActionItem { action: string; rationale: string; guidelineSource?: string }
+export interface ReviewerFlag { code: string; severity: 'high' | 'medium' | 'info'; message: string }
+export interface StructuredPlanRecord {
+  schemaVersion: 1;
+  audience: 'clinician_only';
+  plan: {
+    triageLevel: number;
+    triageConfidence: number;
+    severity: { summary: string; redFlags: string[] };
+    leadingDiagnosis: { name: string; probability: number; confirmationStatus: string; rationale: string };
+    differential: Array<{ name: string; probability: number; evidenceFor: string[]; evidenceAgainst: string[] }>;
+    mustNotMiss: Array<{ name: string; why: string; howToExclude: string }>;
+    investigations: { bedsideStat: PlanTestItem[]; first24h: PlanTestItem[]; definitive: PlanTestItem[] };
+    management: { immediate: PlanActionItem[]; targeted: PlanActionItem[]; supportive: PlanActionItem[] };
+    existingTreatmentDecisions: Array<{ treatment: string; decision: 'continue' | 'stop' | 'modify'; reason: string }>;
+    timingDecisions: Array<{ topic: string; recommendation: string; reason: string }>;
+    prophylaxis: Array<{ agent: string; indication: string }>;
+    escalation: { escalateIf: string[]; redFlags: string[]; referral: string[] };
+    questionAnswers: Array<{ question: string; answer: string }>;
+  };
+  checks: {
+    map: number | null;
+    septicShock: { status: PlanCriterion; reason: string };
+    hlh2004: { metCount: number; notAssessableCount: number; maxPossible: number; status: PlanCriterion };
+    hScore: { scoreMin: number; scoreMax: number; status: PlanCriterion };
+    egfr: number | null;
+  };
+  calibration: {
+    triage: { value: number; band: string };
+    diagnostic: { value: number; band: string; modelValue: number; confirmationStatus: string; appliedCaps: string[] };
+  };
+  reviewerFlags: ReviewerFlag[];
+  references: Record<string, { version: string; signoff: string }>;
+  repairRounds: number;
+}
+
 export interface TriageCase {
   id: string;
   patientId: string;
@@ -18,6 +57,8 @@ export interface TriageCase {
   aiRecommendedAction: string;
   aiPossibleConditions: string[];
   aiReasoning: string;
+  /** Tiered clinician-only plan; absent for older cases and when AI was unavailable. */
+  aiStructuredPlan?: StructuredPlanRecord | null;
   status: string;
   doctorNotes: string | null;
   doctorDiagnosis: string | null;

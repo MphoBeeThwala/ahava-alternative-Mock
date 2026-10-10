@@ -26,6 +26,8 @@ interface VisitData {
   scheduledStart?: string;
   actualStart?: string;
   actualEnd?: string;
+  patientConfirmedAt?: string | null;
+  patientRating?: number | null;
   nurse?: { id: string; firstName: string; lastName: string; email?: string };
   booking?: {
     address?: string;
@@ -45,6 +47,12 @@ export default function VisitTrackerPage({ params }: { params: Promise<{ visitId
   const [visit, setVisit] = useState<VisitData | null>(null);
   const [loading, setLoading] = useState(true);
   const [cancelling, setCancelling] = useState(false);
+  // Straight-line distance from the nurse, worked out by the server (the
+  // patient's own coordinates never reach this page). Replaced by a road ETA
+  // once a maps provider is in.
+  const [nurseDistance, setNurseDistance] = useState<{ meters: number; at: number } | null>(null);
+  const [rating, setRating] = useState(0);
+  const [confirming, setConfirming] = useState(false);
 
   const { lastMessage, connected } = useVisitWebSocket(token);
 
@@ -79,8 +87,9 @@ export default function VisitTrackerPage({ params }: { params: Promise<{ visitId
     }
 
     if (lastMessage.type === 'NURSE_LOCATION_UPDATE') {
-      const d = lastMessage.data as { visitId?: string };
+      const d = lastMessage.data as { visitId?: string; distanceMeters?: number | null };
       if (d.visitId === visitId) {
+        if (typeof d.distanceMeters === 'number') setNurseDistance({ meters: d.distanceMeters, at: Date.now() });
         loadVisit();
       }
     }
@@ -98,6 +107,20 @@ export default function VisitTrackerPage({ params }: { params: Promise<{ visitId
       toast.error('Failed to cancel. Please contact support.');
     } finally {
       setCancelling(false);
+    }
+  };
+
+  const handleConfirm = async () => {
+    setConfirming(true);
+    try {
+      await visitsApi.confirm(visitId, rating || undefined);
+      toast.success('Thank you — visit confirmed.');
+      await loadVisit();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      toast.error(e.response?.data?.error || 'Could not confirm the visit. Please try again.');
+    } finally {
+      setConfirming(false);
     }
   };
 
@@ -220,6 +243,57 @@ export default function VisitTrackerPage({ params }: { params: Promise<{ visitId
                   </div>
                   <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3 }}>Your assigned nurse · {price} · {duration} min</p>
                 </div>
+              </div>
+            )}
+
+            {/* How far away the nurse is, while they are on the way */}
+            {visit.status === 'EN_ROUTE' && (
+              <div style={{ background: 'white', border: '1px solid var(--border)', borderRadius: 20, padding: '20px 24px', boxShadow: 'var(--shadow)' }}>
+                <h2 style={{ fontSize: 14, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Your nurse</h2>
+                {nurseDistance ? (
+                  <p style={{ fontSize: 18, fontWeight: 800, color: 'var(--foreground)' }}>
+                    About {nurseDistance.meters < 1000 ? `${nurseDistance.meters} m` : `${(nurseDistance.meters / 1000).toFixed(1)} km`} away
+                    <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--muted)', marginLeft: 8 }}>straight-line, updates about every 20 s</span>
+                  </p>
+                ) : (
+                  <p style={{ fontSize: 14, color: 'var(--muted)' }}>On the way. Distance will appear as soon as your nurse&apos;s location arrives.</p>
+                )}
+              </div>
+            )}
+
+            {/* Close-out: the patient confirms the visit ended */}
+            {isCompleted && (
+              <div style={{ background: 'white', border: '1px solid var(--border)', borderRadius: 20, padding: '20px 24px', boxShadow: 'var(--shadow)' }}>
+                <h2 style={{ fontSize: 14, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>Your visit</h2>
+                {visit.patientConfirmedAt ? (
+                  <p style={{ fontSize: 14, color: 'var(--foreground)', fontWeight: 600 }}>
+                    Thank you, you confirmed this visit{visit.patientRating ? ` and rated it ${visit.patientRating} out of 5` : ''}.
+                  </p>
+                ) : (
+                  <>
+                    <p style={{ fontSize: 14, color: 'var(--foreground)', marginBottom: 12 }}>Your nurse has finished. Please confirm the visit is complete. A rating is optional.</p>
+                    <div role="radiogroup" aria-label="Rating" style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+                      {[1, 2, 3, 4, 5].map((n) => (
+                        <button
+                          key={n}
+                          type="button"
+                          role="radio"
+                          aria-checked={rating === n}
+                          aria-label={`${n} out of 5`}
+                          onClick={() => setRating(rating === n ? 0 : n)}
+                          style={{ width: 44, height: 44, borderRadius: 12, border: '1px solid var(--border)', background: rating >= n ? '#fbbf24' : 'white', fontSize: 20, cursor: 'pointer' }}
+                        >★</button>
+                      ))}
+                    </div>
+                    <button
+                      onClick={handleConfirm}
+                      disabled={confirming}
+                      style={{ padding: '12px 24px', borderRadius: 12, background: 'var(--primary)', color: 'white', border: 'none', fontWeight: 700, cursor: confirming ? 'default' : 'pointer', opacity: confirming ? 0.7 : 1 }}
+                    >
+                      {confirming ? 'Confirming…' : 'Confirm visit complete'}
+                    </button>
+                  </>
+                )}
               </div>
             )}
 

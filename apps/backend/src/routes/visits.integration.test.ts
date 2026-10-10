@@ -460,3 +460,116 @@ describe("doctor: nurse-visit review queue and approval", () => {
     expect(res.status).toBe(400);
   });
 });
+
+// ---- arrival check and patient confirmation --------------------------------
+
+const BOOKING_PIN = { lat: -26.2041, lng: 28.0473 };
+const NORTH_1KM = { lat: BOOKING_PIN.lat + 1000 / 111_195, lng: BOOKING_PIN.lng };
+
+async function seedEnRouteVisitWithPin(label: string) {
+  const patient = await registerRole("PATIENT", `${label}-patient`);
+  const nurse = await registerRole("NURSE", `${label}-nurse`);
+  const { booking, visit } = await seedBookingAndVisit(patient.userId, nurse.userId);
+  const { encryptPatientLocation } = await import("../utils/encryption");
+  await prisma.booking.update({
+    where: { id: booking.id },
+    data: { encryptedPatientLocation: encryptPatientLocation(BOOKING_PIN.lat, BOOKING_PIN.lng) },
+  });
+  await prisma.visit.update({ where: { id: visit.id }, data: { status: "EN_ROUTE" } });
+  return { patient, nurse, visit };
+}
+
+describe("visits: arrival is checked against the booking location (soft)", () => {
+  it("marks arrived, verified, when the nurse is at the booking", async () => {
+    const { nurse, visit } = await seedEnRouteVisitWithPin("arrive-ok");
+    const res = await nurse.agent.patch(`/api/v1/visits/${visit.id}/status`).send({ status: "ARRIVED", ...BOOKING_PIN });
+    expect(res.status).toBe(200);
+    expect(res.body.visit.status).toBe("ARRIVED");
+  });
+
+  it("asks for a reason when the nurse is far away, and leaves the visit EN_ROUTE", async () => {
+    const { nurse, visit } = await seedEnRouteVisitWithPin("arrive-far");
+    const res = await nurse.agent.patch(`/api/v1/visits/${visit.id}/status`).send({ status: "ARRIVED", ...NORTH_1KM });
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("ARRIVAL_TOO_FAR");
+    expect(res.body.distanceMeters).toBeGreaterThan(900);
+    expect(res.body.reasons).toContain("WRONG_PIN");
+    expect((await prisma.visit.findUnique({ where: { id: visit.id } }))!.status).toBe("EN_ROUTE");
+  });
+
+  it("lets a far nurse continue with a valid reason, and records it in the audit log", async () => {
+    const { nurse, visit } = await seedEnRouteVisitWithPin("arrive-reason");
+    const res = await nurse.agent.patch(`/api/v1/visits/${visit.id}/status`).send({ status: "ARRIVED", ...NORTH_1KM, arrivalReason: "WRONG_PIN" });
+    expect(res.status).toBe(200);
+    const audit = await prisma.auditLog.findFirst({ where: { resource: "Visit", resourceId: visit.id, action: "UPDATE" }, orderBy: { createdAt: "desc" } });
+    expect((audit!.metadata as any).arrival).toMatchObject({ verified: false, overrideReason: "WRONG_PIN" });
+  });
+
+  it("needs a reason when no position is sent at all", async () => {
+    const { nurse, visit } = await seedEnRouteVisitWithPin("arrive-nopos");
+    const res = await nurse.agent.patch(`/api/v1/visits/${visit.id}/status`).send({ status: "ARRIVED" });
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("ARRIVAL_POSITION_UNKNOWN");
+  });
+
+  it("rejects a reason that is not on the list", async () => {
+    const { nurse, visit } = await seedEnRouteVisitWithPin("arrive-badreason");
+    const res = await nurse.agent.patch(`/api/v1/visits/${visit.id}/status`).send({ status: "ARRIVED", ...NORTH_1KM, arrivalReason: "just because" });
+    expect(res.status).toBe(409);
+  });
+});
+
+describe("visits: the patient confirms the visit has ended", () => {
+  async function completedVisit(label: string) {
+    const patient = await registerRole("PATIENT", `${label}-patient`);
+    const nurse = await registerRole("NURSE", `${label}-nurse`);
+    const { visit } = await seedBookingAndVisit(patient.userId, nurse.userId);
+    return { patient, nurse, visit };
+  }
+
+  it("refuses before the nurse has finished the visit", async () => {
+    const { patient, visit } = await completedVisit("confirm-early");
+    const res = await patient.agent.post(`/api/v1/visits/${visit.id}/confirm`).send({ rating: 5 });
+    expect(res.status).toBe(409);
+  });
+
+  it("records the confirmation and rating once the visit is completed, and only once", async () => {
+    const { patient, visit } = await completedVisit("confirm-ok");
+    await prisma.visit.update({ where: { id: visit.id }, data: { status: "COMPLETED", actualEnd: new Date() } });
+
+    const first = await patient.agent.post(`/api/v1/visits/${visit.id}/confirm`).send({ rating: 4 });
+    expect(first.status).toBe(200);
+    const stored = await prisma.visit.findUnique({ where: { id: visit.id } });
+    expect(stored!.patientRating).toBe(4);
+    expect(stored!.patientConfirmedAt).not.toBeNull();
+
+    const second = await patient.agent.post(`/api/v1/visits/${visit.id}/confirm`).send({ rating: 1 });
+    expect(second.status).toBe(409);
+    expect((await prisma.visit.findUnique({ where: { id: visit.id } }))!.patientRating).toBe(4);
+  });
+
+  it("allows confirming without a rating", async () => {
+    const { patient, visit } = await completedVisit("confirm-norating");
+    await prisma.visit.update({ where: { id: visit.id }, data: { status: "COMPLETED" } });
+    const res = await patient.agent.post(`/api/v1/visits/${visit.id}/confirm`).send({});
+    expect(res.status).toBe(200);
+    expect((await prisma.visit.findUnique({ where: { id: visit.id } }))!.patientRating).toBeNull();
+  });
+
+  it("rejects an out-of-range or non-integer rating", async () => {
+    const { patient, visit } = await completedVisit("confirm-badrating");
+    await prisma.visit.update({ where: { id: visit.id }, data: { status: "COMPLETED" } });
+    for (const rating of [0, 6, 3.5, "5"]) {
+      const res = await patient.agent.post(`/api/v1/visits/${visit.id}/confirm`).send({ rating });
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it("returns 404 to another patient and 403 to a nurse", async () => {
+    const { nurse, visit } = await completedVisit("confirm-authz");
+    await prisma.visit.update({ where: { id: visit.id }, data: { status: "COMPLETED" } });
+    const stranger = await registerRole("PATIENT", "confirm-authz-stranger");
+    expect((await stranger.agent.post(`/api/v1/visits/${visit.id}/confirm`).send({})).status).toBe(404);
+    expect((await nurse.agent.post(`/api/v1/visits/${visit.id}/confirm`).send({})).status).toBe(403);
+  });
+});
