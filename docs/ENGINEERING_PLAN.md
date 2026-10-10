@@ -3138,7 +3138,7 @@ Recorded from the product owner's report in a working session. **No signed docum
 
 **Clinical.** Dr. Thwala (HPCSA MP0897654, paediatric specialist) is reported to have signed rows 1-5, 8 and 9 of `CLINICAL_SIGNOFF_CHECKLIST.md`, countersigned rows 6, 7, 10 and 11, reviewed the HIV-HLH-001 gold case rubric, and judged the live Sonnet 5.5 recording good. The case status is now `gold_reviewed_signed_document_pending` and the recording is kind `good` (`good-live-2026-10-10.json`). The checklist's "Switching the gates on" section records the code check: only `FRAMINGHAM_LAB_CHART_SIGNED_OFF` still needs setting in Railway, and doing so makes the WHO/Framingham discordance flag an alert trigger. `PAEDIATRIC_TEWS_SIGNED_OFF` was not switched on.
 
-**Legal and Information Officer** (reported as Lukhele DP Attorneys and Conveyancers, acting as both):
+**Legal and Information Officer** (reported as Lukhele DP Attorneys and Conveyancers, acting as both; the Information Officer is Dumisani Lukhele, senior partner, and the firm is reported registered with the Information Regulator; the consent text in the app was reported checked and fine on 2026-10-10):
 - AH-15 consent wording: reported to meet the legal requirements. Not re-checked in code in this pass: confirm the consent text version in the app is the wording that was approved.
 - Google sign-in with linked terms and privacy policy and no tick box: reported as sufficient consent for POPIA.
 - Research data pipeline (§45-46) placement and design: reported as fine.
