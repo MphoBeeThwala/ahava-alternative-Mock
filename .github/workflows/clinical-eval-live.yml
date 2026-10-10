@@ -30,6 +30,10 @@ jobs:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ahava_ci
       AI_PACK_ANTHROPIC_API_KEY: ${{ secrets.AI_PACK_ANTHROPIC_API_KEY }}
       AI_PACK_GEMINI_API_KEY: ${{ secrets.AI_PACK_GEMINI_API_KEY }}
+      # Keep these equal to production (Railway). A live run is only comparable to
+      # eval/baseline.json when the model settings match; baseline.json records them.
+      AI_CLAUDE_EFFORT: high
+      AI_CLAUDE_MAX_TOKENS: "32000"
     steps:
       - uses: actions/checkout@v4
 

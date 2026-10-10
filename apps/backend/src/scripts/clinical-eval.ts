@@ -27,6 +27,17 @@ import {
 } from '../eval/clinicalEval';
 import { applyJudgement, packCaseToEvalCase } from '../eval/packCases';
 import { EVAL_DIR, loadBaseline, loadCases, loadThresholds, runOffline } from '../eval/evalFiles';
+import { configuredModels } from '../services/aiProviders';
+import type { BaselineSettings } from '../eval/clinicalEval';
+
+/** The Claude settings this run uses, as the engine will read them. Same defaults as services/aiProviders.ts. */
+function runSettings(): BaselineSettings {
+  return {
+    effort: process.env.AI_CLAUDE_EFFORT || 'high',
+    maxTokens: Math.max(1024, parseInt(process.env.AI_CLAUDE_MAX_TOKENS ?? '', 10) || 16_384),
+    models: configuredModels('claude'),
+  };
+}
 
 const args = process.argv.slice(2);
 const flag = (n: string) => args.includes(`--${n}`);
@@ -78,6 +89,7 @@ async function live(): Promise<number> {
   console.log(`Running ${selected.length} case(s) live${judged ? ' (pack cases judged by AI)' : ''}. This spends API credit.`);
 
   const scores: CaseScore[] = [];
+  const noPlan = new Set<string>(); // cases the model gave no usable plan for: never baselined
   const dir = path.join(EVAL_DIR, 'recorded');
   for (const { c, pack } of selected) {
     const started = Date.now();
@@ -92,6 +104,7 @@ async function live(): Promise<number> {
       score = scoreRecord(c, result.plan, schemaIssues, { requiresDoctorReview: result.requiresDoctorReview });
     } else {
       score = scoreUnparsed(c, [`no structured plan (model: ${result.modelUsed})`]);
+      noPlan.add(c.id);
     }
     if (pack && judged && result.plan) {
       const j = await judgeAnswer(pack, {
@@ -119,6 +132,10 @@ async function live(): Promise<number> {
 
   const thresholds = loadThresholds();
   const baseline = loadBaseline();
+  const settings = runSettings();
+  if (baseline?.settings && (baseline.settings.effort !== settings.effort || baseline.settings.maxTokens !== settings.maxTokens)) {
+    console.warn(`WARNING: this run (effort ${settings.effort}, max tokens ${settings.maxTokens}) differs from the baseline (effort ${baseline.settings.effort}, max tokens ${baseline.settings.maxTokens}). Scores are not like for like.`);
+  }
   // Pack cases have no sign-off yet: they are reported and tracked, but only the gold cases are held to the minimums.
   const goldIds = new Set(loadCases().map((c) => c.id));
   const failures = [
@@ -130,8 +147,9 @@ async function live(): Promise<number> {
   if (out) { fs.writeFileSync(out, report); console.log(`\nReport written to ${out}`); } else console.log(`\n${report}`);
 
   if (flag('update-baseline')) {
-    const next: Baseline = { updatedAt: new Date().toISOString(), cases: { ...(baseline?.cases ?? {}) } };
+    const next: Baseline = { updatedAt: new Date().toISOString(), settings, cases: { ...(baseline?.cases ?? {}) } };
     for (const s of scores) {
+      if (noPlan.has(s.caseId)) { console.warn(`Not baselining ${s.caseId}: the model returned no usable plan.`); continue; }
       next.cases[s.caseId] = Object.fromEntries(SECTIONS.filter((x) => s.sections[x].score !== null).map((x) => [x, s.sections[x].score as number]));
     }
     fs.writeFileSync(path.join(EVAL_DIR, 'baseline.json'), JSON.stringify(next, null, 2) + '\n');

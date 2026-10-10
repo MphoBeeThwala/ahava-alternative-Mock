@@ -187,7 +187,9 @@ export interface Thresholds {
   maxRegression: number;
 }
 
-export interface Baseline { updatedAt: string; model?: string; cases: Record<string, Partial<Record<SectionName, number>>> }
+/** The model settings a baseline was produced with. Scores are only comparable between runs that match. */
+export interface BaselineSettings { effort: string; maxTokens: number; models: string[] }
+export interface Baseline { updatedAt: string; model?: string; settings?: BaselineSettings; cases: Record<string, Partial<Record<SectionName, number>>> }
 
 export function checkThresholds(scores: CaseScore[], t: Thresholds, baseline?: Baseline | null): string[] {
   const failures: string[] = [];

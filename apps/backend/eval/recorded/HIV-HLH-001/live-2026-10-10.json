@@ -5,458 +5,519 @@
   "expect": {},
   "output": {
     "triageLevel": 2,
-    "triageConfidence": 0.8,
+    "triageConfidence": 0.85,
     "severity": {
-      "summary": "Advanced HIV (CD4 9) with fever, new confusion, pancytopenia, AKI (eGFR 30), ferritin 18000, sodium 124 and BP 95/59 (MAP 71). qSOFA is 3/3 and HLH-2004 criteria are met (5/8, with 3 not assessable). This is a time-critical multi-organ picture needing emergency (SATS 2) assessment and resuscitation, with a low threshold for level 1 if GCS falls, haemodynamic instability develops or lactate is raised. Sepsis-3 shock criteria cannot be assessed because lactate and vasopressor requirement are missing; MAP is above 65.",
+      "summary": "SATS level 2 (emergency, seen within 10 minutes). A 38-year-old woman with advanced HIV (CD4 9) has had 6 weeks of failed empirical TB treatment. She now has fever, new confusion, pancytopenia, AKI (eGFR 30), hyponatraemia (124), relative hypotension (BP 95/59, MAP 71) and ferritin 18000. qSOFA is 3/3 and HLH-2004 criteria are met (5/8, 3 not assessable). HScore is 222-321 against a cut-off of 169. This pattern suggests secondary HLH triggered by a disseminated opportunistic infection or malignancy, with multi-organ involvement and possible adrenal insufficiency. Circulatory failure cannot be formally judged because lactate and vasopressor data are missing. MAP is above 65, so it is not documented. Her risk is high because deterioration is likely without urgent action, not because circulatory collapse is established. She needs a monitored resuscitation bay, senior review and a time-critical diagnostic and treatment plan.",
       "redFlags": [
-        "New confusion with CD4 9 (cryptococcal or TB meningitis, toxoplasmosis, PML, CMV, metabolic causes)",
-        "qSOFA 3/3",
-        "HLH-2004 5/8 and HScore 222-321 (cut-off 169), with ferritin 18000 and pancytopenia",
-        "Borderline hypotension with hyponatraemia (adrenal insufficiency, including TB or CMV adrenalitis, or sepsis)",
-        "AKI, eGFR 30",
-        "No response after 6 weeks of RHZE",
-        "New skin papules (disseminated cryptococcus, histoplasma, TB, Kaposi sarcoma, other opportunistic infection)",
-        "Lactate not yet known"
+        "New confusion in a patient with CD4 9: exclude cryptococcal or TB meningitis, other CNS infection, and metabolic causes (hyponatraemia, uraemia, hypoglycaemia)",
+        "qSOFA 3/3 with fever, BP 95/59 and AKI: possible sepsis with evolving organ dysfunction",
+        "Pancytopenia with ferritin 18000 and fever: HLH criteria met",
+        "Hypotension with sodium 124: adrenal insufficiency (TB, fungal or CMV adrenalitis) must be considered",
+        "Failure of 6 weeks of RHZE with negative GeneXpert and TB-LAM: TB not excluded, but a second or different opportunistic infection is likely (disseminated histoplasmosis, cryptococcosis, NTM/MAC, CMV, lymphoma)",
+        "New skin papules: may be disseminated fungal infection (cryptococcus, histoplasma), disseminated TB, Kaposi sarcoma or a drug eruption; skin biopsy gives rapid tissue diagnosis",
+        "eGFR 30: affects drug choice (amphotericin formulation, ethambutol, pyrazinamide, cotrimoxazole, tenofovir)",
+        "Pregnancy status not stated: must be established, because cytopenias, AKI and confusion would otherwise raise HELLP, TTP and other pregnancy-related diagnoses"
       ]
     },
     "leadingDiagnosis": {
-      "name": "Secondary haemophagocytic lymphohistiocytosis (HLH) triggered by disseminated opportunistic infection in advanced HIV (disseminated TB, histoplasmosis or cryptococcosis most likely), or by lymphoma",
+      "name": "Secondary (infection-associated) haemophagocytic lymphohistiocytosis in advanced HIV, with the trigger most likely a disseminated opportunistic infection (disseminated TB that is partially treated or drug-resistant, disseminated histoplasmosis or cryptococcosis), with lymphoma still to be excluded",
       "probability": 0.45,
       "confirmationStatus": "clinical_only",
-      "rationale": "Fever, pancytopenia, ferritin 18000, HLH-2004 5/8 and HScore 222-321 all fit HLH. Organomegaly, fibrinogen, triglycerides and bone marrow are not yet assessed, so the score could rise. HLH is secondary until proven otherwise. The trigger is probably a disseminated opportunistic infection, because CD4 is 9 and there are skin papules, confusion and failure of TB treatment. Negative GeneXpert and TB-LAM do not exclude TB, especially after 6 weeks of therapy. Probability is moderate because the same findings are also explained by the infections themselves, and no tissue, culture or antigen result is available."
+      "rationale": "HLH-2004 is met (5/8) and HScore is 222-321. Supporting findings are fever, pancytopenia, ferritin 18000 and CD4 9. The cause remains uncertain: TB (negative Xpert and LAM do not exclude it), disseminated fungal disease (skin papules, confusion, pancytopenia, CD4 below 100), NTM/MAC or CMV (CD4 below 50), and lymphoma. HLH is secondary until proven otherwise, so the aim is to find and treat the trigger while HLH-directed therapy is decided with haematology. The probability is moderate because HLH-2004 is not yet fully assessable (triglycerides, fibrinogen, sCD25, marrow and spleen not done). Several alternative triggers remain plausible, and some of these (e.g. disseminated TB or fungal sepsis alone with hyperferritinaemia) could account for the picture without true HLH."
     },
     "differential": [
       {
-        "name": "Disseminated TB (including drug-resistant TB or TB-IRIS-like complications) with or without CNS involvement",
+        "name": "Disseminated TB (paucibacillary, drug-resistant, or inadequately treated), possibly with adrenal involvement",
         "probability": 0.3,
         "evidenceFor": [
-          "CD4 9",
-          "Pancytopenia and very high ferritin",
-          "Empirical TB treatment started",
-          "Endemic setting",
-          "Paucibacillary disease makes negative Xpert and LAM unreliable"
+          "CD4 9 in a high-TB-burden setting",
+          "Fever, pancytopenia and very high ferritin are compatible with disseminated TB",
+          "Negative Xpert and LAM do not exclude TB in advanced HIV",
+          "Microbiology taken after weeks of treatment may be falsely negative",
+          "Hypotension with hyponatraemia is compatible with adrenal TB"
         ],
         "evidenceAgainst": [
-          "No response after 6 weeks of RHZE (suggests resistance, non-adherence, malabsorption or a second pathology)",
-          "Negative GeneXpert and TB-LAM (not exclusionary)"
-        ]
-      },
-      {
-        "name": "Disseminated cryptococcosis or cryptococcal meningitis",
-        "probability": 0.2,
-        "evidenceFor": [
-          "CD4 below 100",
-          "New confusion",
-          "Skin papules (can be cryptococcal)",
-          "Fever"
-        ],
-        "evidenceAgainst": [
-          "CrAg status not supplied; serum CrAg can be falsely negative from the prozone effect"
+          "No improvement after 6 weeks of RHZE (suggests resistance, malabsorption, non-adherence, or a different or additional diagnosis)",
+          "Negative GeneXpert and TB-LAM (limited negative predictive value)",
+          "No microbiological confirmation"
         ]
       },
       {
         "name": "Disseminated histoplasmosis",
-        "probability": 0.2,
+        "probability": 0.25,
         "evidenceFor": [
           "CD4 below 100",
           "Skin papules",
-          "Pancytopenia",
-          "Very high ferritin",
-          "Fever with no response to TB treatment",
-          "Is a recognised HLH trigger"
+          "Pancytopenia and very high ferritin",
+          "Fever with failure of TB treatment",
+          "Hypotension with hyponatraemia (adrenal involvement is possible)",
+          "Disseminated disease can mimic TB and trigger HLH"
         ],
         "evidenceAgainst": [
-          "No exposure history or antigen result supplied"
+          "No fungal testing has been done",
+          "Exposure history unknown"
         ]
       },
       {
-        "name": "Disseminated non-tuberculous mycobacteria (MAC) or CMV disease",
+        "name": "Cryptococcal disease (meningitis or disseminated)",
+        "probability": 0.25,
+        "evidenceFor": [
+          "CD4 9",
+          "New confusion",
+          "Skin papules (molluscum-like lesions)",
+          "Fever",
+          "A negative TB workup does not explain the confusion"
+        ],
+        "evidenceAgainst": [
+          "CrAg and CSF not yet reported",
+          "No headache or meningism documented"
+        ]
+      },
+      {
+        "name": "Lymphoma or other malignancy (HIV-associated lymphoma, Kaposi sarcoma) as HLH trigger",
+        "probability": 0.12,
+        "evidenceFor": [
+          "Advanced HIV",
+          "Skin papules",
+          "Pancytopenia",
+          "Extreme ferritin",
+          "Lack of response to TB treatment"
+        ],
+        "evidenceAgainst": [
+          "No documented lymphadenopathy, mass or B symptoms beyond fever",
+          "No imaging or histology yet"
+        ]
+      },
+      {
+        "name": "Disseminated MAC/NTM or CMV disease",
         "probability": 0.12,
         "evidenceFor": [
           "CD4 below 50",
-          "Pancytopenia and fever",
-          "Failure of TB treatment",
-          "CMV can cause adrenalitis, encephalitis and cytopenias"
+          "Fever and pancytopenia",
+          "No response to RHZE",
+          "CMV adrenalitis is possible"
         ],
         "evidenceAgainst": [
-          "No specific supporting test result"
+          "No cultures, PCR or imaging yet"
         ]
       },
       {
-        "name": "Lymphoma or other malignancy (including Kaposi sarcoma)",
-        "probability": 0.1,
-        "evidenceFor": [
-          "Advanced HIV",
-          "Skin lesions",
-          "Pancytopenia",
-          "Raised ferritin",
-          "Malignancy-associated HLH"
-        ],
-        "evidenceAgainst": [
-          "No imaging or histology available"
-        ]
-      },
-      {
-        "name": "Adrenal insufficiency or sepsis contributing to hypotension and hyponatraemia",
+        "name": "Adrenal insufficiency (TB, fungal or CMV adrenalitis) contributing to hypotension and hyponatraemia",
         "probability": 0.15,
         "evidenceFor": [
           "BP 95/59",
           "Sodium 124",
-          "Fever",
           "Confusion",
-          "Disseminated TB or CMV can cause adrenalitis"
+          "Advanced HIV with infections that infiltrate the adrenals"
         ],
         "evidenceAgainst": [
-          "Cortisol not measured",
-          "MAP is 71, not hypotensive by MAP"
+          "Cortisol and potassium not available",
+          "Hyponatraemia has other plausible causes (SIADH from CNS or lung disease, hypovolaemia)"
         ]
       },
       {
-        "name": "Drug-induced cytopenias, nephrotoxicity or drug-resistant TB",
+        "name": "Drug reaction (DRESS or severe cutaneous adverse reaction to RHZE or cotrimoxazole)",
         "probability": 0.08,
         "evidenceFor": [
-          "6 weeks of RHZE",
-          "Raised creatinine"
+          "Fever, skin lesions and cytopenias 6 weeks into new drugs",
+          "AKI",
+          "Hyperferritinaemia"
         ],
         "evidenceAgainst": [
-          "Fever, ferritin 18000 and confusion are not explained by drugs alone"
+          "Skin papules rather than a diffuse rash",
+          "Eosinophilia and LFTs not reported"
+        ]
+      },
+      {
+        "name": "Bacterial sepsis or Pneumocystis pneumonia as co-infection",
+        "probability": 0.1,
+        "evidenceFor": [
+          "qSOFA 3/3",
+          "CD4 9",
+          "Fever with relative hypotension"
+        ],
+        "evidenceAgainst": [
+          "No respiratory symptoms, hypoxia or focus documented"
+        ]
+      },
+      {
+        "name": "Pregnancy-related thrombotic microangiopathy or HELLP, or TTP/HUS (to exclude if she is pregnant or recently postpartum; TMA also possible in advanced HIV)",
+        "probability": 0.04,
+        "evidenceFor": [
+          "Cytopenia, AKI and confusion would fit if she is pregnant or recently postpartum",
+          "HIV is a TTP risk factor"
+        ],
+        "evidenceAgainst": [
+          "Pancytopenia (not isolated thrombocytopenia and anaemia) is less typical",
+          "Pregnancy status not stated",
+          "No blood film or haemolysis markers yet"
         ]
       }
     ],
     "mustNotMiss": [
       {
         "name": "Cryptococcal meningitis",
-        "why": "Fatal if missed. The patient has new confusion and CD4 9. Raised intracranial pressure needs management, and ART timing depends on the result.",
-        "howToExclude": "Serum CrAg, then lumbar puncture with opening pressure and CSF CrAg, India ink or culture, regardless of the serum result, if there are no contraindications."
+        "why": "Confusion with CD4 9 is cryptococcal meningitis until excluded. The result changes ART timing and treatment, and raised intracranial pressure needs therapeutic drainage. A negative serum CrAg does not exclude it (prozone effect).",
+        "howToExclude": "Serum CrAg now. Lumbar puncture with opening pressure and CSF CrAg, India ink/culture, cell count, protein and glucose. Do CT brain first only if there are focal signs, papilloedema or markedly reduced consciousness."
       },
       {
-        "name": "TB meningitis or disseminated drug-resistant TB",
-        "why": "Standard RHZE does not treat resistant TB and has limited CNS penetration. Both are lethal and change ART timing.",
-        "howToExclude": "CSF Xpert and culture, blood mycobacterial culture, urine and other-site Xpert, rifampicin-resistance testing, and bone marrow or node tissue for culture and histology."
+        "name": "TB meningitis and disseminated TB (including drug-resistant TB)",
+        "why": "TB remains possible despite negative Xpert and LAM, because the tests are insensitive and she has been on treatment for 6 weeks. Stopping treatment would be dangerous, and drug-resistant TB would need a regimen change.",
+        "howToExclude": "CSF Xpert Ultra and culture. Blood mycobacterial culture. Xpert, LPA and culture on any specimen (sputum, urine, marrow, node, skin). Repeat urine LAM. Bone marrow and skin biopsy for AFB. Check adherence and absorption."
       },
       {
-        "name": "Adrenal crisis",
-        "why": "Hypotension, hyponatraemia and sepsis-like illness in advanced HIV with TB may reflect adrenal failure. It is rapidly fatal but treatable.",
-        "howToExclude": "Random cortisol before steroids; give empirical hydrocortisone IV if there is haemodynamic compromise, without waiting for the result."
+        "name": "Disseminated histoplasmosis and other endemic or opportunistic fungal infection",
+        "why": "It mimics TB, causes HLH and pancytopenia, and is rapidly fatal if untreated. It needs amphotericin-based therapy, not anti-TB drugs.",
+        "howToExclude": "Urine and serum Histoplasma antigen if available. Fungal blood culture. Skin biopsy with GMS/PAS and fungal culture. Marrow histology and culture. Peripheral/buffy coat smear. If testing is unavailable and the patient is deteriorating, discuss empirical liposomal amphotericin B with ID/microbiology."
       },
       {
-        "name": "Disseminated histoplasmosis and other endemic fungal disease",
-        "why": "Mimics TB, causes HLH, and needs amphotericin-based therapy.",
-        "howToExclude": "Urine or serum Histoplasma antigen if available, fungal blood culture, skin biopsy with histology and culture, bone marrow."
+        "name": "Adrenal insufficiency / adrenal crisis",
+        "why": "Hypotension with hyponatraemia, fever and confusion in advanced HIV. It is treatable and life-threatening.",
+        "howToExclude": "Random cortisol (before steroids), electrolytes including potassium, glucose. Give empirical IV hydrocortisone if she remains hypotensive or cortisol is low. Adrenal imaging (ultrasound or CT)."
       },
       {
-        "name": "Lymphoma-associated HLH",
-        "why": "Needs haematology-led treatment, and the HLH will not settle without treating the malignancy.",
-        "howToExclude": "Imaging for nodes and organomegaly, LDH, bone marrow trephine, and node or skin biopsy."
+        "name": "HIV-associated lymphoma / malignancy as the HLH trigger",
+        "why": "HLH needs a trigger search; lymphoma is a treatable cause that will not respond to anti-infective therapy.",
+        "howToExclude": "Bone marrow aspirate and trephine, skin or lymph node biopsy, CT or ultrasound for nodes and organomegaly, LDH."
       },
       {
-        "name": "Sepsis with possible progression to shock",
-        "why": "qSOFA is 3/3 and lactate is unknown, so Sepsis-3 shock criteria cannot be judged and haemodynamic deterioration cannot be excluded.",
-        "howToExclude": "Lactate, blood cultures, repeat haemodynamics and urine output."
+        "name": "Bacterial sepsis (including bacteraemia, Salmonella)",
+        "why": "qSOFA 3/3 in an immunosuppressed host; delayed antibiotics increase mortality.",
+        "howToExclude": "Blood cultures before antibiotics (without delaying them), lactate, urine culture, chest X-ray; start empirical IV antibiotics."
       },
       {
-        "name": "Pneumocystis pneumonia and CMV disease",
-        "why": "CD4 is below 50 and the CXR is not described. Each is treatable.",
-        "howToExclude": "Oxygen saturation, CXR, LDH, PJP PCR if respiratory signs, and dilated fundoscopy for CMV retinitis."
+        "name": "Pregnancy-related emergencies (HELLP, acute fatty liver) and TTP/HUS",
+        "why": "Pregnancy status is not documented. Cytopenia, AKI and confusion with normal or low BP would be an obstetric emergency if she is pregnant or postpartum.",
+        "howToExclude": "Urgent pregnancy test. If positive, urgent obstetric review. Blood film for schistocytes, LDH, haptoglobin, platelets, LFTs and coagulation."
       }
     ],
     "investigations": {
       "bedsideStat": [
         {
-          "test": "Bedside glucose (HGT)",
-          "rationale": "Confusion; exclude hypoglycaemia."
+          "test": "Bedside (point-of-care) glucose",
+          "rationale": "Confusion; exclude hypoglycaemia, which is common in sepsis and adrenal insufficiency."
         },
         {
-          "test": "GCS, full vitals, oxygen saturation, temperature, urine output",
-          "rationale": "Quantify severity and monitor trajectory."
+          "test": "Full vitals including GCS, temperature, respiratory rate, oxygen saturation, repeat BP and urine output",
+          "rationale": "Establish a baseline and detect progression of circulatory compromise; qSOFA is 3/3."
         },
         {
-          "test": "Venous blood gas with lactate",
-          "rationale": "Needed to judge Sepsis-3 shock criteria; also acid-base status and potassium."
+          "test": "Venous or arterial blood gas with lactate",
+          "rationale": "Lactate is a missing input needed to judge the degree of circulatory dysfunction and tissue hypoperfusion in suspected sepsis; the Sepsis-3 shock criteria cannot be assessed without it."
         },
         {
-          "test": "Urea, creatinine and electrolytes including potassium",
-          "rationale": "AKI with sodium 124; check for hyperkalaemia."
+          "test": "Point-of-care electrolytes (sodium, potassium), urea and creatinine",
+          "rationale": "Sodium 124 and eGFR 30; hyperkalaemia and low sodium with hypotension would support adrenal insufficiency."
         },
         {
-          "test": "Random cortisol (before steroids)",
-          "rationale": "Hypotension with hyponatraemia; consider adrenal insufficiency."
+          "test": "Random serum cortisol (draw before any steroid)",
+          "rationale": "Hypotension with hyponatraemia; adrenal insufficiency must be evaluated."
         },
         {
-          "test": "Serum CrAg (lateral flow)",
-          "rationale": "CD4 below 100 with confusion; a negative result does not exclude disease (prozone)."
+          "test": "Serum cryptococcal antigen (lateral flow)",
+          "rationale": "CD4 9 with confusion; a rapid test that guides LP and antifungal therapy. A negative result does not rule out disease if the load is very high (prozone effect)."
         },
         {
-          "test": "Blood cultures (bacterial and fungal) before antimicrobials",
-          "rationale": "Suspected sepsis; do not delay treatment."
+          "test": "Pregnancy test (urine or serum hCG)",
+          "rationale": "Woman aged 38; pregnancy status not stated and affects differential, imaging and drug choices."
         },
         {
-          "test": "Urine LAM (repeat if done before) and malaria test if there is relevant travel",
-          "rationale": "LAM is a negative result that does not exclude TB. Exclude malaria in an endemic area."
+          "test": "Malaria rapid test or smear if travel to Limpopo/KwaZulu-Natal low-lying areas",
+          "rationale": "Fever and confusion; malaria is rapidly treatable and must not be missed."
         },
         {
-          "test": "Fundoscopy for papilloedema and CMV retinitis; neurological examination for meningism and focal signs",
-          "rationale": "Decide whether lumbar puncture is safe."
+          "test": "ECG and urine dipstick",
+          "rationale": "Electrolyte and renal derangement; urine protein, blood and infection."
+        },
+        {
+          "test": "Skin lesion examination, and smear or scraping from a papule for stain/microscopy",
+          "rationale": "Rapid clue to cryptococcus, histoplasma or AFB; also documents the lesions before biopsy."
         }
       ],
       "first24h": [
         {
-          "test": "Lumbar puncture with opening pressure; CSF CrAg, India ink or fungal culture, Xpert Ultra, TB culture, cell count, protein, glucose, bacterial culture",
-          "rationale": "Confusion with CD4 9; do first if no focal signs, papilloedema or a clotting or platelet contraindication. Otherwise do CT head first."
+          "test": "Full blood count with differential, peripheral blood smear (schistocytes, parasites, intracellular yeasts on buffy coat), reticulocytes",
+          "rationale": "Quantify pancytopenia; exclude TMA; look for yeast or haemophagocytes."
         },
         {
-          "test": "CT brain (with contrast) if focal signs, papilloedema, seizures or lumbar puncture contraindicated",
-          "rationale": "Toxoplasmosis, TB, lymphoma, PML, mass lesion."
+          "test": "Blood cultures (bacterial) before antibiotics, plus blood culture for mycobacteria and for fungi",
+          "rationale": "Sepsis, Salmonella, disseminated TB/MAC and fungaemia; mycobacterial blood culture has the best yield in CD4 below 50."
         },
         {
-          "test": "Full blood count with smear, reticulocytes",
-          "rationale": "Quantify cytopenias; look for haemoparasites and blasts."
+          "test": "Lumbar puncture: opening pressure, CSF cell count, protein, glucose, CrAg, India ink, Gram stain, bacterial/fungal/mycobacterial culture, Xpert Ultra, VDRL or syphilis tests, ± CMV/VZV/HSV PCR",
+          "rationale": "New confusion with CD4 9; needed to decide ART timing and treat meningitis. Do CT first only if focal signs, seizures, papilloedema or marked depression of consciousness; do not delay antibiotics or antifungals for imaging."
         },
         {
-          "test": "Fibrinogen, triglycerides, coagulation screen",
-          "rationale": "Complete HLH-2004 and HScore criteria and assess DIC and bleeding risk before procedures."
+          "test": "Liver function tests, LDH, triglycerides, fibrinogen, coagulation profile (INR/aPTT), D-dimer",
+          "rationale": "HLH-2004 criteria not yet assessable (triglycerides, fibrinogen); hepatotoxicity from RHZE; DIC screen."
         },
         {
-          "test": "Liver function tests including AST and ALT, LDH, albumin",
-          "rationale": "HScore component; hepatic involvement; PJP or lymphoma marker."
+          "test": "Soluble CD25 (sIL-2R), if available; repeat ferritin",
+          "rationale": "Completes HLH-2004; trending ferritin follows response."
         },
         {
-          "test": "Chest X-ray",
-          "rationale": "Pulmonary TB, PJP or fungal disease; a normal result does not exclude disease."
+          "test": "Urine lipoarabinomannan repeated; urine Histoplasma antigen and serum Histoplasma antigen where available",
+          "rationale": "TB-LAM negative at presentation does not exclude TB; LAM is repeated for completeness; Histoplasma antigen is the key test for a fungal mimic."
         },
         {
-          "test": "Abdominal ultrasound or CT chest, abdomen and pelvis",
-          "rationale": "Organomegaly, lymphadenopathy, abdominal TB, adrenal enlargement or lymphoma."
+          "test": "Sputum (or induced sputum) for Xpert Ultra with rifampicin resistance and culture; urine and any other available specimen for Xpert/culture",
+          "rationale": "Drug-resistant TB has to be considered since there has been no response."
         },
         {
-          "test": "Urine microscopy and protein; urine and serum osmolality; urine sodium",
-          "rationale": "Characterise AKI and hyponatraemia (SIADH, adrenal, renal or volume loss)."
+          "test": "Chest X-ray; ultrasound of abdomen (spleen, liver, nodes, adrenals, kidneys); CT chest/abdomen if available and renal function allows",
+          "rationale": "Organomegaly (HLH criterion, HScore), lymphadenopathy, adrenal enlargement, hydronephrosis in AKI. A normal chest X-ray does not exclude TB or PJP."
         },
         {
-          "test": "Skin papule punch biopsy for histology, fungal and mycobacterial culture; or scraping/smear",
-          "rationale": "Rapid route to a diagnosis of the trigger."
+          "test": "CMV PCR (blood), EBV PCR, syphilis serology, hepatitis B surface antigen and hepatitis C antibody, HIV viral load",
+          "rationale": "HLH triggers; HBV status guides ART regimen, particularly with renal impairment."
         },
         {
-          "test": "Urine and serum Histoplasma antigen if available; blood mycobacterial culture",
-          "rationale": "Disseminated fungal disease and mycobacteraemia."
+          "test": "Urea/electrolytes, serum osmolality, urine sodium and osmolality, urine protein/creatinine ratio, urine microscopy",
+          "rationale": "Characterise hyponatraemia (adrenal, SIADH, hypovolaemia) and AKI (pre-renal, ATN, drug-induced, infiltrative, TMA)."
         },
         {
-          "test": "CMV viral load, syphilis serology, hepatitis B surface antigen, toxoplasma IgG",
-          "rationale": "Opportunistic infections, HLH triggers, and ART and treatment planning."
+          "test": "Differential count for eosinophils; haemolysis markers (haptoglobin, direct antiglobulin test)",
+          "rationale": "DRESS, haemolysis and TMA."
         },
         {
-          "test": "HIV viral load, repeat CD4 not required",
-          "rationale": "Establish treatment history, adherence and possible resistance."
-        },
-        {
-          "test": "Sputum or other-site specimens for Xpert and culture; drug-susceptibility testing from any positive culture",
-          "rationale": "Drug-resistant TB; a negative result after 6 weeks of therapy is not exclusionary."
-        },
-        {
-          "test": "Soluble IL-2 receptor (sCD25) and NK-cell activity if available",
-          "rationale": "Supplementary HLH-2004 criteria; do not delay treatment waiting for these."
+          "test": "Review adherence and drug history (directly observed treatment, vomiting, diarrhoea, concurrent medications)",
+          "rationale": "Non-adherence or malabsorption could explain treatment failure."
         }
       ],
       "definitive": [
         {
-          "test": "Bone marrow aspirate and trephine: haemophagocytosis, histology, TB and fungal culture, Xpert, lymphoma or Kaposi sarcoma assessment",
-          "rationale": "Confirms HLH, identifies infectious or malignant triggers and gives the highest yield for disseminated TB, fungus and MAC."
+          "test": "Bone marrow aspirate and trephine: haemophagocytosis, cytology, histology (granulomas, lymphoma, fungal stains, AFB), plus culture for mycobacteria and fungi and Xpert",
+          "rationale": "Confirms HLH features and finds the trigger (infection or malignancy); highest-yield single procedure for pancytopenia in advanced HIV."
         },
         {
-          "test": "Lymph node or other organ biopsy if abnormal on imaging",
-          "rationale": "Lymphoma, TB, Kaposi sarcoma."
+          "test": "Skin punch biopsy of a papule: histology with H&E, GMS/PAS and Ziehl-Neelsen stains, tissue culture (fungal and mycobacterial) and Xpert",
+          "rationale": "Gives rapid tissue diagnosis of cryptococcosis, histoplasmosis, TB, NTM, Kaposi sarcoma or drug eruption."
         },
         {
-          "test": "Mycobacterial and fungal blood cultures; drug susceptibility testing of any isolate",
-          "rationale": "Confirm species and resistance."
+          "test": "Lymph node or other lesional biopsy if lymphadenopathy or mass is found on imaging",
+          "rationale": "Lymphoma and granulomatous infection."
+        },
+        {
+          "test": "Mycobacterial culture with drug susceptibility testing and line probe assay on positive cultures",
+          "rationale": "Confirms or excludes drug-resistant TB or NTM."
         }
       ]
     },
     "management": {
       "immediate": [
         {
-          "action": "Resuscitate in a monitored high-care area: oxygen if hypoxic, two IV lines, cautious isotonic crystalloid IV guided by clinical volume status and urine output, and strict fluid balance",
-          "rationale": "BP 95/59, AKI and sepsis-like illness; avoid fluid overload and rapid sodium correction.",
+          "action": "Move to a monitored resuscitation or high-care bay. Secure IV access, continuous monitoring, hourly vitals, GCS and urine output.",
+          "rationale": "SATS level 2 with qSOFA 3/3, confusion and possible evolving circulatory compromise.",
+          "guidelineSource": "SATS"
+        },
+        {
+          "action": "Check bedside glucose immediately and correct if low.",
+          "rationale": "Reversible cause of confusion.",
           "guidelineSource": "SA guideline: verify"
         },
         {
-          "action": "Take blood cultures, lactate and cortisol, then give empirical broad-spectrum IV antibiotics per local sepsis guideline without delay",
-          "rationale": "qSOFA 3/3 and immunosuppression; antibacterial cover while the diagnosis is established.",
+          "action": "Take blood cultures (bacterial, mycobacterial, fungal) and lactate, then give empirical IV broad-spectrum antibiotics within the first hour without delaying for cultures or LP.",
+          "rationale": "Suspected sepsis in a profoundly immunosuppressed host; delayed antibiotics increase mortality.",
           "guidelineSource": "SA guideline: verify"
         },
         {
-          "action": "Give empirical hydrocortisone IV if hypotension persists or deteriorates, or if cortisol is low, after sampling cortisol",
-          "rationale": "Hypotension with hyponatraemia in advanced HIV and TB; adrenal crisis is lethal and treatable.",
+          "action": "Give cautious IV isotonic (balanced) crystalloid titrated to perfusion with frequent reassessment; start vasopressors and escalate to ICU if hypotension persists after fluids.",
+          "rationale": "BP 95/59 with AKI; avoid both under-resuscitation and fluid overload, and avoid rapid correction of sodium.",
           "guidelineSource": "SA guideline: verify"
         },
         {
-          "action": "Correct hyponatraemia slowly with specific cause-directed therapy; avoid rapid correction and monitor sodium frequently",
-          "rationale": "Sodium 124 with confusion; risk of osmotic demyelination if overcorrected.",
+          "action": "Draw random cortisol, then give empirical IV hydrocortisone if she remains hypotensive, if potassium is raised or glucose is low, or if cortisol is low or equivocal. Do not delay for the result if she deteriorates.",
+          "rationale": "Hypotension with hyponatraemia raises adrenal insufficiency, a treatable cause of circulatory failure in advanced HIV; replacement is not the same as HLH-directed immunosuppression.",
           "guidelineSource": "SA guideline: verify"
         },
         {
-          "action": "Urgent senior medical review and discussion with infectious diseases and haematology",
-          "rationale": "Multi-system life-threatening illness that needs specialist input.",
+          "action": "Perform lumbar puncture promptly (after CT only if focal signs, papilloedema or markedly reduced consciousness). Measure opening pressure and drain therapeutically if raised.",
+          "rationale": "Confusion with CD4 9; cryptococcal and TB meningitis change management and ART timing.",
+          "guidelineSource": "SA guideline: verify"
+        },
+        {
+          "action": "Establish pregnancy status urgently; if pregnant or postpartum, request urgent obstetric review.",
+          "rationale": "Changes differential (HELLP/AFLP/TMA) and drug and imaging choices.",
           "guidelineSource": "SA guideline: verify"
         }
       ],
       "targeted": [
         {
-          "action": "If CSF or serum CrAg is positive: liposomal amphotericin B IV plus flucytosine (or fluconazole if flucytosine is unavailable), with therapeutic lumbar punctures for raised pressure",
-          "rationale": "Cryptococcal meningitis; amphotericin is nephrotoxic, so monitor creatinine and electrolytes and give fluid and potassium and magnesium support.",
-          "guidelineSource": "Southern African HIV Clinicians Society cryptococcal guideline: verify"
-        },
-        {
-          "action": "If histoplasmosis or other disseminated fungal disease is suspected from skin biopsy, antigen or histology: start liposomal amphotericin B IV after discussion with infectious diseases",
-          "rationale": "Life-threatening disseminated fungal disease; do not wait for culture if clinical suspicion is high.",
+          "action": "Continue RHZE pending TB work-up, with pharmacist review for renal impairment (particularly ethambutol and pyrazinamide) and monitoring of liver function. Add pyridoxine if not already given.",
+          "rationale": "TB is not excluded: Xpert and LAM have limited sensitivity at CD4 9, and cultures after 6 weeks of therapy may be falsely negative. Stopping would risk untreated TB.",
           "guidelineSource": "SA guideline: verify"
         },
         {
-          "action": "Treat the HLH trigger first; consider HLH-directed immunosuppression (for example dexamethasone IV, with or without etoposide or IVIG) only after haematology discussion and infection cover",
-          "rationale": "Secondary HLH in HIV is usually driven by infection or lymphoma; immunosuppression without treating the trigger is dangerous.",
+          "action": "Discuss empirical liposomal amphotericin B IV with ID or microbiology as soon as CrAg, CSF results and Histoplasma antigen are known, or earlier if she deteriorates before results. Prefer the liposomal formulation given eGFR 30. If CSF CrAg is positive, treat as cryptococcal meningitis per guideline (amphotericin-based induction with flucytosine, renal and marrow toxicity monitored).",
+          "rationale": "Disseminated histoplasmosis and cryptococcosis are leading alternatives and are fatal without amphotericin. Pre-emptive treatment is justified if she is deteriorating and testing is delayed.",
           "guidelineSource": "SA guideline: verify"
         },
         {
-          "action": "Modify TB management: continue treatment pending results and send drug-susceptibility testing; discuss a drug-resistant TB regimen with the TB expert if cultures or molecular tests show resistance or if clinical suspicion persists",
-          "rationale": "No improvement at 6 weeks; resistance, malabsorption, TB-IRIS or a second pathogen is possible.",
-          "guidelineSource": "NDoH TB guidelines: verify"
+          "action": "Urgent haematology discussion/referral for HLH (HLH-2004 5/8, HScore above cut-off), including marrow findings and the decision on HLH-directed therapy.",
+          "rationale": "Secondary HLH in HIV is managed by treating the trigger; steroids or etoposide are given only with haematology and ID agreement once infection is covered, because immunosuppression can worsen uncontrolled infection.",
+          "guidelineSource": "SA guideline: verify"
         },
         {
-          "action": "Consider empirical treatment for PJP (high-dose cotrimoxazole IV with adjunctive steroids) if there is hypoxia or compatible CXR",
-          "rationale": "CD4 below 200; PJP is a common co-infection.",
+          "action": "Trigger search: do the investigations listed (marrow, skin biopsy, blood and CSF cultures, antigens, PCRs, imaging) in parallel rather than sequentially.",
+          "rationale": "HLH is secondary until proven otherwise; infection (TB, fungal, MAC, CMV, EBV), lymphoma and drugs are possible triggers.",
+          "guidelineSource": "SA guideline: verify"
+        },
+        {
+          "action": "Consider empirical treatment for disseminated MAC or CMV, or PJP treatment, only if supported by results (CT chest, PCRs, culture, CD4 below 50 with a compatible picture) after ID discussion.",
+          "rationale": "Avoids unfocused polypharmacy while keeping reversible causes in view.",
+          "guidelineSource": "SA guideline: verify"
+        },
+        {
+          "action": "Assess hyponatraemia: serum and urine osmolality, urine sodium, volume status, cortisol. Correct cautiously and avoid rapid rises in sodium.",
+          "rationale": "Sodium 124 with confusion; risk of osmotic demyelination with overcorrection.",
+          "guidelineSource": "SA guideline: verify"
+        },
+        {
+          "action": "Review all nephrotoxic and renally cleared drugs. Avoid NSAIDs, contrast if possible, and tenofovir DF-containing ART at current eGFR. Seek nephrology advice if AKI progresses.",
+          "rationale": "eGFR 30.",
+          "guidelineSource": "SA guideline: verify"
+        },
+        {
+          "action": "Plan ART according to timingDecisions after the LP, once meningitis is excluded or treated.",
+          "rationale": "Early ART is life-saving at CD4 9, but timing depends on CNS findings and HLH trigger treatment.",
           "guidelineSource": "SA guideline: verify"
         }
       ],
       "supportive": [
         {
-          "action": "Renal protection: stop or avoid nephrotoxins, adjust renally cleared drugs, daily creatinine and electrolytes, strict urine output",
-          "rationale": "eGFR 30; drug choices and dosing are affected.",
+          "action": "Strict fluid balance, urinary output monitoring and daily electrolytes and renal function.",
+          "rationale": "AKI and hyponatraemia.",
           "guidelineSource": "SA guideline: verify"
         },
         {
-          "action": "Check platelets and coagulation; transfuse blood products per local guideline for bleeding or before procedures",
-          "rationale": "Pancytopenia and possible HLH coagulopathy.",
+          "action": "Transfuse blood products only against clinical thresholds or bleeding. Check coagulation and fibrinogen before any biopsy or LP.",
+          "rationale": "Pancytopenia and possible HLH coagulopathy; biopsies and LP need haemostatic safety.",
           "guidelineSource": "SA guideline: verify"
         },
         {
-          "action": "Nutritional support, thiamine, pressure-area care, seizure and delirium precautions, VTE prophylaxis if platelets allow",
-          "rationale": "General care of a critically ill patient with confusion.",
+          "action": "Airborne infection control precautions until TB is excluded or she has had adequate treatment; neuro observations and seizure and falls precautions.",
+          "rationale": "Possible infectious TB; new confusion.",
           "guidelineSource": "SA guideline: verify"
         },
         {
-          "action": "Isolation and infection-prevention measures until pulmonary TB is excluded",
-          "rationale": "Infectious TB cannot be excluded.",
-          "guidelineSource": "NDoH TB infection-control guidance: verify"
+          "action": "Nutritional assessment and support, mouth care and screening for oral or oesophageal candidiasis.",
+          "rationale": "Advanced HIV disease; malnutrition is common.",
+          "guidelineSource": "SA guideline: verify"
+        },
+        {
+          "action": "Identify next of kin and capacity; HIV counselling and adherence support; discuss goals of care with the family early given the high risk.",
+          "rationale": "High mortality with HLH and advanced HIV; confusion limits consent.",
+          "guidelineSource": "SA guideline: verify"
         }
       ]
     },
     "existingTreatmentDecisions": [
       {
-        "treatment": "Empirical TB treatment (RHZE)",
+        "treatment": "Empirical TB treatment (RHZE) for 6 weeks",
         "decision": "continue",
-        "reason": "Negative GeneXpert and TB-LAM do not exclude TB at CD4 9, and tests taken after 6 weeks of treatment are less reliable. Stopping risks untreated disseminated TB. Continue while obtaining tissue, cultures and drug susceptibility testing. Review urgently if resistance is shown (modify) and if confusion or hepatic or renal toxicity limit therapy. Lack of response means the differential includes drug-resistant TB, malabsorption or non-adherence, TB-IRIS, another opportunistic infection (fungal, MAC, CMV) and HLH or lymphoma. Review dose adjustment for renal function; consider CNS-penetrating regimen if TB meningitis is considered."
-      },
-      {
-        "treatment": "Cotrimoxazole prophylaxis (if the patient is currently taking it)",
-        "decision": "modify",
-        "reason": "Status unknown. Continue or start prophylaxis, but review for renal impairment, cytopenias and hyperkalaemia. Switch to treatment-dose cotrimoxazole if PJP is suspected. Cotrimoxazole can contribute to cytopenias, so review against the FBC."
-      },
-      {
-        "treatment": "ART (if the patient is currently taking it)",
-        "decision": "modify",
-        "reason": "ART status is not stated; the case question implies she is not yet on ART. If she is on ART, review adherence and viral load, avoid abrupt interruption unless liver or renal toxicity or interactions require it, and adjust with specialist advice."
+        "reason": "TB is not excluded. Negative GeneXpert and TB-LAM do not rule it out in CD4 9, and any test after 6 weeks of therapy can be falsely negative. Continue while the work-up for drug-resistant TB, NTM, fungal disease and lymphoma proceeds. Stop or modify only if there is: (a) a confirmed alternative diagnosis that explains everything, with TB excluded on adequate specimens including marrow and culture; (b) rifampicin resistance or other resistance on testing; (c) severe hepatotoxicity or drug hypersensitivity/DRESS. Ask the pharmacist to review renally cleared components (ethambutol, pyrazinamide) at eGFR 30, and check adherence and absorption."
       }
     ],
     "timingDecisions": [
       {
         "topic": "ART initiation",
-        "recommendation": "Defer ART for now. Start once cryptococcal and TB meningitis are excluded or treated, and the patient is stable. Cryptococcal meningitis: delay ART by about 4 to 6 weeks of antifungal therapy. TB meningitis: delay by about 4 to 8 weeks of effective TB therapy. Non-CNS TB or other OIs without meningitis: start within 2 weeks of starting treatment (CD4 below 50). If the CSF is clear and the patient stable, start ART as soon as possible, within 2 weeks of effective OI treatment and as soon as acute confusion, AKI and sepsis are stabilised.",
-        "reason": "Starting ART too early in cryptococcal or TB meningitis increases mortality from IRIS, while delaying it in CD4 9 increases mortality from AIDS. The lumbar puncture result is the key determinant. Review regimen choice for renal function, rifampicin interactions and drug-resistant TB. Discuss timing with an HIV specialist."
+        "recommendation": "Do not start ART today before the lumbar puncture and CSF results (CrAg, TB) are available. If cryptococcal and TB meningitis are excluded and she is stabilised on infection-directed therapy with HLH-directed treatment decided by haematology and ID, start ART early, within days to about 2 weeks. She is already 6 weeks into TB treatment, so ART is overdue unless a CNS infection is found. If cryptococcal meningitis is confirmed, defer ART for about 4-6 weeks after starting antifungal therapy. If TB meningitis is confirmed, delay ART per guideline (verify the interval) with specialist input. If there is disseminated histoplasmosis or another non-CNS infection, start ART early once she is clinically stable on antifungal treatment.",
+        "reason": "At CD4 9, early ART improves survival, but starting during active cryptococcal or TB meningitis increases mortality from IRIS in a closed space. Regimen choice needs renal and haematological adjustment: avoid tenofovir DF at eGFR 30 pending specialist advice, avoid zidovudine with pancytopenia, check HBV status, and adjust dolutegravir dosing for concurrent rifampicin using the pharmacy table. Monitor for IRIS after ART starts."
       },
       {
         "topic": "Lumbar puncture",
-        "recommendation": "Do within hours after bedside assessment for contraindications (focal signs, papilloedema, coagulopathy, low platelets). If contraindicated, do CT first and treat empirically for cryptococcal disease if CrAg is positive.",
-        "reason": "Result determines antifungal therapy and ART timing."
+        "recommendation": "Perform as soon as she is stable and coagulation and platelets are known; do it before CT if there are no focal signs, papilloedema or markedly reduced consciousness.",
+        "reason": "Results determine antifungal therapy and ART timing; lack of CSF data is the main barrier to deciding on ART."
       },
       {
-        "topic": "Bone marrow biopsy",
-        "recommendation": "Within 24 to 48 hours, after correcting coagulopathy if present.",
-        "reason": "Confirms HLH and the trigger; high diagnostic yield."
+        "topic": "HLH-directed immunosuppression (steroids, etoposide, other)",
+        "recommendation": "Defer until haematology and ID review, with infection-directed therapy started first. If she deteriorates rapidly, discuss with haematology the same day.",
+        "reason": "Immunosuppression before the trigger is treated can worsen disseminated infection. Marrow, cultures and antigens may change management within 24-72 hours."
       },
       {
-        "topic": "HLH-directed immunosuppression",
-        "recommendation": "Decide with haematology after the trigger work-up is under way and infection cover is in place; do not delay if the patient is deteriorating.",
-        "reason": "Risk of worsening untreated infection versus risk of progressive HLH organ failure."
+        "topic": "Empirical hydrocortisone",
+        "recommendation": "Draw cortisol first. Give IV hydrocortisone if hypotension persists, potassium is raised, glucose is low, or cortisol is low or equivocal; do not delay if she deteriorates haemodynamically.",
+        "reason": "Hypotension with hyponatraemia; adrenal crisis is rapidly fatal and treatable."
+      },
+      {
+        "topic": "Empirical antifungal therapy (liposomal amphotericin B)",
+        "recommendation": "Decide within hours with ID/microbiology once CrAg, Histoplasma antigen and CSF are back; start earlier if she worsens and results are delayed.",
+        "reason": "Disseminated histoplasmosis or cryptococcosis would otherwise remain untreated."
       }
     ],
     "prophylaxis": [
       {
-        "agent": "Cotrimoxazole (oral or IV)",
-        "indication": "Indicated: CD4 is below 200 (PJP and toxoplasma prophylaxis). Use treatment dosing if PJP is diagnosed. Monitor creatinine, potassium and blood counts given eGFR 30 and pancytopenia."
+        "agent": "Cotrimoxazole prophylaxis (oral)",
+        "indication": "Indicated at CD4 below 200 (PJP, toxoplasma and bacterial prophylaxis). Check whether she is already taking it. Start or continue once she is stable, with adjustment for eGFR 30 by pharmacy and monitoring of blood counts, since pancytopenia and AKI are present and cotrimoxazole is a possible cause of drug reaction. If PJP is suspected or confirmed, treatment-dose therapy replaces prophylaxis."
       },
       {
-        "agent": "Fluconazole (pre-emptive)",
-        "indication": "Only if serum CrAg is positive and CSF is negative; otherwise treat as above. Not a substitute for lumbar puncture."
+        "agent": "Fluconazole (oral)",
+        "indication": "Pre-emptive therapy is indicated if serum CrAg is positive and meningitis is excluded. If CSF CrAg is positive, treat as cryptococcal meningitis instead. It is not indicated as prophylaxis while the CrAg result is pending."
       },
       {
         "agent": "TB preventive therapy",
-        "indication": "Not indicated now; patient is on or being assessed for active TB treatment."
+        "indication": "Not applicable: she is already on full TB treatment."
       },
       {
-        "agent": "Azithromycin or equivalent MAC prophylaxis",
-        "indication": "Not routinely indicated if ART will start promptly; exclude active MAC first."
+        "agent": "MAC prophylaxis",
+        "indication": "Not indicated if ART is started promptly; reconsider if disseminated MAC is excluded and ART is delayed, per guideline."
       }
     ],
     "escalation": {
       "escalateIf": [
-        "GCS falls, seizures or new focal deficits",
-        "Systolic BP below 90 or MAP below 65 or lactate raised",
-        "Hypoxia or respiratory distress",
-        "Sodium falls or rises quickly, or potassium rises",
-        "Urine output falls or creatinine rises further",
-        "Bleeding or platelets fall significantly",
-        "Rising ferritin or worsening cytopenias"
+        "MAP below 65 mmHg, raised lactate, or a vasopressor requirement (documented circulatory failure): ICU referral",
+        "GCS falls, seizures, focal deficit or signs of raised intracranial pressure",
+        "Persistent hypotension or hyperkalaemia, or hypoglycaemia (adrenal crisis)",
+        "Rising creatinine, oliguria, severe acidosis or hyperkalaemia: nephrology and renal replacement discussion",
+        "Falling platelets or fibrinogen, bleeding, or DIC",
+        "Worsening hypoxia (PJP, ARDS, or HLH lung involvement)",
+        "Sodium falls below 120 or neurological features of hyponatraemia, or overly rapid correction"
       ],
       "redFlags": [
         "Confusion with CD4 9",
-        "HLH criteria met",
-        "Possible adrenal crisis",
-        "Failure of TB treatment"
+        "qSOFA 3/3",
+        "Ferritin 18000 with pancytopenia and fever",
+        "Hypotension with hyponatraemia",
+        "AKI (eGFR 30)",
+        "No response to 6 weeks of RHZE"
       ],
       "referral": [
-        "Haematology (HLH, bone marrow)",
-        "Infectious diseases or HIV specialist (ART timing, opportunistic infections)",
-        "TB or drug-resistant TB expert",
-        "Nephrology if AKI progresses",
-        "ICU or high-care review",
-        "Neurology or neurosurgery if CT shows a mass or raised pressure is refractory"
+        "Urgent haematology (HLH, marrow)",
+        "Infectious diseases/internal medicine/HIV specialist (opportunistic infections, ART timing, antifungal therapy)",
+        "ICU or high-care review if circulatory failure is documented",
+        "Nephrology if AKI worsens",
+        "Dermatology for biopsy support if needed",
+        "Obstetrics urgently if pregnant or recently postpartum",
+        "Clinical pharmacist for renal dose adjustments and drug interactions"
       ]
     },
     "questionAnswers": [
       {
         "question": "Should we continue TB treatment?",
-        "answer": "Yes, continue RHZE for now; do not stop because of the negative GeneXpert and TB-LAM. At CD4 9, TB is often paucibacillary and disseminated, and tests taken after 6 weeks of treatment cannot exclude it. Lack of response suggests drug-resistant TB, malabsorption or non-adherence, TB-IRIS, or a second pathogen (cryptococcus, histoplasma, MAC, CMV) or HLH or lymphoma. Obtain bone marrow, skin, CSF and blood specimens for culture, Xpert and histology, send drug susceptibility testing, and review with a TB or infectious diseases specialist. Modify therapy if resistance or intolerance is shown or if renal function requires adjustment."
+        "answer": "Yes, continue RHZE for now. Negative GeneXpert and TB-LAM do not exclude TB at CD4 9, and cultures taken after 6 weeks of treatment may be falsely negative. Non-response means the differential must widen: drug-resistant TB, non-adherence or malabsorption, NTM/MAC, disseminated histoplasmosis or cryptococcosis, CMV, lymphoma, and secondary HLH. Collect additional specimens (blood mycobacterial culture, marrow, skin and CSF with Xpert and culture, repeat urine LAM, sputum for resistance testing) and review renally cleared drugs with pharmacy. Reassess after results: stop or change TB treatment only if TB is convincingly excluded, resistance is shown, or there is serious drug toxicity or hypersensitivity."
       },
       {
         "question": "When should ART be started?",
-        "answer": "Not today. First exclude cryptococcal and TB meningitis with a lumbar puncture (CT first if indicated) and stabilise the patient. If meningitis is excluded, start ART within about 2 weeks of starting effective opportunistic infection treatment, as soon as she is stable and able to take oral medicines. If cryptococcal meningitis is confirmed, defer ART about 4 to 6 weeks; if TB meningitis, about 4 to 8 weeks. Agree the timing and regimen with an HIV specialist, accounting for renal function and drug interactions, and monitor for IRIS."
+        "answer": "Not before the LP and CSF results. Cryptococcal or TB meningitis must be excluded first, because early ART in those conditions raises mortality. If meningitis is excluded and she is stabilised on infection-directed therapy with haematology input, start ART early, within days to about 2 weeks. She is already 6 weeks into TB treatment, so delay is not justified without a CNS reason. If cryptococcal meningitis is found, defer ART for about 4-6 weeks after starting antifungal therapy. If TB meningitis is found, delay per guideline with specialist input. Choose the regimen with renal function (avoid tenofovir DF at eGFR 30), pancytopenia (avoid zidovudine), HBV status and rifampicin interactions in mind, and monitor for IRIS."
       }
     ],
     "evidenceSources": [
-      "SATS",
-      "WHO",
       "Patient Symptoms",
       "Patient Vitals",
-      "Patient Risk Profile"
+      "Patient Risk Profile",
+      "SATS",
+      "WHO",
+      "StatPearls/NCBI"
     ],
     "uncertaintyFlags": [
-      "ART history, adherence, TB drug adherence and cotrimoxazole use are unknown",
-      "Lactate, glucose, cortisol, CrAg, fibrinogen, triglycerides, AST and organomegaly are not supplied, so Sepsis-3 shock criteria cannot be assessed and HLH criteria may be higher",
-      "Nature and distribution of skin papules, CXR and neurological examination are not described",
-      "HLH and infection are overlapping and not mutually exclusive; the trigger is unknown",
-      "Negative GeneXpert and TB-LAM do not exclude TB; microbiology after 6 weeks of therapy is unreliable",
-      "Pregnancy status and travel or endemic exposure history are not stated",
-      "Draft for a reviewing doctor; clinical confirmation is required and no doses are given"
+      "The cause of the HLH-like picture is unknown; TB, histoplasmosis, cryptococcosis, MAC, CMV, lymphoma and drug reaction all remain plausible, so no single trigger has a high probability.",
+      "HLH-2004 shows 5/8 with 3 criteria not assessable (e.g. triglycerides, fibrinogen, sCD25, marrow, spleen); HScore is missing organomegaly, fibrinogen, AST and marrow findings.",
+      "Circulatory failure cannot be judged: lactate and vasopressor data are missing. MAP is 71, so it is not documented.",
+      "Pregnancy status is not stated and could change the differential and management.",
+      "CrAg, CSF, Histoplasma antigen, cortisol, potassium, glucose, LFTs, platelet count, blood film and imaging are not reported.",
+      "Medication history is incomplete: adherence, cotrimoxazole use, previous ART exposure and other drugs are not stated; HBV status and viral load are unknown.",
+      "Exposure and travel history (endemic fungi, malaria areas) is not supplied.",
+      "The transfer question is for a draft to be checked by a reviewing doctor; the information given is insufficient for definitive decisions, so requiresDoctorReview = true."
     ]
   }
 }
