@@ -7,6 +7,7 @@ import { verifyWebSocketTicket } from './authSession';
 import { decryptPatientLocation } from '../utils/encryption';
 import { ACCESS_WINDOWS, checkVerifiedClinician, displayName, hasActiveAccess, syncVisitGrant } from './careAccess';
 import { distanceMeters, isVisitStatus, visitTimingFor, visitTransitionError } from './visitStatus';
+import { etaForVisit } from './googleMaps';
 
 interface AuthenticatedWebSocket extends WebSocket {
   userId?: string;
@@ -639,6 +640,10 @@ const handleLocationUpdate = async (ws: AuthenticatedWebSocket, data: any) => {
       // routing provider; this is the no-provider fallback.)
       const bookingLocation = decryptPatientLocation(visit.booking.encryptedPatientLocation);
       const distanceToPatientM = bookingLocation ? Math.round(distanceMeters({ lat: data.lat, lng: data.lng }, bookingLocation)) : null;
+      // Road ETA from Google, only while on the way and only when maps are on.
+      const etaSeconds = visit.status === 'EN_ROUTE' && bookingLocation
+        ? etaForVisit(visit.id, { lat: data.lat, lng: data.lng }, bookingLocation)
+        : null;
 
       // Send location update to patient
       sendToUser(visit.booking.patientId, {
@@ -648,6 +653,7 @@ const handleLocationUpdate = async (ws: AuthenticatedWebSocket, data: any) => {
           lat: data.lat,
           lng: data.lng,
           distanceMeters: distanceToPatientM,
+          etaSeconds,
           timestamp: new Date().toISOString(),
         },
       });

@@ -51,6 +51,8 @@ export default function VisitTrackerPage({ params }: { params: Promise<{ visitId
   // patient's own coordinates never reach this page). Replaced by a road ETA
   // once a maps provider is in.
   const [nurseDistance, setNurseDistance] = useState<{ meters: number; at: number } | null>(null);
+  // Road ETA, only when the server has Google maps switched on.
+  const [etaSeconds, setEtaSeconds] = useState<number | null>(null);
   const [rating, setRating] = useState(0);
   const [confirming, setConfirming] = useState(false);
 
@@ -87,9 +89,10 @@ export default function VisitTrackerPage({ params }: { params: Promise<{ visitId
     }
 
     if (lastMessage.type === 'NURSE_LOCATION_UPDATE') {
-      const d = lastMessage.data as { visitId?: string; distanceMeters?: number | null };
+      const d = lastMessage.data as { visitId?: string; distanceMeters?: number | null; etaSeconds?: number | null };
       if (d.visitId === visitId) {
         if (typeof d.distanceMeters === 'number') setNurseDistance({ meters: d.distanceMeters, at: Date.now() });
+        if (typeof d.etaSeconds === 'number') setEtaSeconds(d.etaSeconds);
         loadVisit();
       }
     }
@@ -252,8 +255,9 @@ export default function VisitTrackerPage({ params }: { params: Promise<{ visitId
                 <h2 style={{ fontSize: 14, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Your nurse</h2>
                 {nurseDistance ? (
                   <p style={{ fontSize: 18, fontWeight: 800, color: 'var(--foreground)' }}>
-                    About {nurseDistance.meters < 1000 ? `${nurseDistance.meters} m` : `${(nurseDistance.meters / 1000).toFixed(1)} km`} away
-                    <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--muted)', marginLeft: 8 }}>straight-line, updates about every 20 s</span>
+                    {etaSeconds !== null
+                      ? <>About {Math.max(1, Math.round(etaSeconds / 60))} min away<span style={{ fontSize: 12, fontWeight: 500, color: 'var(--muted)', marginLeft: 8 }}>by road, {nurseDistance.meters < 1000 ? `${nurseDistance.meters} m` : `${(nurseDistance.meters / 1000).toFixed(1)} km`} in a straight line</span></>
+                      : <>About {nurseDistance.meters < 1000 ? `${nurseDistance.meters} m` : `${(nurseDistance.meters / 1000).toFixed(1)} km`} away<span style={{ fontSize: 12, fontWeight: 500, color: 'var(--muted)', marginLeft: 8 }}>straight-line, updates about every 20 s</span></>}
                   </p>
                 ) : (
                   <p style={{ fontSize: 14, color: 'var(--muted)' }}>On the way. Distance will appear as soon as your nurse&apos;s location arrives.</p>
