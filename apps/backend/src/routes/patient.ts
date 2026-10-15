@@ -50,6 +50,9 @@ const submitBiometricsSchema = Joi.object({
   temperatureTrend: Joi.string()
     .valid("normal", "elevated_single_day", "elevated_over_3_days")
     .optional(),
+  // Overnight oximetry (forwarded to the early-warning engine)
+  spo2NightMin: Joi.number().min(50).max(100).optional(),
+  nightOdiPerHr: Joi.number().min(0).max(150).optional(),
 
   // Source
   source: Joi.string().valid("wearable", "manual").default("manual"),
@@ -178,6 +181,39 @@ router.post(
       const createAlertIfNeeded = async (): Promise<{ id: string } | null> => {
         if (!(alertLevel !== "GREEN" && anomalies.length > 0)) return null;
         try {
+          // A condition that is still present (chronic hypertension, say) is
+          // re-detected on every reading; alerting each time buries the patient.
+          // Alert only when this level has a category that has not already
+          // alerted, unresolved, in the last 7 days. An escalation to a new
+          // level always alerts.
+          // Anomaly text carries live numbers, so group on its leading
+          // identifier (e.g. "bp_sustained_elevated"), and ignore the
+          // informational notes that are not conditions.
+          const category = (a: unknown) =>
+            String(a).match(/^[A-Za-z0-9_]+/)?.[0] ?? String(a);
+          const notCondition = new Set(["Suppressed", "No", "Exercise"]);
+          const current = [...new Set(anomalies.map(category))].filter(
+            (c) => !notCondition.has(c),
+          );
+          const recent = await prisma.healthAlert.findMany({
+            where: {
+              userId,
+              alertLevel,
+              resolved: false,
+              createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+            },
+            orderBy: { createdAt: "desc" },
+            select: { id: true, detectedAnomalies: true },
+          });
+          const alerted = new Set(
+            recent.flatMap((r) =>
+              Array.isArray(r.detectedAnomalies)
+                ? (r.detectedAnomalies as unknown[]).map(category)
+                : [],
+            ),
+          );
+          const duplicate = current.every((c) => alerted.has(c)) ? recent[0] : undefined;
+          if (duplicate) return { id: duplicate.id };
           if (
             prisma.healthAlert &&
             typeof prisma.healthAlert.create === "function"
@@ -423,14 +459,27 @@ router.get(
     try {
       const userId = req.user!.id;
 
-      const [user, latestReading] = await Promise.all([
+      const [user, latestReading, bodyReading, recentBp] = await Promise.all([
         prisma.user.findUnique({
           where: { id: userId },
-          select: { dateOfBirth: true, riskProfile: true },
+          select: { dateOfBirth: true, riskProfile: true, gender: true },
         }),
         prisma.biometricReading.findFirst({
           where: { userId },
           orderBy: { createdAt: "desc" },
+        }),
+        // Latest weight and height, which may sit on different rows
+        prisma.biometricReading.findMany({
+          where: { userId, OR: [{ weight: { not: null } }, { height: { not: null } }] },
+          orderBy: { createdAt: "desc" },
+          take: 20,
+          select: { weight: true, height: true },
+        }),
+        prisma.biometricReading.findMany({
+          where: { userId, bloodPressureSystolic: { not: null } },
+          orderBy: { createdAt: "desc" },
+          take: 14,
+          select: { bloodPressureSystolic: true },
         }),
       ]);
 
@@ -451,8 +500,33 @@ router.get(
               (365.25 * 24 * 60 * 60 * 1000),
           )
         : 50;
+      // Measured inputs for the risk charts. Each stays undefined (so the
+      // engine reports it as missing) unless there is real data behind it;
+      // nothing is assumed.
+      const sexRaw = String(user?.gender ?? "").trim().toLowerCase();
+      const sex =
+        sexRaw === "m" || sexRaw === "male"
+          ? "male"
+          : sexRaw === "f" || sexRaw === "female"
+            ? "female"
+            : undefined;
+      const weightKg = bodyReading.find((b) => b.weight != null)?.weight;
+      const heightCm = bodyReading.find((b) => b.height != null)?.height;
+      const bmi =
+        weightKg && heightCm && heightCm > 0
+          ? Math.round((weightKg / (heightCm / 100) ** 2) * 10) / 10
+          : undefined;
+      const systolicBp = recentBp.length
+        ? Math.round(
+            recentBp.reduce((a, r) => a + Number(r.bloodPressureSystolic), 0) /
+              recentBp.length,
+          )
+        : undefined;
       const context = {
         age: Math.max(18, Math.min(120, age)),
+        ...(sex ? { sex } : {}),
+        ...(bmi ? { bmi } : {}),
+        ...(systolicBp ? { systolic_bp: systolicBp } : {}),
         smoker: Boolean(riskProfile.smoker),
         hypertension: Boolean(riskProfile.hypertension),
         cholesterol_known: Boolean(
@@ -503,14 +577,20 @@ router.get(
 
       // Try ML service first, with graceful fallback to database-only analysis
       let mlData: any;
+      // Local dev skips the ML service unless explicitly opted in, so a
+      // developer without it running still gets the DB-only fallback.
       const mlServiceAvailable =
         process.env.ML_SERVICE_URL &&
-        !process.env.ML_SERVICE_URL.includes("localhost");
+        (!process.env.ML_SERVICE_URL.includes("localhost") ||
+          process.env.ML_SERVICE_ALLOW_LOCALHOST === "true");
 
       if (mlServiceAvailable) {
         try {
-          const summaryRes = await axios.get(
+          // POST (not GET) so the per-request context (sex, BMI, measured
+          // systolic) reaches the engine; those are deliberately not stored.
+          const summaryRes = await axios.post(
             `${ML_SERVICE_URL}/early-warning/summary/${encodeURIComponent(userId)}`,
+            { context },
             {
               timeout: 8000,
               headers: mlServiceHeaders(),
@@ -1038,7 +1118,7 @@ router.patch(
           merged) as Record<string, unknown>;
 
       const ML_URL = (process.env.ML_SERVICE_URL ?? "").replace(/\/$/, "");
-      const mlServiceAvailable = !!ML_URL && !ML_URL.includes("localhost");
+      const mlServiceAvailable = !!ML_URL && (!ML_URL.includes("localhost") || process.env.ML_SERVICE_ALLOW_LOCALHOST === "true");
       if (mlServiceAvailable) {
         const age = current?.dateOfBirth
           ? Math.floor(

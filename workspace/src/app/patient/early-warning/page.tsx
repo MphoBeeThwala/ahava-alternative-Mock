@@ -135,6 +135,46 @@ export default function EarlyWarningPage() {
                   </div>
                 </Card>
 
+                {/* Why this level: the engine's own findings, plainly. A level
+                    with no reason beside it is not something a patient can act on. */}
+                {(() => {
+                  const reasons = (data.anomalies ?? []).filter(
+                    (a) => !/^(Suppressed|No history yet|Exercise context)/.test(a),
+                  );
+                  const bp = data.bp_assessment;
+                  if (reasons.length === 0 && !(bp && (bp.readings_7d ?? 0) > 0)) return null;
+                  return (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>What we found</CardTitle>
+                      </CardHeader>
+                      <div className="p-4 space-y-3">
+                        {bp && (bp.readings_7d ?? 0) > 0 && (
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="p-3 rounded-lg bg-slate-50">
+                              <div className="text-xs text-[var(--muted)] mb-1">Latest blood pressure</div>
+                              <div className="font-medium">{bp.latest_systolic}/{bp.latest_diastolic} <span className="text-[var(--muted)] font-normal">mmHg</span></div>
+                            </div>
+                            <div className="p-3 rounded-lg bg-slate-50">
+                              <div className="text-xs text-[var(--muted)] mb-1">7-day average ({bp.readings_7d} readings)</div>
+                              <div className="font-medium">{bp.mean_systolic_7d}/{bp.mean_diastolic_7d} <span className="text-[var(--muted)] font-normal">mmHg</span></div>
+                            </div>
+                          </div>
+                        )}
+                        {reasons.length > 0 && (
+                          <ul className="space-y-2" data-testid="ew-reasons">
+                            {reasons.map((r) => (
+                              <li key={r} className="text-sm p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-900">
+                                {r.replace(/^[a-z0-9_]+:\s*/i, '')}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </Card>
+                  );
+                })()}
+
                 {/* BP check prompt — AH-45.5a. prompt_bp_check can only be
                     true once BP_CHECK_PROMPT_SIGNED_OFF is set server-side
                     (docs/CLINICAL_SIGNOFF_CHECKLIST.md row 10), so this

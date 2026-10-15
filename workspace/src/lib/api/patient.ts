@@ -99,6 +99,19 @@ export interface EarlyWarningSummary {
     disclaimer?: string;
   };
 
+  // Directly measured (cuff) blood pressure as of the latest reading — see
+  // ml-service BpAssessment. Distinct from bp_risk above, which is a
+  // proxy signal from HR/HRV/sleep and not a measurement.
+  bp_assessment?: {
+    readings_7d?: number;
+    latest_systolic?: number | null;
+    latest_diastolic?: number | null;
+    mean_systolic_7d?: number | null;
+    mean_diastolic_7d?: number | null;
+    level?: 'GREEN' | 'YELLOW' | 'RED';
+    flags?: string[];
+  };
+
   fusion?: {
     trajectory_risk_2y_pct?: number | null;
     alert_triggered?: boolean;

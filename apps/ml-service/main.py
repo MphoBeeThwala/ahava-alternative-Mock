@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 from models import (
     BiometricData, IngestResponse, ReadinessScore, AlertLevel,
-    ContextualProfile, EarlyWarningSummary,
+    ContextualProfile, EarlyWarningSummary, BpReading,
 )
 from engine import EarlyWarningEngine, _dict_to_biometric
 import db
@@ -86,6 +86,24 @@ def ingest_biometrics(data: BiometricData, user_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/ingest/bp", response_model=IngestResponse)
+def ingest_blood_pressure(reading: BpReading, user_id: str):
+    """
+    Ingest a directly measured (cuff) blood-pressure reading and evaluate the
+    BP rules (crisis range, stage 2, sustained, rising, low) as of its timestamp.
+    """
+    try:
+        alert_level, anomalies = engine.ingest_bp(user_id, reading)
+        message = "Data processed successfully."
+        if alert_level != AlertLevel.GREEN:
+            message = "Blood pressure flagged. Medical review suggested."
+        return IngestResponse(
+            user_id=user_id, status="processed", processed_at=datetime.now(),
+            alert_level=alert_level, anomalies=anomalies, message=message,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/readiness-score/{user_id}", response_model=ReadinessScore)
 def get_readiness_score(user_id: str):
     """
@@ -111,6 +129,28 @@ def early_warning_analyze(user_id: str, body: EarlyWarningAnalyzeRequest):
         engine.ingest(user_id, body.biometrics)
         summary = engine.full_analysis(user_id, body.biometrics, body.context)
         return summary
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class EarlyWarningSummaryRequest(BaseModel):
+    context: Optional[ContextualProfile] = None
+
+
+@app.post("/early-warning/summary/{user_id}", response_model=EarlyWarningSummary)
+def early_warning_summary_with_context(user_id: str, body: EarlyWarningSummaryRequest):
+    """
+    Latest early-warning summary for the stored history, using per-request
+    context (sex, BMI, systolic BP ...). Unlike /early-warning/analyze this does
+    NOT ingest anything, so repeated page loads do not add duplicate readings,
+    and context fields the stored profile does not keep (sex, BMI) still count.
+    """
+    latest_row = db.load_latest_biometric(user_id)
+    if not latest_row:
+        raise HTTPException(status_code=404, detail="No biometric data for user")
+    try:
+        last = _dict_to_biometric(latest_row)
+        return engine.full_analysis(user_id, last, body.context)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

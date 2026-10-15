@@ -35,9 +35,55 @@ export async function processBiometricReading(
   biometricData: any,
 ): Promise<MonitoringResult> {
   try {
+    const nowIso = new Date().toISOString();
+    const bpIn = biometricData.bloodPressure as
+      | { systolic: number; diastolic: number }
+      | undefined;
+    // A BP-only submission carries no wearable vitals. Don't fabricate
+    // HR/HRV/SpO2 defaults into the wearable baseline for it.
+    const hasWearableVitals = [
+      biometricData.heartRate,
+      biometricData.heartRateResting,
+      biometricData.hrvRmssd,
+      biometricData.oxygenSaturation,
+      biometricData.respiratoryRate,
+    ].some((v) => v != null);
+
+    let bpLevel: "GREEN" | "YELLOW" | "RED" = "GREEN";
+    let bpAnomalies: string[] = [];
+    if (bpIn) {
+      const bpRes = await axios.post(
+        `${ML_SERVICE_URL}/ingest/bp?user_id=${userId}`,
+        { timestamp: nowIso, systolic: bpIn.systolic, diastolic: bpIn.diastolic },
+        { timeout: 5000, headers: mlServiceHeaders() },
+      );
+      bpLevel = bpRes.data.alert_level;
+      bpAnomalies = bpRes.data.anomalies || [];
+    }
+
+    if (!hasWearableVitals) {
+      const scoreRes = await axios.get(
+        `${ML_SERVICE_URL}/readiness-score/${userId}`,
+        { timeout: 5000, headers: mlServiceHeaders() },
+      );
+      const baselineStatus = scoreRes.data.baseline_status || "STABLE";
+      return {
+        alertLevel: bpLevel,
+        anomalies: bpAnomalies,
+        readinessScore: scoreRes.data.score ?? 100,
+        baselineStatus,
+        recommendations: generateRecommendations(
+          bpLevel,
+          bpAnomalies,
+          baselineStatus,
+          biometricData,
+        ),
+      };
+    }
+
     // Send to ML service for analysis
     const mlPayload: Record<string, unknown> = {
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso,
       heart_rate_resting:
         biometricData.heartRateResting || biometricData.heartRate || 70,
       hrv_rmssd: biometricData.hrvRmssd || 50,
@@ -52,6 +98,10 @@ export async function processBiometricReading(
     if (biometricData.ecgRhythm) mlPayload.ecg_rhythm = biometricData.ecgRhythm;
     if (biometricData.temperatureTrend)
       mlPayload.temperature_trend = biometricData.temperatureTrend;
+    if (biometricData.spo2NightMin != null)
+      mlPayload.spo2_night_min = biometricData.spo2NightMin;
+    if (biometricData.nightOdiPerHr != null)
+      mlPayload.night_odi_per_hr = biometricData.nightOdiPerHr;
 
     const mlResponse = await axios.post(
       `${ML_SERVICE_URL}/ingest?user_id=${userId}`,
@@ -62,11 +112,16 @@ export async function processBiometricReading(
       },
     );
 
-    const alertLevel = mlResponse.data.alert_level as
+    const rank = { GREEN: 0, YELLOW: 1, RED: 2 } as const;
+    const wearableLevel = mlResponse.data.alert_level as
       | "GREEN"
       | "YELLOW"
       | "RED";
-    const anomalies = mlResponse.data.anomalies || [];
+    const alertLevel = rank[bpLevel] > rank[wearableLevel] ? bpLevel : wearableLevel;
+    const anomalies: string[] = [
+      ...(mlResponse.data.anomalies || []),
+      ...bpAnomalies,
+    ];
 
     // Get readiness score
     const scoreResponse = await axios.get(
@@ -240,35 +295,40 @@ function generateRecommendations(
 /**
  * Fallback analysis when ML service is unavailable
  */
-function fallbackAnalysis(biometricData: any): MonitoringResult {
+export function fallbackAnalysis(biometricData: any): MonitoringResult {
   const anomalies: string[] = [];
   let alertLevel: "GREEN" | "YELLOW" | "RED" = "GREEN";
 
   // Basic threshold checks
   const heartRate = biometricData.heartRateResting || biometricData.heartRate;
   if (heartRate) {
-    if (heartRate > 100) {
-      anomalies.push("Elevated resting heart rate");
-      alertLevel = "YELLOW";
-    } else if (heartRate > 120) {
+    if (heartRate > 120) {
       anomalies.push("Significantly elevated heart rate");
       alertLevel = "RED";
+    } else if (heartRate > 100) {
+      anomalies.push("Elevated resting heart rate");
+      alertLevel = "YELLOW";
     }
   }
 
   if (biometricData.oxygenSaturation) {
-    if (biometricData.oxygenSaturation < 95) {
-      anomalies.push("Low oxygen saturation");
-      alertLevel = alertLevel === "RED" ? "RED" : "YELLOW";
-    } else if (biometricData.oxygenSaturation < 90) {
+    if (biometricData.oxygenSaturation < 90) {
       anomalies.push("Critically low oxygen saturation");
       alertLevel = "RED";
+    } else if (biometricData.oxygenSaturation < 95) {
+      anomalies.push("Low oxygen saturation");
+      alertLevel = alertLevel === "RED" ? "RED" : "YELLOW";
     }
   }
 
   if (biometricData.bloodPressure) {
     const { systolic, diastolic } = biometricData.bloodPressure;
-    if (systolic > 140 || diastolic > 90) {
+    if (systolic >= 180 || diastolic >= 120) {
+      anomalies.push(
+        `bp_crisis_range: ${systolic}/${diastolic} mmHg - hypertensive crisis range; repeat after 5 min rest and contact a doctor today`,
+      );
+      alertLevel = "RED";
+    } else if (systolic > 140 || diastolic > 90) {
       anomalies.push("Elevated blood pressure");
       alertLevel = alertLevel === "RED" ? "RED" : "YELLOW";
     }
