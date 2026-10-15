@@ -12,13 +12,13 @@ Key changes vs original:
 import numpy as np
 import pandas as pd
 from typing import List, Dict, Tuple, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import hashlib
 import os
 import who_2019_chart_lookup
 import framingham_lab_lookup
 from models import (
-    BiometricData, AlertLevel, ContextualProfile,
+    BiometricData, AlertLevel, ContextualProfile, BpReading, BpAssessment,
     CvdRiskAssessment, BpRiskAssessment, FraminghamLabRiskAssessment,
     FusionOutput, EarlyWarningSummary,
     UncertaintyProfile, ClinicalProvenance,
@@ -188,6 +188,40 @@ class EarlyWarningEngine:
         self.IMMATURE_BASELINE_MULT_UNDER_7D = 1.5
         self.IMMATURE_BASELINE_MULT_7_TO_14D = 1.25
 
+        # Measured-vitals rules (cuff BP, overnight oximetry). These read
+        # directly measured values, not wearable-derived proxies, and are
+        # evaluated as of the reading's own timestamp.
+        #
+        # Thresholds follow ESC/ESH 2023 and AHA/ACC 2017 (home BP):
+        #   crisis range >=180 systolic or >=120 diastolic; stage 2 >=160/100;
+        #   home hypertension >=135/85 (mean of >=6 readings over 7 days);
+        #   hypotension <90 systolic. The "rising" rule (3-day mean >=5 mmHg and
+        #   >=3 standard errors above the person's own prior 2-week mean) and the nocturnal rules (>=3 of 7 nights
+        #   with a minimum SpO2 <=88%; 7-night mean ODI >=15/h, the AASM
+        #   moderate-OSA band) are engineering judgments that need clinician
+        #   sign-off, see docs/CLINICAL_SIGNOFF_CHECKLIST.md rows 12-13.
+        self.BP_CRISIS_SYS = 180
+        self.BP_CRISIS_DIA = 120
+        self.BP_STAGE2_SYS = 160
+        self.BP_STAGE2_DIA = 100
+        self.BP_HOME_HTN_SYS = 135
+        self.BP_HOME_HTN_DIA = 85
+        self.BP_LOW_SYS = 90
+        self.BP_LOW_DIA = 50
+        self.BP_CRISIS_RED_HOURS = 6      # RED while a crisis-range reading is this recent
+        self.BP_CRISIS_MEMORY_HOURS = 72  # YELLOW for this long after it
+        self.BP_SUSTAINED_MIN_READINGS = 6
+        self.BP_RISING_DELTA_SYS = 5      # mmHg, and
+        self.BP_RISING_MIN_Z = 3.0        # >= 3 standard errors above the person's own prior mean
+        self.BP_RISING_SD_FLOOR = 4.0     # mmHg, floor on the personal day-to-day SD (very steady wearers)
+        self.BP_RISING_RECENT_DAYS = 3
+        self.BP_RISING_BASELINE_DAYS = 14
+        self.NIGHT_SPO2_LOW = 88
+        self.NIGHT_SPO2_LOW_NIGHTS = 3
+        self.NIGHT_ODI_YELLOW = 15
+        self.NIGHT_ODI_MIN_NIGHTS = 4
+        self.VITALS_WINDOW_DAYS = self.BP_RISING_RECENT_DAYS + self.BP_RISING_BASELINE_DAYS + 1
+
     def _absolute_floor(self, data: BiometricData) -> Tuple[AlertLevel, List[str]]:
         """Baseline-independent SATS-aligned floor — see __init__ comment."""
         anomalies: List[str] = []
@@ -304,16 +338,179 @@ class EarlyWarningEngine:
         """Store a new data point, then evaluate. Returns (AlertLevel, anomalies)."""
         alert_level, anomalies = self._evaluate(user_id, data)
         db.save_biometric(user_id, data, alert_level.value, anomalies)
+        if data.spo2_night_min is not None or data.night_odi_per_hr is not None:
+            db.save_vitals(
+                user_id, data.timestamp,
+                spo2_night_min=data.spo2_night_min, night_odi=data.night_odi_per_hr,
+                alert_level=alert_level.value, anomalies=anomalies,
+            )
         return alert_level, anomalies
+
+    def ingest_bp(self, user_id: str, reading: BpReading) -> Tuple[AlertLevel, List[str]]:
+        """Store a measured BP reading and evaluate the BP rules as of its time."""
+        level, anomalies, _ = self._assess_measured_vitals(user_id, reading.timestamp, current_bp=reading)
+        db.save_vitals(
+            user_id, reading.timestamp, systolic=reading.systolic, diastolic=reading.diastolic,
+            alert_level=level.value, anomalies=anomalies,
+        )
+        return level, anomalies
+
+    # ------------------------------------------------------------------
+    # Measured vitals: cuff BP and overnight oximetry
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _mean(values: List[float]) -> Optional[float]:
+        return sum(values) / len(values) if values else None
+
+    def _assess_measured_vitals(
+        self,
+        user_id: str,
+        as_of: datetime,
+        current_bp: Optional[BpReading] = None,
+        current_night: Optional[Tuple[Optional[float], Optional[float], datetime]] = None,
+    ) -> Tuple[AlertLevel, List[str], BpAssessment]:
+        t = db.as_utc(as_of)
+        rows = db.load_vitals(user_id, days=self.VITALS_WINDOW_DAYS, as_of=t)
+
+        bp: List[Tuple[datetime, float, float]] = [
+            (db.as_utc(r["timestamp"]), float(r["systolic"]), float(r["diastolic"]))
+            for r in rows if r.get("systolic") is not None and r.get("diastolic") is not None
+        ]
+        if current_bp is not None:
+            ts = db.as_utc(current_bp.timestamp)
+            if all(b[0] != ts for b in bp):
+                bp.append((ts, float(current_bp.systolic), float(current_bp.diastolic)))
+        bp.sort(key=lambda b: b[0])
+
+        nights: List[Tuple[datetime, Optional[float], Optional[float]]] = [
+            (db.as_utc(r["timestamp"]), r.get("spo2_night_min"), r.get("night_odi"))
+            for r in rows if r.get("spo2_night_min") is not None or r.get("night_odi") is not None
+        ]
+        if current_night is not None:
+            ts = db.as_utc(current_night[2])
+            if all(n[0] != ts for n in nights):
+                nights.append((ts, current_night[0], current_night[1]))
+
+        level = AlertLevel.GREEN
+        anomalies: List[str] = []
+
+        def raise_to(new: AlertLevel) -> None:
+            nonlocal level
+            if self._LEVEL_RANK[new] > self._LEVEL_RANK[level]:
+                level = new
+
+        hours = lambda ts: (t - ts).total_seconds() / 3600.0
+        last7 = [b for b in bp if hours(b[0]) <= 7 * 24]
+        mean_sys = self._mean([b[1] for b in last7])
+        mean_dia = self._mean([b[2] for b in last7])
+        latest = bp[-1] if bp else None
+
+        if latest is not None:
+            is_crisis = lambda b: b[1] >= self.BP_CRISIS_SYS or b[2] >= self.BP_CRISIS_DIA
+            crisis = [b for b in bp if is_crisis(b) and hours(b[0]) <= self.BP_CRISIS_MEMORY_HOURS]
+            if crisis:
+                worst = max(crisis, key=lambda b: (b[1], b[2]))
+                if any(hours(b[0]) <= self.BP_CRISIS_RED_HOURS for b in crisis):
+                    raise_to(AlertLevel.RED)
+                    anomalies.append(
+                        f"bp_crisis_range: {worst[1]:.0f}/{worst[2]:.0f} mmHg measured "
+                        f"{worst[0].strftime('%Y-%m-%d %H:%M')} UTC (>={self.BP_CRISIS_SYS} systolic or "
+                        f">={self.BP_CRISIS_DIA} diastolic) - hypertensive crisis range; repeat after 5 min rest "
+                        f"and contact a doctor today; chest pain, breathlessness, vision/speech change or "
+                        f"weakness is an emergency"
+                    )
+                else:
+                    raise_to(AlertLevel.YELLOW)
+                    anomalies.append(
+                        f"bp_recent_crisis: {worst[1]:.0f}/{worst[2]:.0f} mmHg "
+                        f"{hours(worst[0]):.0f}h ago was in the crisis range - keep monitoring and follow up with a doctor"
+                    )
+            elif hours(latest[0]) <= 24 and (latest[1] >= self.BP_STAGE2_SYS or latest[2] >= self.BP_STAGE2_DIA):
+                raise_to(AlertLevel.YELLOW)
+                anomalies.append(
+                    f"bp_stage2: {latest[1]:.0f}/{latest[2]:.0f} mmHg (>={self.BP_STAGE2_SYS}/{self.BP_STAGE2_DIA}) - "
+                    f"stage 2 range; see a doctor within days"
+                )
+            elif hours(latest[0]) <= 24 and (latest[1] < self.BP_LOW_SYS or latest[2] < self.BP_LOW_DIA):
+                raise_to(AlertLevel.YELLOW)
+                anomalies.append(
+                    f"bp_low: {latest[1]:.0f}/{latest[2]:.0f} mmHg (<{self.BP_LOW_SYS} systolic or <{self.BP_LOW_DIA} "
+                    f"diastolic) - low blood pressure; seek advice if dizzy or faint"
+                )
+
+        if (len(last7) >= self.BP_SUSTAINED_MIN_READINGS and mean_sys is not None and mean_dia is not None
+                and (mean_sys >= self.BP_HOME_HTN_SYS or mean_dia >= self.BP_HOME_HTN_DIA)):
+            raise_to(AlertLevel.YELLOW)
+            anomalies.append(
+                f"bp_sustained_elevated: 7-day mean {mean_sys:.0f}/{mean_dia:.0f} mmHg over {len(last7)} readings "
+                f"(>={self.BP_HOME_HTN_SYS}/{self.BP_HOME_HTN_DIA} home threshold) - book a GP review for hypertension"
+            )
+
+        recent = [b for b in bp if hours(b[0]) <= self.BP_RISING_RECENT_DAYS * 24]
+        prior = [b for b in bp if self.BP_RISING_RECENT_DAYS * 24 < hours(b[0]) <= (self.BP_RISING_RECENT_DAYS + self.BP_RISING_BASELINE_DAYS) * 24]
+        if len(recent) >= 4 and len(prior) >= 10:
+            prior_sys = [b[1] for b in prior]
+            delta = self._mean([b[1] for b in recent]) - self._mean(prior_sys)
+            prior_sd = max(float(np.std(prior_sys)), self.BP_RISING_SD_FLOOR)
+            z = delta / (prior_sd / (len(recent) ** 0.5))
+            if delta >= self.BP_RISING_DELTA_SYS and z >= self.BP_RISING_MIN_Z:
+                raise_to(AlertLevel.YELLOW)
+                anomalies.append(
+                    f"bp_rising: {self.BP_RISING_RECENT_DAYS}-day mean systolic is {delta:.0f} mmHg above the "
+                    f"previous {self.BP_RISING_BASELINE_DAYS} days - blood pressure is climbing; recheck and consider a GP visit"
+                )
+
+        week_nights = [n for n in nights if hours(n[0]) <= 7 * 24]
+        low_nights = [n for n in week_nights if n[1] is not None and n[1] <= self.NIGHT_SPO2_LOW]
+        if len(low_nights) >= self.NIGHT_SPO2_LOW_NIGHTS:
+            raise_to(AlertLevel.YELLOW)
+            anomalies.append(
+                f"nocturnal_hypoxaemia: minimum overnight SpO2 <={self.NIGHT_SPO2_LOW}% on {len(low_nights)} of the "
+                f"last 7 nights - possible sleep apnoea; ask a GP about a sleep study"
+            )
+        odis = [n[2] for n in week_nights if n[2] is not None]
+        if len(odis) >= self.NIGHT_ODI_MIN_NIGHTS and self._mean(odis) >= self.NIGHT_ODI_YELLOW:
+            raise_to(AlertLevel.YELLOW)
+            anomalies.append(
+                f"nocturnal_desaturation_pattern: 7-night mean oxygen desaturation index {self._mean(odis):.0f}/h "
+                f"(>={self.NIGHT_ODI_YELLOW}/h) - possible sleep-disordered breathing; ask a GP about a sleep study"
+            )
+
+        assessment = BpAssessment(
+            readings_7d=len(last7),
+            latest_systolic=latest[1] if latest else None,
+            latest_diastolic=latest[2] if latest else None,
+            mean_systolic_7d=round(mean_sys, 1) if mean_sys is not None else None,
+            mean_diastolic_7d=round(mean_dia, 1) if mean_dia is not None else None,
+            level=level.value,
+            flags=[a.split(":", 1)[0] for a in anomalies if a.startswith("bp_")],
+        )
+        return level, anomalies, assessment
 
     # ------------------------------------------------------------------
     # Evaluate (read-only)
     # ------------------------------------------------------------------
     def _evaluate(self, user_id: str, data: BiometricData) -> Tuple[AlertLevel, List[str]]:
+        """Wearable rules plus measured-vitals rules (BP, overnight oximetry).
+
+        The measured rules are never suppressed by exercise context or by an
+        empty wearable history: a crisis-range cuff reading is not a function
+        of step count.
+        """
+        level, anomalies = self._evaluate_wearable(user_id, data)
+        night = None
+        if data.spo2_night_min is not None or data.night_odi_per_hr is not None:
+            night = (data.spo2_night_min, data.night_odi_per_hr, data.timestamp)
+        m_level, m_anomalies, _ = self._assess_measured_vitals(user_id, data.timestamp, current_night=night)
+        if self._LEVEL_RANK[m_level] > self._LEVEL_RANK[level]:
+            level = m_level
+        return level, anomalies + m_anomalies
+
+    def _evaluate_wearable(self, user_id: str, data: BiometricData) -> Tuple[AlertLevel, List[str]]:
         floor_level, floor_anomalies = self._absolute_floor(data)
 
         history = db.load_biometrics(
-            user_id, days=self.MIN_BASELINE_DAYS + self.ROLLING_WINDOW_DAYS + 1
+            user_id, days=self.MIN_BASELINE_DAYS + self.ROLLING_WINDOW_DAYS + 1, as_of=data.timestamp
         )
         if not history:
             if floor_level != AlertLevel.GREEN:
@@ -965,21 +1162,27 @@ class EarlyWarningEngine:
             db.save_context(user_id, context)
 
         history = db.load_biometrics(
-            user_id, days=self.MIN_BASELINE_DAYS + self.ROLLING_WINDOW_DAYS + 1
+            user_id, days=self.MIN_BASELINE_DAYS + self.ROLLING_WINDOW_DAYS + 1, as_of=data.timestamp
         )
         alert_level, anomalies = self._evaluate(user_id, data)
+        _, _, bp_assessment = self._assess_measured_vitals(user_id, data.timestamp)
+        # Measured BP fills the risk charts' systolic input only when the
+        # profile has none; a stated value is never overridden or imputed.
+        systolic_for_risk = profile.systolic_bp
+        if systolic_for_risk is None and bp_assessment.readings_7d >= self.BP_SUSTAINED_MIN_READINGS:
+            systolic_for_risk = bp_assessment.mean_systolic_7d
 
         age = profile.age
         hr_baseline,  _ = self._calculate_blended_baseline(history, "heart_rate_resting", age)
         hrv_baseline, _ = self._calculate_blended_baseline(history, "hrv_rmssd",          age)
         hr_trend, hrv_vs_baseline, sleep_pattern = self._extract_features(history, data, user_id)
 
-        cvd_risk = self._who2019_non_lab_risk_category(profile, profile.systolic_bp)
+        cvd_risk = self._who2019_non_lab_risk_category(profile, systolic_for_risk)
         cvd_risk.physiological_trend_flags = self._physiological_trend_flags(
             hr_trend, hrv_vs_baseline, sleep_pattern
         )
         cvd_risk.epidemiological_flags = self._epidemiological_flags(profile)
-        framingham_lab_risk = self._framingham_lab_risk(profile, profile.systolic_bp)
+        framingham_lab_risk = self._framingham_lab_risk(profile, systolic_for_risk)
         # §45.2's discordance_flag infrastructure, used for real for the
         # first time: WHO 2019 and Framingham-lab are genuinely independent
         # instruments (different required inputs — BMI vs cholesterol/HDL),
@@ -1001,6 +1204,8 @@ class EarlyWarningEngine:
         clinical_flags: List[str] = []
         if getattr(data, "ecg_rhythm", None) == "irregular":
             clinical_flags.append("Atrial fibrillation suspected")
+        if bp_assessment.level != "GREEN":
+            clinical_flags.extend(f"Blood pressure: {f}" for f in bp_assessment.flags)
         if hrv_vs_baseline == "below" and hrv_baseline:
             clinical_flags.append("HRV below threshold")
         if data.heart_rate_resting > hr_baseline + 10:
@@ -1047,6 +1252,7 @@ class EarlyWarningEngine:
             cvd_risk=cvd_risk,
             framingham_lab_risk=framingham_lab_risk,
             bp_risk=bp_risk,
+            bp_assessment=bp_assessment,
             fusion=fusion,
             clinical_flags=clinical_flags,
             alert_level=alert_level,

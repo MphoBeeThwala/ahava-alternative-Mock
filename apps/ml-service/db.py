@@ -181,6 +181,43 @@ CREATE INDEX IF NOT EXISTS bts_user_time_idx
 """
 
 
+# Directly measured vitals the wearable summary row does not carry: cuff blood
+# pressure and overnight oximetry. Separate table so the existing wearable
+# history (baselines, HRV, persistence windows) keeps its exact shape.
+VITALS_SQL = """
+CREATE TABLE IF NOT EXISTS measured_vitals_time_series (
+    time            TIMESTAMPTZ NOT NULL,
+    user_id         TEXT        NOT NULL,
+    systolic        DOUBLE PRECISION,
+    diastolic       DOUBLE PRECISION,
+    spo2_night_min  DOUBLE PRECISION,
+    night_odi       DOUBLE PRECISION,
+    alert_level     TEXT DEFAULT 'GREEN',
+    anomalies       JSONB DEFAULT '[]'
+);
+CREATE INDEX IF NOT EXISTS mvts_user_time_idx
+    ON measured_vitals_time_series (user_id, time DESC);
+"""
+
+
+def _ensure_vitals_table(conn) -> None:
+    """Best-effort: the restricted service role cannot run DDL, in which case
+    the table must already exist (apps/backend/src/scripts/ml-db-role.ts)."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT to_regclass('public.measured_vitals_time_series') IS NOT NULL")
+            if bool(cur.fetchone()[0]):
+                return
+            cur.execute(VITALS_SQL)
+        conn.commit()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning("[db] measured_vitals_time_series unavailable (needs owner DDL): %s", e)
+
+
 def ensure_schema() -> None:
     """Call once at service startup to create hypertable if not already present."""
     if not _use_db:
@@ -195,6 +232,7 @@ def ensure_schema() -> None:
             cur.execute("SELECT to_regclass('public.biometric_time_series') IS NOT NULL")
             if bool(cur.fetchone()[0]):
                 logger.info("[db] biometric_time_series present; skipping schema setup")
+                _ensure_vitals_table(conn)
                 return
 
             if _timescale_mode == "off":
@@ -231,6 +269,7 @@ def ensure_schema() -> None:
                 logger.info(
                     "[db] TimescaleDB not available on this host; using plain PostgreSQL table"
                 )
+            _ensure_vitals_table(conn)
     finally:
         _put_conn(conn)
 
@@ -300,13 +339,26 @@ def save_biometric(
 # ---------------------------------------------------------------------------
 # Read — returns rows as plain dicts with keys matching BiometricData fields
 # ---------------------------------------------------------------------------
-def load_biometrics(user_id: str, days: int = 30) -> List[dict]:
+def as_utc(ts: Optional[datetime]) -> datetime:
+    """Timezone-aware UTC; naive timestamps are taken to be UTC, None means now."""
+    if ts is None:
+        return datetime.now(timezone.utc)
+    return ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else ts.astimezone(timezone.utc)
+
+
+def load_biometrics(user_id: str, days: int = 30, as_of: Optional[datetime] = None) -> List[dict]:
+    """History window is relative to `as_of` (default: now), never later than it.
+
+    Anchoring on the reading's own timestamp, not wall-clock time, is what lets
+    a back-filled or replayed reading see the history that actually preceded it.
+    """
+    end = as_utc(as_of)
     if not _use_db:
         rows = _memory_biometrics.get(user_id, [])
         if not rows:
             return []
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-        filtered = [r for r in rows if isinstance(r.get("timestamp"), datetime) and r["timestamp"].astimezone(timezone.utc) >= cutoff]
+        cutoff = end - timedelta(days=days)
+        filtered = [r for r in rows if isinstance(r.get("timestamp"), datetime) and cutoff <= r["timestamp"].astimezone(timezone.utc) <= end]
         return sorted(filtered, key=lambda r: r.get("timestamp") or datetime.now(timezone.utc))
     try:
         conn = _get_conn()
@@ -333,10 +385,11 @@ def load_biometrics(user_id: str, days: int = 30) -> List[dict]:
                     anomalies
                 FROM biometric_time_series
                 WHERE user_id = %s
-                  AND time > NOW() - INTERVAL '1 day' * %s
+                  AND time > %s::timestamptz - INTERVAL '1 day' * %s
+                  AND time <= %s::timestamptz
                 ORDER BY time ASC
                 """,
-                (user_id, days),
+                (user_id, end, days, end),
             )
             rows = cur.fetchall()
             return [dict(r) for r in rows]
@@ -483,5 +536,87 @@ def save_context(user_id: str, profile: ContextualProfile) -> None:
         except Exception:
             pass
         raise
+    finally:
+        _put_conn(conn)
+
+
+# ---------------------------------------------------------------------------
+# Measured vitals (cuff BP, overnight oximetry)
+# ---------------------------------------------------------------------------
+_memory_vitals: dict[str, list[dict]] = {}
+
+
+def save_vitals(
+    user_id: str,
+    time: datetime,
+    systolic: Optional[float] = None,
+    diastolic: Optional[float] = None,
+    spo2_night_min: Optional[float] = None,
+    night_odi: Optional[float] = None,
+    alert_level: str = "GREEN",
+    anomalies: Optional[list] = None,
+) -> None:
+    anomalies = anomalies or []
+    if not _use_db:
+        _memory_vitals.setdefault(user_id, []).append({
+            "timestamp": as_utc(time), "systolic": systolic, "diastolic": diastolic,
+            "spo2_night_min": spo2_night_min, "night_odi": night_odi,
+            "alert_level": alert_level, "anomalies": anomalies,
+        })
+        return
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO measured_vitals_time_series
+                    (time, user_id, systolic, diastolic, spo2_night_min, night_odi, alert_level, anomalies)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                (as_utc(time), user_id, systolic, diastolic, spo2_night_min, night_odi,
+                 alert_level, psycopg2.extras.Json(anomalies)),
+            )
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        _put_conn(conn)
+
+
+def load_vitals(user_id: str, days: int = 30, as_of: Optional[datetime] = None) -> List[dict]:
+    """Measured-vitals rows in (as_of - days, as_of], oldest first."""
+    end = as_utc(as_of)
+    if not _use_db:
+        cutoff = end - timedelta(days=days)
+        rows = [r for r in _memory_vitals.get(user_id, []) if cutoff < r["timestamp"] <= end]
+        return sorted(rows, key=lambda r: r["timestamp"])
+    try:
+        conn = _get_conn()
+    except psycopg2.pool.PoolError as e:
+        logger.warning("[db] load_vitals pool exhausted for %s: %s", user_id, e)
+        return []
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT time AS timestamp, systolic, diastolic, spo2_night_min, night_odi,
+                       alert_level, anomalies
+                FROM measured_vitals_time_series
+                WHERE user_id = %s
+                  AND time > %s::timestamptz - INTERVAL '1 day' * %s
+                  AND time <= %s::timestamptz
+                ORDER BY time ASC
+                """,
+                (user_id, end, days, end),
+            )
+            return [dict(r) for r in cur.fetchall()]
+    except psycopg2.errors.UndefinedTable:
+        conn.rollback()
+        logger.warning("[db] measured_vitals_time_series missing; BP/night rules inactive")
+        return []
     finally:
         _put_conn(conn)

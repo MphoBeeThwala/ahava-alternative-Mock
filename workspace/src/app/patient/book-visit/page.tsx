@@ -6,7 +6,7 @@ import RoleGuard, { UserRole } from '../../../components/RoleGuard';
 import DashboardLayout from '../../../components/DashboardLayout';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useToast } from '../../../contexts/ToastContext';
-import { bookingsApi } from '../../../lib/api';
+import { bookingsApi, placesApi, type AddressSuggestion } from '../../../lib/api';
 import { useVisitWebSocket } from '../../../hooks/useVisitWebSocket';
 
 const SERVICES = [
@@ -48,6 +48,14 @@ export default function BookVisitPage() {
   const [insuranceMemberNumber, setInsuranceMemberNumber] = useState('');
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [locError, setLocError] = useState('');
+  // Address search (Google, via the backend). Off unless the server says so;
+  // the plain address field and the device location always still work.
+  const [mapsOn, setMapsOn] = useState(false);
+  const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
+  const [pickedCoords, setPickedCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchSeq = useRef(0);
+  const sessionToken = useRef('');
   const [submitting, setSubmitting] = useState(false);
   const [bookingId, setBookingId] = useState<string | null>(null);
   const [accepted, setAccepted] = useState<IncomingAccept | null>(null);
@@ -92,6 +100,52 @@ export default function BookVisitPage() {
     }
   }, [step, accepted, router]);
 
+  // Is address search on? Failure just means "no": the manual field stays.
+  useEffect(() => {
+    placesApi.config().then((c) => setMapsOn(c.enabled)).catch(() => setMapsOn(false));
+    return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
+  }, []);
+
+  const newSessionToken = () =>
+    (typeof crypto !== 'undefined' && 'randomUUID' in crypto) ? crypto.randomUUID() : `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+
+  // Typing edits the address, so any previously picked place no longer applies.
+  // Debounced, 4+ characters, and stale answers are ignored: fewer lookups, lower cost.
+  const handleAddressChange = (value: string) => {
+    setAddress(value);
+    setPickedCoords(null);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    if (!mapsOn || value.trim().length < 4) { setSuggestions([]); return; }
+    if (!sessionToken.current) sessionToken.current = newSessionToken();
+    const seq = ++searchSeq.current;
+    searchTimer.current = setTimeout(async () => {
+      try {
+        const r = await placesApi.autocomplete(value.trim(), sessionToken.current);
+        if (seq === searchSeq.current) setSuggestions(r.available ? r.suggestions : []);
+      } catch {
+        if (seq === searchSeq.current) setSuggestions([]);
+      }
+    }, 450);
+  };
+
+  const pickSuggestion = async (s: AddressSuggestion) => {
+    setSuggestions([]);
+    searchSeq.current++;
+    try {
+      const r = await placesApi.details(s.placeId, sessionToken.current);
+      if (r.available && r.place) {
+        setAddress(r.place.address);
+        setPickedCoords({ lat: r.place.lat, lng: r.place.lng });
+      } else {
+        setAddress(s.text); // maps went away mid-way: keep the text, fall back to device location
+      }
+    } catch {
+      setAddress(s.text);
+    } finally {
+      sessionToken.current = ''; // a session ends with the lookup; the next search starts a new one
+    }
+  };
+
   const getLocation = () => {
     setLocError('');
     if (!navigator.geolocation) {
@@ -117,7 +171,10 @@ export default function BookVisitPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!coords) { toast.error('Please share your location first.'); return; }
+    // A picked address wins: the nurse is sent to the address the patient chose,
+    // not to wherever the phone happens to be (booking for someone else).
+    const bookingCoords = pickedCoords ?? coords;
+    if (!bookingCoords) { toast.error('Please share your location or pick your address from the suggestions.'); return; }
     if (!address.trim()) { toast.error('Please enter your address.'); return; }
     if (!scheduledDate) { toast.error('Please select a date and time.'); return; }
     if (paymentMethod === 'INSURANCE' && (!insuranceProvider.trim() || !insuranceMemberNumber.trim())) {
@@ -132,8 +189,8 @@ export default function BookVisitPage() {
         estimatedDuration: duration,
         paymentMethod,
         amountInCents: selectedDuration.price,
-        patientLat: coords.lat,
-        patientLng: coords.lng,
+        patientLat: bookingCoords.lat,
+        patientLng: bookingCoords.lng,
         ...(paymentMethod === 'INSURANCE' ? { insuranceProvider, insuranceMemberNumber } : {}),
       });
       setBookingId(result.booking?.id ?? null);
@@ -310,10 +367,29 @@ export default function BookVisitPage() {
                       type="text"
                       placeholder="e.g. 12 Sandton Drive, Sandton, 2196"
                       value={address}
-                      onChange={(e) => setAddress(e.target.value)}
+                      onChange={(e) => handleAddressChange(e.target.value)}
                       required
+                      autoComplete="off"
                       style={{ width: '100%', padding: '11px 14px', border: '1.5px solid var(--border)', borderRadius: 10, fontSize: 14, color: 'var(--foreground)', background: 'white', outline: 'none', boxSizing: 'border-box' }}
                     />
+                    {suggestions.length > 0 && (
+                      <ul role="listbox" aria-label="Address suggestions" style={{ listStyle: 'none', margin: '4px 0 0', padding: 0, border: '1.5px solid var(--border)', borderRadius: 10, background: 'white', overflow: 'hidden' }}>
+                        {suggestions.map((s) => (
+                          <li key={s.placeId} role="option" aria-selected={false}>
+                            <button
+                              type="button"
+                              onClick={() => pickSuggestion(s)}
+                              style={{ width: '100%', textAlign: 'left', padding: '10px 14px', background: 'white', border: 'none', borderBottom: '1px solid var(--border)', fontSize: 14, color: 'var(--foreground)', cursor: 'pointer' }}
+                            >
+                              📍 {s.text}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {pickedCoords && (
+                      <p style={{ fontSize: 12, color: '#059669', marginTop: 6, fontWeight: 600 }}>✓ Location set from this address</p>
+                    )}
                   </div>
 
                   {/* Location pin */}
@@ -374,10 +450,10 @@ export default function BookVisitPage() {
                 </div>
                 <button
                   type="submit"
-                  disabled={submitting || !coords}
-                  style={{ padding: '14px 32px', borderRadius: 14, background: coords ? 'linear-gradient(135deg,#0d9488,#059669)' : 'rgba(255,255,255,0.15)', border: 'none', color: 'white', fontSize: 16, fontWeight: 800, cursor: coords && !submitting ? 'pointer' : 'not-allowed', opacity: submitting ? 0.7 : 1, fontFamily: 'inherit', boxShadow: coords ? '0 4px 20px rgba(13,148,136,0.4)' : 'none', transition: 'all 0.2s' }}
+                  disabled={submitting || !(pickedCoords ?? coords)}
+                  style={{ padding: '14px 32px', borderRadius: 14, background: (pickedCoords ?? coords) ? 'linear-gradient(135deg,#0d9488,#059669)' : 'rgba(255,255,255,0.15)', border: 'none', color: 'white', fontSize: 16, fontWeight: 800, cursor: (pickedCoords ?? coords) && !submitting ? 'pointer' : 'not-allowed', opacity: submitting ? 0.7 : 1, fontFamily: 'inherit', boxShadow: (pickedCoords ?? coords) ? '0 4px 20px rgba(13,148,136,0.4)' : 'none', transition: 'all 0.2s' }}
                 >
-                  {submitting ? 'Booking…' : !coords ? '📍 Location required' : 'Find a Nurse →'}
+                  {submitting ? 'Booking…' : !(pickedCoords ?? coords) ? '📍 Location required' : 'Find a Nurse →'}
                 </button>
               </div>
 

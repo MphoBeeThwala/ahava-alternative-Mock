@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (early warning ignored measured blood pressure, 2026-10-15)
+- **A cuff-measured BP of 201/122 left the patient GREEN.** The ML engine only looked at wearable proxies (HR, HRV, daily SpO2); measured BP never reached it. Added `POST /ingest/bp` and a `measured_vitals_time_series` table, with rules for crisis range, stage 2, sustained home hypertension, rising BP, hypotension, and overnight oximetry (low nights, ODI). Thresholds are in `engine.py`; clinician sign-off rows 12-13 are pending.
+- **History windows were anchored on the wall clock, not the reading.** A back-filled or replayed reading saw no history, so baselines never formed (a 90-day replay produced its first flag on day 73). `load_biometrics` now takes `as_of`.
+- **BP-only submissions no longer feed invented HR 70 / HRV 50 / SpO2 98 defaults** into the wearable baseline.
+- **The risk charts now get sex, BMI and measured systolic** from the account and readings; before, they always reported them missing. The summary endpoint takes context per request (`POST /early-warning/summary/{user}`) because sex and BMI are deliberately not stored.
+- Backend fallback logic had unreachable branches (HR >120 and SpO2 <90 sat behind broader checks) and no BP crisis check; fixed.
+- Repeat alerts: a condition still present no longer raises a new alert on every reading (one per category per 7 days; escalation always alerts).
+- Dashboard showed a missing SpO2 as `0%` (`Number(null)`); each tile now shows its own latest value.
+- Early Warning page now lists what triggered the level ("What we found").
+- `ML_SERVICE_ALLOW_LOCALHOST=true` lets local dev use a local ML service (it was silently skipped whenever the URL contained "localhost").
+- `ml-db-role.ts` provisions and verifies the new table.
+
 ### Added (clinical reasoning pipeline, doctor-review drafts only)
 - **Structured, tiered clinical plan** replaces the flat triage answer: severity, leading diagnosis with probability, differential with evidence for/against, must-not-miss, investigations (bedside/stat, first 24 h, definitive), management (immediate, targeted, supportive), explicit continue/stop/modify decisions on existing treatment, timing decisions (e.g. ART), prophylaxis, escalation, and an answer to every question the case asks. Validated in code; an incomplete plan gets one targeted re-prompt (`AI_PLAN_REPAIR_ROUNDS`). Stored clinician-only in the new encrypted `aiStructuredPlan` column and never returned to patients.
 - **Deterministic checks** computed in code before the model reasons: MAP, qSOFA, Sepsis-3 shock, HLH-2004, HScore, corrected sodium, eGFR, CD4 triggers. Tri-state (met / not met / not assessable): a missing lactate is never read as normal. "Septic shock" is blocked unless the criteria are met.

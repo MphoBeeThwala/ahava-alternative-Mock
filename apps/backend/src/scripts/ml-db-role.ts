@@ -6,6 +6,7 @@
  * i.e. with read/write access to every table: triage notes, messages,
  * prescriptions, passwords, audit logs. It needs exactly:
  *   - biometric_time_series: SELECT, INSERT (its own vitals history)
+ *   - measured_vitals_time_series: SELECT, INSERT (cuff BP, overnight oximetry)
  *   - users: SELECT (id, "riskProfile"), UPDATE ("riskProfile")
  * and nothing else. Run with the OWNER connection string:
  *
@@ -44,7 +45,18 @@ CREATE TABLE IF NOT EXISTS biometric_time_series (
     alert_level  TEXT DEFAULT 'GREEN',
     anomalies    JSONB DEFAULT '[]'
 );
-CREATE INDEX IF NOT EXISTS bts_user_time_idx ON biometric_time_series (user_id, time DESC);`;
+CREATE INDEX IF NOT EXISTS bts_user_time_idx ON biometric_time_series (user_id, time DESC);
+CREATE TABLE IF NOT EXISTS measured_vitals_time_series (
+    time            TIMESTAMPTZ NOT NULL,
+    user_id         TEXT        NOT NULL,
+    systolic        DOUBLE PRECISION,
+    diastolic       DOUBLE PRECISION,
+    spo2_night_min  DOUBLE PRECISION,
+    night_odi       DOUBLE PRECISION,
+    alert_level     TEXT DEFAULT 'GREEN',
+    anomalies       JSONB DEFAULT '[]'
+);
+CREATE INDEX IF NOT EXISTS mvts_user_time_idx ON measured_vitals_time_series (user_id, time DESC);`;
 
 const ident = (name: string) => `"${name.replace(/"/g, '""')}"`;
 
@@ -79,8 +91,10 @@ export async function provisionMlRole(ownerUrl: string, roleName: string, passwo
       await tx.$executeRawUnsafe(`GRANT USAGE ON SCHEMA public TO ${role}`);
       // Start from nothing on the two tables, then grant exactly what's used.
       await tx.$executeRawUnsafe(`REVOKE ALL ON biometric_time_series FROM ${role}`);
+      await tx.$executeRawUnsafe(`REVOKE ALL ON measured_vitals_time_series FROM ${role}`);
       await tx.$executeRawUnsafe(`REVOKE ALL ON users FROM ${role}`);
       await tx.$executeRawUnsafe(`GRANT SELECT, INSERT ON biometric_time_series TO ${role}`);
+      await tx.$executeRawUnsafe(`GRANT SELECT, INSERT ON measured_vitals_time_series TO ${role}`);
       await tx.$executeRawUnsafe(`GRANT SELECT (id, "riskProfile"), UPDATE ("riskProfile") ON users TO ${role}`);
     });
   } finally {
@@ -99,6 +113,7 @@ export async function dropMlRole(ownerUrl: string, roleName: string): Promise<vo
     const [{ name }] = await db.$queryRawUnsafe<Array<{ name: string }>>('SELECT current_database() AS name');
     await db.$transaction([
       db.$executeRawUnsafe(`REVOKE ALL ON biometric_time_series FROM ${role}`),
+      db.$executeRawUnsafe(`REVOKE ALL ON measured_vitals_time_series FROM ${role}`),
       db.$executeRawUnsafe(`REVOKE ALL ON users FROM ${role}`),
       db.$executeRawUnsafe(`REVOKE USAGE ON SCHEMA public FROM ${role}`),
       db.$executeRawUnsafe(`REVOKE CONNECT ON DATABASE ${ident(name)} FROM ${role}`),
@@ -129,6 +144,8 @@ export async function verifyMlRole(mlUrl: string): Promise<{ ok: boolean; checks
       };
       await expect('read biometric_time_series', 'SELECT count(*)::int AS n FROM biometric_time_series', true);
       await expect('insert biometric_time_series', `INSERT INTO biometric_time_series (time, user_id) VALUES (now(), '__ml_role_probe__') RETURNING user_id`, true);
+      await expect('read measured_vitals_time_series', 'SELECT count(*)::int AS n FROM measured_vitals_time_series', true);
+      await expect('insert measured_vitals_time_series', `INSERT INTO measured_vitals_time_series (time, user_id) VALUES (now(), '__ml_role_probe__') RETURNING user_id`, true);
       await expect('read users.riskProfile', 'SELECT id, "riskProfile" FROM users LIMIT 1', true);
       await expect('update users.riskProfile', `UPDATE users SET "riskProfile" = "riskProfile" WHERE id = '__none__' RETURNING id`, true);
       await expect('no users.email / passwordHash', 'SELECT email, "passwordHash" FROM users LIMIT 1', false);

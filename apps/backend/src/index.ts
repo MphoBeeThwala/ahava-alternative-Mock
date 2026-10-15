@@ -17,6 +17,7 @@ import authRoutes from "./routes/auth";
 import twoFactorRoutes from "./routes/twoFactor";
 import googleAuthRoutes from "./routes/googleAuth";
 import bookingRoutes from "./routes/bookings";
+import placesRoutes from "./routes/places";
 import visitRoutes from "./routes/visits";
 import messageRoutes from "./routes/messages";
 import paymentRoutes from "./routes/payments";
@@ -222,6 +223,7 @@ app.use(`${API_V1}/auth`, authRoutes);
 app.use(`${API_V1}/auth/2fa`, twoFactorRoutes);
 app.use(`${API_V1}/auth/google`, googleAuthRoutes);
 app.use(`${API_V1}/bookings`, authMiddleware, bookingRoutes);
+app.use(`${API_V1}/places`, authMiddleware, placesRoutes);
 app.use(`${API_V1}/visits`, authMiddleware, visitRoutes);
 app.use(`${API_V1}/messages`, authMiddleware, messageRoutes);
 // NOTE: no app-level auth on payments - the PayFast ITN webhook is a

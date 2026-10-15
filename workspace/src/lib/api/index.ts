@@ -6,6 +6,7 @@ export * from './client';
 export * from './auth';
 export * from './patient';
 export * from './bookings';
+export * from './places';
 export * from './visits';
 export * from './nurse';
 export * from './doctor';

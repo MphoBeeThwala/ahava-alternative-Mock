@@ -33,6 +33,8 @@ import { useOfflineBiometricSync } from '../../../hooks/useOfflineBiometricSync'
 type Reading = Record<string, unknown>;
 
 function num(v: unknown): number | undefined {
+    // Number(null) is 0, which would show a missing metric as a real zero.
+    if (v == null || v === '') return undefined;
     const n = Number(v);
     return Number.isFinite(n) ? n : undefined;
 }
@@ -188,18 +190,27 @@ export default function PatientDashboard() {
     // ---- Derived, real-data-only values (see docs/UI_UX_IMPLEMENTATION_BRIEF.md §1.1) ----
 
     const latest = biometricHistory[0];
-    const previous = biometricHistory[1];
     const chronological = useMemo(() => [...biometricHistory].reverse(), [biometricHistory]);
     const hrSeries = useMemo(() => chronological.map((r) => num(r.heartRate ?? r.heartRateResting)).filter((v): v is number => v != null), [chronological]);
     const spo2Series = useMemo(() => chronological.map((r) => num(r.oxygenSaturation)).filter((v): v is number => v != null), [chronological]);
     const bpSeries = useMemo(() => chronological.map((r) => num(r.bloodPressureSystolic)).filter((v): v is number => v != null), [chronological]);
 
-    const latestHr = num(latest?.heartRate ?? latest?.heartRateResting);
-    const previousHr = num(previous?.heartRate ?? previous?.heartRateResting);
-    const latestSpo2 = num(latest?.oxygenSaturation);
-    const previousSpo2 = num(previous?.oxygenSaturation);
-    const latestBpSys = num(latest?.bloodPressureSystolic);
-    const latestBpDia = num(latest?.bloodPressureDiastolic);
+    // Not every reading carries every metric (a cuff-only reading has no SpO2),
+    // so each tile shows its own most recent value and compares with the one before.
+    const lastTwo = (get: (r: Reading) => unknown): [number | undefined, number | undefined] => {
+        const vals: number[] = [];
+        for (const r of biometricHistory) {
+            const v = num(get(r));
+            if (v != null) vals.push(v);
+            if (vals.length === 2) break;
+        }
+        return [vals[0], vals[1]];
+    };
+    const [latestHr, previousHr] = lastTwo((r) => r.heartRate ?? r.heartRateResting);
+    const [latestSpo2, previousSpo2] = lastTwo((r) => r.oxygenSaturation);
+    const latestBpRow = biometricHistory.find((r) => num(r.bloodPressureSystolic) != null);
+    const latestBpSys = num(latestBpRow?.bloodPressureSystolic);
+    const latestBpDia = num(latestBpRow?.bloodPressureDiastolic);
 
     const formatDelta = (curr: number | undefined, prev: number | undefined, unit: string): { text: string; tone: 'up' | 'down' | 'neutral' } | undefined => {
         if (curr == null || prev == null) return undefined;

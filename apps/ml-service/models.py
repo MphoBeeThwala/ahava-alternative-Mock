@@ -21,6 +21,26 @@ class BiometricData(BaseModel):
     sleep_duration_hours: float = Field(0.0, ge=0, le=24, description="Sleep duration (hours/night)")
     ecg_rhythm: Literal["regular", "irregular", "unknown"] = Field("unknown", description="Single-lead ECG rhythm")
     temperature_trend: Literal["normal", "elevated_single_day", "elevated_over_3_days"] = Field("normal", description="Temperature trend over recent days")
+    # Overnight oximetry, when the device reports it (sleep-disordered-breathing rules).
+    spo2_night_min: Optional[float] = Field(None, ge=50, le=100, description="Lowest SpO2 overnight (%)")
+    night_odi_per_hr: Optional[float] = Field(None, ge=0, le=150, description="Oxygen desaturation index (events/hour)")
+
+class BpReading(BaseModel):
+    """A directly measured (cuff) blood-pressure reading: the mean of the
+    protocol's paired readings. Never inferred from HR/HRV."""
+    timestamp: datetime = Field(..., description="ISO 8601 time of measurement")
+    systolic: float = Field(..., ge=50, le=300, description="Systolic (mmHg)")
+    diastolic: float = Field(..., ge=30, le=200, description="Diastolic (mmHg)")
+
+class BpAssessment(BaseModel):
+    """Summary of measured BP as of the reading's timestamp."""
+    readings_7d: int = 0
+    latest_systolic: Optional[float] = None
+    latest_diastolic: Optional[float] = None
+    mean_systolic_7d: Optional[float] = None
+    mean_diastolic_7d: Optional[float] = None
+    level: Literal["GREEN", "YELLOW", "RED"] = "GREEN"
+    flags: List[str] = Field(default_factory=list)
 
 class ContextualProfile(BaseModel):
     """Contextual inputs for CVD risk (WHO 2019 chart). POPIA: store minimally.
@@ -232,6 +252,7 @@ class EarlyWarningSummary(BaseModel):
     cvd_risk: CvdRiskAssessment
     framingham_lab_risk: FraminghamLabRiskAssessment
     bp_risk: BpRiskAssessment
+    bp_assessment: Optional[BpAssessment] = None
     fusion: FusionOutput
     # Clinical flags
     clinical_flags: List[str] = []
