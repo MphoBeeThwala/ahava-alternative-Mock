@@ -205,8 +205,15 @@ def _ensure_vitals_table(conn) -> None:
     the table must already exist (apps/backend/src/scripts/ml-db-role.ts)."""
     try:
         with conn.cursor() as cur:
+            # Every uvicorn worker runs this at import. Without a lock, two workers
+            # both pass the existence check and race in CREATE TABLE, and the loser
+            # fails with a pg_type duplicate-key error. The advisory lock makes the
+            # check-then-create atomic across workers and replicas; it is released
+            # at commit/rollback.
+            cur.execute("SELECT pg_advisory_xact_lock(727001)")
             cur.execute("SELECT to_regclass('public.measured_vitals_time_series') IS NOT NULL")
             if bool(cur.fetchone()[0]):
+                conn.commit()
                 return
             cur.execute(VITALS_SQL)
         conn.commit()
