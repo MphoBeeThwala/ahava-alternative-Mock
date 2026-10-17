@@ -34,7 +34,13 @@ const submitBiometricsSchema = Joi.object({
   bloodPressure: Joi.object({
     systolic: Joi.number().min(50).max(250).required(),
     diastolic: Joi.number().min(30).max(150).required(),
-  }).optional(),
+  })
+    // A transposed or mistyped pair (e.g. 100/125) is a data-entry error: ask for a
+    // re-measure instead of treating the diastolic as a crisis-range reading.
+    .custom((v, helpers) =>
+      v.systolic > v.diastolic ? v : helpers.message({ custom: "Systolic must be higher than diastolic. Please re-check the reading." }),
+    )
+    .optional(),
   oxygenSaturation: Joi.number().min(50).max(100).optional(), // SpO2
   temperature: Joi.number().min(30).max(45).optional(), // Celsius
   respiratoryRate: Joi.number().min(4).max(60).optional(), // Breaths per minute

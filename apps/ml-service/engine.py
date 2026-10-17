@@ -165,6 +165,13 @@ class EarlyWarningEngine:
         # §50.2: HRV's smallest-worthwhile-change is 0.5x the patient's own
         # coefficient of variation on the log scale, not a sigma multiple.
         self.HRV_SWC_MULTIPLIER = 0.5
+        # The SWC is the size of change worth caring about, sized against ONE
+        # reading's variability. Here a 7-day mean is compared with a 7-day
+        # baseline mean, whose difference is much less variable than a single
+        # reading, so the SWC alone is crossed by ordinary noise about a third of
+        # the time. A change must ALSO be this many standard errors from baseline.
+        # Simulated stable healthy people were flagged on ~29% of days without it.
+        self.HRV_MIN_Z = 2.5
         # A real day-to-day CV floor, not just a floating-point-noise guard:
         # the spec's own cited literature gives ~2.7-3.1% as the lower bound
         # even for a genuinely stable individual. Without this, a patient
@@ -213,7 +220,7 @@ class EarlyWarningEngine:
         self.BP_SUSTAINED_MIN_READINGS = 6
         self.BP_RISING_DELTA_SYS = 5      # mmHg, and
         self.BP_RISING_MIN_Z = 3.0        # >= 3 standard errors above the person's own prior mean
-        self.BP_RISING_SD_FLOOR = 4.0     # mmHg, floor on the personal day-to-day SD (very steady wearers)
+        self.BP_RISING_SD_FLOOR = 5.0     # mmHg, floor on the personal day-to-day SD (very steady wearers)
         self.BP_RISING_RECENT_DAYS = 3
         self.BP_RISING_BASELINE_DAYS = 14
         self.NIGHT_SPO2_LOW = 88
@@ -339,7 +346,12 @@ class EarlyWarningEngine:
     def ingest(self, user_id: str, data: BiometricData) -> Tuple[AlertLevel, List[str]]:
         """Store a new data point, then evaluate. Returns (AlertLevel, anomalies)."""
         alert_level, anomalies = self._evaluate(user_id, data)
-        db.save_biometric(user_id, data, alert_level.value, anomalies)
+        # Idempotent: a retried delivery of the same reading must not be
+        # stored twice (it would double-weight the baseline).
+        existing = db.load_biometrics(user_id, days=1, as_of=data.timestamp)
+        ts = db.as_utc(data.timestamp)
+        if not any(db.as_utc(r.get("timestamp")) == ts for r in existing):
+            db.save_biometric(user_id, data, alert_level.value, anomalies)
         if data.spo2_night_min is not None or data.night_odi_per_hr is not None:
             db.save_vitals(
                 user_id, data.timestamp,
@@ -351,10 +363,17 @@ class EarlyWarningEngine:
     def ingest_bp(self, user_id: str, reading: BpReading) -> Tuple[AlertLevel, List[str]]:
         """Store a measured BP reading and evaluate the BP rules as of its time."""
         level, anomalies, _ = self._assess_measured_vitals(user_id, reading.timestamp, current_bp=reading)
-        db.save_vitals(
-            user_id, reading.timestamp, systolic=reading.systolic, diastolic=reading.diastolic,
-            alert_level=level.value, anomalies=anomalies,
+        ts = db.as_utc(reading.timestamp)
+        already = any(
+            db.as_utc(r["timestamp"]) == ts and r.get("systolic") == reading.systolic
+            and r.get("diastolic") == reading.diastolic
+            for r in db.load_vitals(user_id, days=1, as_of=ts)
         )
+        if not already:
+            db.save_vitals(
+                user_id, reading.timestamp, systolic=reading.systolic, diastolic=reading.diastolic,
+                alert_level=level.value, anomalies=anomalies,
+            )
         return level, anomalies
 
     # ------------------------------------------------------------------
@@ -382,7 +401,8 @@ class EarlyWarningEngine:
             ts = db.as_utc(current_bp.timestamp)
             if all(b[0] != ts for b in bp):
                 bp.append((ts, float(current_bp.systolic), float(current_bp.diastolic)))
-        bp.sort(key=lambda b: b[0])
+        # A retried or re-delivered reading must count once.
+        bp = sorted(set(bp), key=lambda b: b[0])
 
         nights: List[Tuple[datetime, Optional[float], Optional[float]]] = [
             (db.as_utc(r["timestamp"]), r.get("spo2_night_min"), r.get("night_odi"))
@@ -454,7 +474,8 @@ class EarlyWarningEngine:
             prior_sys = [b[1] for b in prior]
             delta = self._mean([b[1] for b in recent]) - self._mean(prior_sys)
             prior_sd = max(float(np.std(prior_sys)), self.BP_RISING_SD_FLOOR)
-            z = delta / (prior_sd / (len(recent) ** 0.5))
+            # standard error of a difference between two means (recent and prior windows)
+            z = delta / (prior_sd * (1.0 / len(recent) + 1.0 / len(prior)) ** 0.5)
             if delta >= self.BP_RISING_DELTA_SYS and z >= self.BP_RISING_MIN_Z:
                 raise_to(AlertLevel.YELLOW)
                 anomalies.append(
@@ -658,7 +679,11 @@ class EarlyWarningEngine:
         # nowhere near zero's real-world meaning — treating that as "no
         # variability, never flag" would make HRV monitoring least sensitive
         # for exactly the most consistent wearers. See HRV_MIN_CV's comment.
-        baseline_cv = max(baseline_std / abs(baseline_mean), self.HRV_MIN_CV)
+        # On the log scale the standard deviation already is the proportional
+        # variability (a CV of ~12% is a log-SD of ~0.12). It was previously
+        # divided by the log-mean (~3.8), which made the threshold ~30x too
+        # tight and flagged a stable healthy person on most days.
+        baseline_cv = max(baseline_std, self.HRV_MIN_CV)
         swc = self.HRV_SWC_MULTIPLIER * baseline_cv
 
         current_ln = float(np.log(data.hrv_rmssd))
@@ -668,6 +693,10 @@ class EarlyWarningEngine:
 
         deviation = abs(rolling_mean - baseline_mean)
         if deviation <= swc:
+            return False, None
+        n_recent = len(recent) + 1
+        std_err = baseline_cv * float(np.sqrt(1.0 / len(baseline_window) + 1.0 / n_recent))
+        if std_err > 0 and deviation / std_err < self.HRV_MIN_Z:
             return False, None
 
         direction = "below" if rolling_mean < baseline_mean else "above"

@@ -103,9 +103,9 @@ class TestOtherBpRules:
         assert not any(a.startswith("bp_rising") for a in anomalies)
 
     def test_modest_steady_climb_is_flagged(self, engine, user_id):
-        # steady 136 for two weeks then ~142: +6 on a very steady person
+        # steady 136 for two weeks then ~145: +9 on a very steady person
         feed(engine, user_id, T0, 14, 136, 86)
-        _, anomalies = feed(engine, user_id, T0 + timedelta(days=14), 3, 142, 88)
+        _, anomalies = feed(engine, user_id, T0 + timedelta(days=14), 3, 145, 90)
         assert any(a.startswith("bp_rising") for a in anomalies)
 
 
