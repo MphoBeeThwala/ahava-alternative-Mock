@@ -44,6 +44,7 @@ _pool: Optional[psycopg2.pool.ThreadedConnectionPool] = None
 # this service silently falls back to in-memory history. So the size is derived
 # from a budget PER REPLICA instead, divided among that replica's workers.
 DEFAULT_CONNECTIONS_PER_REPLICA = 20
+DEFAULT_WARM_CONNECTIONS = 4  # idle connections kept open per worker (see pool_settings)
 
 
 def _whole_number(env, name: str, default: int, warnings: List[str]) -> int:
@@ -70,7 +71,13 @@ def pool_settings(env=None) -> dict:
     derived_max = max(1, budget // workers)
     explicit_max = (env.get("ML_DB_POOL_MAX") or "").strip() != ""
     max_conn = _whole_number(env, "ML_DB_POOL_MAX", derived_max, warnings)
-    min_conn = min(_whole_number(env, "ML_DB_POOL_MIN", 1, warnings), max_conn)
+    # psycopg2 keeps only `minconn` connections idle and CLOSES any other connection
+    # as soon as it is returned. With minconn=1, every request beyond the first
+    # concurrent one opened and closed a fresh connection: measured 18x lower
+    # throughput at 12 concurrent requests (48 vs 850 req/s) and multi-second
+    # tails. A small warm floor fixes that and still never exceeds the budget,
+    # because it is capped at the per-worker maximum.
+    min_conn = min(_whole_number(env, "ML_DB_POOL_MIN", min(derived_max, DEFAULT_WARM_CONNECTIONS), warnings), max_conn)
     if workers > budget:
         warnings.append(
             f"{workers} workers exceed the connection budget of {budget} per replica; each gets 1 connection, "

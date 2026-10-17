@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (found by adversarial and load testing of the ML engine, 2026-10-17)
+- **HRV rule flagged a stable, healthy person on ~29% of days.** The smallest-worthwhile-change used std/mean on the log scale (~30x too small) and ignored that a 7-day mean was being compared with a 7-day baseline. Now CV = std(ln HRV) and a shift must also be >= 2.5 standard errors; flag rate in a simulated healthy cohort falls to ~5%. **Needs clinician re-confirmation (sign-off row 14).**
+- **Retried deliveries counted twice**: a repeated BP reading inflated the 7-day reading count and could raise "sustained hypertension" early; a repeated wearable reading double-weighted the baseline. Saves are now idempotent and BP readings are de-duplicated.
+- **Transposed BP (100/125) was treated as a crisis**; it is now rejected (ML 422, backend 400) so the person re-measures. Readings stamped more than 24h in the future (device clock error) are rejected.
+- **Rising-BP rule** used the wrong standard error (one window, not two); false "rising" flags in healthy simulations fixed.
+- **Database connection churn under concurrency**: the pool kept 1 idle connection and closed the rest on return, so concurrent requests each opened a new connection (48 vs 850 requests/s at 12 concurrent in-process). Default warm floor is now 4 per worker, capped at the per-worker budget.
+- New: `tests/test_engine_hardening.py` (boundaries, randomised monotonicity, retries, out-of-order, specificity/sensitivity over simulated 90 days) and `scripts/canary.py` (live canary and load test for any ML URL).
+
 ### Fixed (early warning ignored measured blood pressure, 2026-10-15)
 - **A cuff-measured BP of 201/122 left the patient GREEN.** The ML engine only looked at wearable proxies (HR, HRV, daily SpO2); measured BP never reached it. Added `POST /ingest/bp` and a `measured_vitals_time_series` table, with rules for crisis range, stage 2, sustained home hypertension, rising BP, hypotension, and overnight oximetry (low nights, ODI). Thresholds are in `engine.py`; clinician sign-off rows 12-13 are pending.
 - **History windows were anchored on the wall clock, not the reading.** A back-filled or replayed reading saw no history, so baselines never formed (a 90-day replay produced its first flag on day 73). `load_biometrics` now takes `as_of`.

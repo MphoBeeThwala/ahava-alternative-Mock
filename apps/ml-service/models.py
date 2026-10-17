@@ -1,7 +1,17 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator, field_validator
 from typing import List, Optional, Literal
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from enum import Enum
+
+def _not_in_the_future(ts: datetime) -> datetime:
+    """A device with a wrong clock would otherwise stamp readings far ahead,
+    become 'the latest reading' forever, and skew every later window."""
+    now = datetime.now(timezone.utc)
+    t = ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else ts
+    if t > now + timedelta(hours=24):
+        raise ValueError("timestamp is more than 24h in the future (device clock error?)")
+    return ts
+
 
 class AlertLevel(str, Enum):
     GREEN = "GREEN"     # Normal
@@ -25,12 +35,24 @@ class BiometricData(BaseModel):
     spo2_night_min: Optional[float] = Field(None, ge=50, le=100, description="Lowest SpO2 overnight (%)")
     night_odi_per_hr: Optional[float] = Field(None, ge=0, le=150, description="Oxygen desaturation index (events/hour)")
 
+    _ts = field_validator("timestamp")(_not_in_the_future)
+
 class BpReading(BaseModel):
     """A directly measured (cuff) blood-pressure reading: the mean of the
     protocol's paired readings. Never inferred from HR/HRV."""
     timestamp: datetime = Field(..., description="ISO 8601 time of measurement")
     systolic: float = Field(..., ge=50, le=300, description="Systolic (mmHg)")
     diastolic: float = Field(..., ge=30, le=200, description="Diastolic (mmHg)")
+
+    _ts = field_validator("timestamp")(_not_in_the_future)
+
+    @model_validator(mode="after")
+    def _systolic_above_diastolic(self):
+        # A transposed or mistyped pair (100/125) is a data error, not a crisis:
+        # reject it so the person re-measures instead of being alarmed.
+        if self.systolic <= self.diastolic:
+            raise ValueError("systolic must be greater than diastolic")
+        return self
 
 class BpAssessment(BaseModel):
     """Summary of measured BP as of the reading's timestamp."""

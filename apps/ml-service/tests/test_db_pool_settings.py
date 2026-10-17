@@ -19,15 +19,15 @@ def test_the_default_replica_budget_is_modest():
     assert DEFAULT_CONNECTIONS_PER_REPLICA == 20
 
 
-def test_one_worker_with_no_settings_gets_the_whole_budget_and_opens_one_connection_at_start():
+def test_one_worker_with_no_settings_gets_the_whole_budget_and_keeps_a_small_warm_floor():
     c = cfg()
-    assert (c["min"], c["max"], c["workers"], c["warnings"]) == (1, 20, 1, [])
+    assert (c["min"], c["max"], c["workers"], c["warnings"]) == (4, 20, 1, [])
 
 
 @pytest.mark.parametrize("workers,expected_max", [(2, 10), (3, 6), (4, 5), (8, 2), (20, 1)])
 def test_the_budget_is_shared_out_among_the_workers(workers, expected_max):
     c = cfg(ML_SERVICE_WORKERS=workers)
-    assert c["max"] == expected_max and c["min"] == 1 and c["warnings"] == []
+    assert c["max"] == expected_max and c["min"] == min(expected_max, 4) and c["warnings"] == []
 
 
 def test_adding_workers_can_never_add_connections():
@@ -90,5 +90,16 @@ def test_the_real_pool_is_created_with_the_computed_sizes(monkeypatch):
     for var in ("ML_DB_POOL_MIN", "ML_DB_POOL_MAX", "ML_DB_CONNECTIONS_PER_REPLICA"):
         monkeypatch.delenv(var, raising=False)
     db._get_pool()
-    assert seen == {"minconn": 1, "maxconn": 2, "dsn": "postgresql://x/y"}
+    assert seen == {"minconn": 2, "maxconn": 2, "dsn": "postgresql://x/y"}
     monkeypatch.setattr(db, "_pool", None)  # leave no fake behind for other tests
+
+
+def test_the_warm_floor_never_pushes_a_replica_over_its_connection_budget():
+    for workers in range(1, 25):
+        c = cfg(ML_SERVICE_WORKERS=workers)
+        assert workers * c["min"] <= max(DEFAULT_CONNECTIONS_PER_REPLICA, workers), workers
+
+
+def test_under_concurrency_most_requests_reuse_a_connection_instead_of_opening_one():
+    """The regression behind the load-test finding: with minconn=1, psycopg2 closes every extra connection on return."""
+    assert cfg(ML_SERVICE_WORKERS=1)["min"] >= 4
