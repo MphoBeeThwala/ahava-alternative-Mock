@@ -27,6 +27,17 @@ export interface MonitoringResult {
   recommendations: string[];
 }
 
+type Level = "GREEN" | "YELLOW" | "RED";
+const LEVEL_RANK: Record<Level, number> = { GREEN: 0, YELLOW: 1, RED: 2 };
+const worst = (a: Level, b: Level): Level =>
+  LEVEL_RANK[b] > LEVEL_RANK[a] ? b : a;
+
+// Informational notes the engine puts in `anomalies`; they are not findings.
+const NOTE_PREFIX = /^(Suppressed|No history yet|Exercise context)/;
+const dedupe = (items: string[]): string[] => [
+  ...new Set(items.filter((a) => !NOTE_PREFIX.test(a))),
+];
+
 /**
  * Process biometric reading through early warning system
  */
@@ -61,20 +72,38 @@ export async function processBiometricReading(
       bpAnomalies = bpRes.data.anomalies || [];
     }
 
-    if (!hasWearableVitals) {
+    // The ML baseline needs a complete wearable set. A partial submission (say
+    // a manual heart rate, or a SpO2 from a fingertip oximeter) must not be
+    // padded with made-up HRV/SpO2/RR values and stored as if the device had
+    // measured them: that corrupts the person's baseline and can hide a real
+    // abnormal value. Check what was actually provided against the absolute
+    // thresholds instead, and leave the ML history alone.
+    const hr = biometricData.heartRateResting ?? biometricData.heartRate;
+    const completeWearableSet =
+      hr != null &&
+      biometricData.hrvRmssd != null &&
+      biometricData.oxygenSaturation != null &&
+      biometricData.respiratoryRate != null;
+
+    if (!completeWearableSet) {
+      const partial = hasWearableVitals
+        ? fallbackAnalysis({ ...biometricData, bloodPressure: undefined })
+        : null;
+      const level = worst(bpLevel, partial?.alertLevel ?? "GREEN");
+      const found = dedupe([...bpAnomalies, ...(partial?.anomalies ?? [])]);
       const scoreRes = await axios.get(
         `${ML_SERVICE_URL}/readiness-score/${userId}`,
         { timeout: 5000, headers: mlServiceHeaders() },
       );
       const baselineStatus = scoreRes.data.baseline_status || "STABLE";
       return {
-        alertLevel: bpLevel,
-        anomalies: bpAnomalies,
+        alertLevel: level,
+        anomalies: found,
         readinessScore: scoreRes.data.score ?? 100,
         baselineStatus,
         recommendations: generateRecommendations(
-          bpLevel,
-          bpAnomalies,
+          level,
+          found,
           baselineStatus,
           biometricData,
         ),
@@ -112,16 +141,17 @@ export async function processBiometricReading(
       },
     );
 
-    const rank = { GREEN: 0, YELLOW: 1, RED: 2 } as const;
     const wearableLevel = mlResponse.data.alert_level as
       | "GREEN"
       | "YELLOW"
       | "RED";
-    const alertLevel = rank[bpLevel] > rank[wearableLevel] ? bpLevel : wearableLevel;
-    const anomalies: string[] = [
+    const alertLevel = worst(bpLevel, wearableLevel);
+    // The wearable evaluation already includes the measured-BP rules as of this
+    // time, so the same finding can arrive twice; list it once.
+    const anomalies: string[] = dedupe([
       ...(mlResponse.data.anomalies || []),
       ...bpAnomalies,
-    ];
+    ]);
 
     // Get readiness score
     const scoreResponse = await axios.get(
@@ -132,7 +162,8 @@ export async function processBiometricReading(
       },
     );
 
-    const readinessScore = scoreResponse.data.score || 100;
+    // ?? not ||: a score of 0 (the worst) must not read as 100 (the best).
+    const readinessScore = scoreResponse.data.score ?? 100;
     const baselineStatus = scoreResponse.data.baseline_status || "STABLE";
 
     // Generate recommendations based on alert level and actual biometric values
@@ -302,7 +333,7 @@ export function fallbackAnalysis(biometricData: any): MonitoringResult {
   // Basic threshold checks
   const heartRate = biometricData.heartRateResting || biometricData.heartRate;
   if (heartRate) {
-    if (heartRate > 120) {
+    if (heartRate >= 130) {
       anomalies.push("Significantly elevated heart rate");
       alertLevel = "RED";
     } else if (heartRate > 100) {
@@ -312,7 +343,7 @@ export function fallbackAnalysis(biometricData: any): MonitoringResult {
   }
 
   if (biometricData.oxygenSaturation) {
-    if (biometricData.oxygenSaturation < 90) {
+    if (biometricData.oxygenSaturation <= 91) {
       anomalies.push("Critically low oxygen saturation");
       alertLevel = "RED";
     } else if (biometricData.oxygenSaturation < 95) {
@@ -474,7 +505,7 @@ export async function getMonitoringSummary(userId: string): Promise<{
     const recentReadings = readings.slice(-7);
     if (recentReadings.length > 0) {
       const avgScore =
-        recentReadings.reduce((sum, r) => sum + (r.readinessScore || 100), 0) /
+        recentReadings.reduce((sum, r) => sum + (r.readinessScore ?? 100), 0) /
         recentReadings.length;
       currentReadinessScore = Math.round(avgScore);
     }
@@ -500,7 +531,7 @@ export async function getMonitoringSummary(userId: string): Promise<{
   }
 
   // Calculate trend
-  const recentScores = readings.slice(-14).map((r) => r.readinessScore || 100);
+  const recentScores = readings.slice(-14).map((r) => r.readinessScore ?? 100);
   let trend: "STABLE" | "IMPROVING" | "DECLINING" = "STABLE";
   if (recentScores.length >= 7) {
     const firstHalf = recentScores.slice(0, 7).reduce((a, b) => a + b, 0) / 7;

@@ -220,6 +220,8 @@ class EarlyWarningEngine:
         self.NIGHT_SPO2_LOW_NIGHTS = 3
         self.NIGHT_ODI_YELLOW = 15
         self.NIGHT_ODI_MIN_NIGHTS = 4
+        self.READINESS_CAP_RED = 40
+        self.READINESS_CAP_YELLOW = 75
         self.VITALS_WINDOW_DAYS = self.BP_RISING_RECENT_DAYS + self.BP_RISING_BASELINE_DAYS + 1
 
     def _absolute_floor(self, data: BiometricData) -> Tuple[AlertLevel, List[str]]:
@@ -443,7 +445,7 @@ class EarlyWarningEngine:
             raise_to(AlertLevel.YELLOW)
             anomalies.append(
                 f"bp_sustained_elevated: 7-day mean {mean_sys:.0f}/{mean_dia:.0f} mmHg over {len(last7)} readings "
-                f"(>={self.BP_HOME_HTN_SYS}/{self.BP_HOME_HTN_DIA} home threshold) - book a GP review for hypertension"
+                f"(home hypertension is a mean of {self.BP_HOME_HTN_SYS}+ systolic or {self.BP_HOME_HTN_DIA}+ diastolic) - book a GP review for hypertension"
             )
 
         recent = [b for b in bp if hours(b[0]) <= self.BP_RISING_RECENT_DAYS * 24]
@@ -786,12 +788,28 @@ class EarlyWarningEngine:
         latest = db.load_latest_biometric(user_id)
         if not latest:
             return 75, "PROVISIONAL", "STABLE"
-        _, anomalies = self._evaluate(user_id, _dict_to_biometric(latest))
-        score = 100 - min(100, len(anomalies) * 15)
+        level, anomalies = self._evaluate(user_id, _dict_to_biometric(latest))
+        # Informational notes ("Suppressed: ...", "No history yet ...", the
+        # not-reassuring SpO2 band) are not findings and must not cost points.
+        findings = [a for a in anomalies if not self._is_informational(a)]
+        score = 100 - min(100, len(findings) * 15)
+        # A display heuristic, not a clinical measure: the score may never
+        # contradict the alert level (a crisis-range BP must not read 85/100).
+        if level == AlertLevel.RED:
+            score = min(score, self.READINESS_CAP_RED)
+        elif level == AlertLevel.YELLOW:
+            score = min(score, self.READINESS_CAP_YELLOW)
         history = db.load_biometrics(user_id, days=14)
         trend = self._calculate_trend(history)
         info  = self.get_baseline_info(user_id)
         return max(0, score), info["stage"], trend
+
+    @staticmethod
+    def _is_informational(anomaly: str) -> bool:
+        return (
+            anomaly.startswith(("Suppressed", "No history yet", "Exercise context"))
+            or "is indeterminate" in anomaly
+        )
 
     def _calculate_trend(self, history: List[dict]) -> str:
         if len(history) < 7:

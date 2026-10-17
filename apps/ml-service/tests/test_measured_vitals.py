@@ -147,3 +147,23 @@ class TestFullAnalysis:
         assert summary.bp_assessment.level == "YELLOW"
         assert summary.alert_level == AlertLevel.YELLOW
         assert "bp_sustained_elevated" in summary.bp_assessment.flags
+
+
+class TestReadinessScore:
+    def test_informational_notes_do_not_cost_points(self, engine, user_id, make_biometric):
+        # a normal first reading yields only the "No history yet" note
+        engine.ingest(user_id, make_biometric(timestamp=T0))
+        score, _, _ = engine.get_readiness_score(user_id)
+        assert score == 100
+
+    def test_yellow_is_capped_at_75(self, engine, user_id, make_biometric):
+        bp(engine, user_id, T0, 165, 98)  # stage 2: one finding (85) but a YELLOW level
+        engine.ingest(user_id, make_biometric(timestamp=T0 + timedelta(minutes=1)))
+        score, _, _ = engine.get_readiness_score(user_id)
+        assert score == 75
+
+    def test_score_never_contradicts_alert_level(self, engine, user_id, make_biometric):
+        bp(engine, user_id, T0, 205, 125)  # one crisis finding would otherwise be 85
+        engine.ingest(user_id, make_biometric(timestamp=T0 + timedelta(minutes=1)))
+        score, _, _ = engine.get_readiness_score(user_id)
+        assert score <= 40
