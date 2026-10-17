@@ -112,6 +112,24 @@ router.get("/", requireVerifiedDoctor, async (req: AuthenticatedRequest, res, ne
         })
       ).map((g) => g.patientId),
     );
+    // The flag is usually about blood pressure, so show it. The newest reading
+    // is often a wearable-only row with no BP, so take the latest BP row separately.
+    const latestBpRows = await prisma.biometricReading.findMany({
+      where: {
+        userId: { in: flaggedIds },
+        bloodPressureSystolic: { not: null },
+        bloodPressureDiastolic: { not: null },
+      },
+      distinct: ["userId"],
+      orderBy: [{ userId: "asc" }, { createdAt: "desc" }],
+      select: {
+        userId: true,
+        createdAt: true,
+        bloodPressureSystolic: true,
+        bloodPressureDiastolic: true,
+      },
+    });
+    const latestBp = new Map(latestBpRows.map((b) => [b.userId, b]));
     const unassigned = flagged
       .filter((r) => !mine.has(r.userId) && !heldByOthers.has(r.userId))
       .map((r) => ({
@@ -166,6 +184,13 @@ router.get("/", requireVerifiedDoctor, async (req: AuthenticatedRequest, res, ne
         heartRateResting: r.heartRateResting,
         hrvRmssd: r.hrvRmssd,
         oxygenSaturation: r.oxygenSaturation,
+        latestBloodPressure: latestBp.get(r.userId)
+          ? {
+              systolic: latestBp.get(r.userId)!.bloodPressureSystolic,
+              diastolic: latestBp.get(r.userId)!.bloodPressureDiastolic,
+              measuredAt: latestBp.get(r.userId)!.createdAt,
+            }
+          : null,
       })),
     });
   } catch (error) {

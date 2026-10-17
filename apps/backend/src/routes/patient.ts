@@ -9,6 +9,7 @@ import { idempotencyMiddleware } from "../middleware/idempotency";
 import axios from "axios";
 import Joi from "joi";
 import {
+  fallbackAnalysis,
   processBiometricReading,
   getMonitoringSummary,
   detectEarlyWarningSigns,
@@ -262,7 +263,7 @@ router.post(
         message: "Biometrics recorded successfully",
         alertLevel: alertLevel || "GREEN",
         anomalies: anomalies || [],
-        readinessScore: readinessScore || 100,
+        readinessScore: readinessScore ?? 100,
         baselineStatus: baselineStatus || "STABLE",
         recommendations: recommendations || [],
         earlyWarnings: earlyWarnings || [],
@@ -272,7 +273,7 @@ router.post(
           deviceType: value.deviceType,
           alertLevel: alertLevel || "GREEN",
           anomalies: anomalies || [],
-          readinessScore: readinessScore || 100,
+          readinessScore: readinessScore ?? 100,
           baselineStatus: baselineStatus || "STABLE",
           recommendations: recommendations || [],
           earlyWarnings: earlyWarnings || [],
@@ -585,6 +586,7 @@ router.get(
           process.env.ML_SERVICE_ALLOW_LOCALHOST === "true");
 
       if (mlServiceAvailable) {
+       try {
         try {
           // POST (not GET) so the per-request context (sex, BMI, measured
           // systolic) reaches the engine; those are deliberately not stored.
@@ -684,6 +686,17 @@ router.get(
           );
           mlData = analyzeRes.data;
         }
+       } catch (mlErr: any) {
+        // The ML service being down, slow, misconfigured (auth, version skew)
+        // or failing on this patient's data must not take the page down: serve
+        // the degraded, clearly-labelled rules below instead of a 500.
+        console.warn(
+          "[EarlyWarning] ML service failed; serving degraded rules:",
+          mlErr.response?.status ?? mlErr.code ?? "",
+          mlErr.response?.data?.detail ?? mlErr.message,
+        );
+        mlData = undefined;
+       }
       }
 
       // Fallback to database-only analysis if ML service unavailable (this
@@ -703,6 +716,26 @@ router.get(
           where: { userId },
           orderBy: { createdAt: "desc" },
           take: 30,
+        });
+
+        // Basic absolute thresholds on what the patient actually measured, not a
+        // blanket GREEN: a degraded engine must still flag a crisis-range BP.
+        const latestBp = allReadings.find(
+          (x) => x.bloodPressureSystolic != null && x.bloodPressureDiastolic != null,
+        );
+        const bpIsRecent =
+          latestBp && Date.now() - new Date(latestBp.createdAt).getTime() <= 72 * 3600 * 1000;
+        const lr: any = latestReading;
+        const basic = fallbackAnalysis({
+          heartRate: lr.heartRateResting ?? lr.heartRate ?? undefined,
+          oxygenSaturation: lr.oxygenSaturation ?? undefined,
+          respiratoryRate: lr.respiratoryRate ?? undefined,
+          bloodPressure: bpIsRecent
+            ? {
+                systolic: Number(latestBp!.bloodPressureSystolic),
+                diastolic: Number(latestBp!.bloodPressureDiastolic),
+              }
+            : undefined,
         });
 
         mlData = {
@@ -755,16 +788,16 @@ router.get(
             alert_message: null,
           },
           clinical_flags: [],
-          alert_level: "GREEN",
-          anomalies: [],
+          alert_level: basic.alertLevel,
+          anomalies: basic.anomalies,
           recommendations:
             allReadings.length === 0
               ? [
                   "Please add your first biometric reading to get personalized recommendations",
                 ]
               : [
-                  "Maintain current health habits",
-                  "Continue regular monitoring of vital signs",
+                  "Our full analysis is temporarily unavailable, so this check uses basic limits only. Trends and risk scores are not shown.",
+                  ...basic.recommendations,
                 ],
         };
       }
@@ -1223,7 +1256,10 @@ router.get(
           respiratoryRate: true,
         },
         orderBy: { createdAt: "desc" },
-        take: limit,
+        // Not `take: limit`: that counts readings, and with two or more a day it
+        // silently shortened the window (30 readings = ~15 days). The limit is
+        // applied to days, after grouping.
+        take: 2000,
       });
 
       // Group by day, keeping worst alert level per day
@@ -1262,7 +1298,7 @@ router.get(
         (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
       );
 
-      return res.json(timeline);
+      return res.json(timeline.slice(0, limit));
     } catch (e) {
       console.error("Error loading timeline:", e);
       return res.status(500).json({ error: "Failed to load timeline" });
