@@ -70,6 +70,10 @@ module.exports = async function globalSetup() {
     // force UTF8 the way every real deployment (Docker's postgres:16 image,
     // Railway/CI) already gets by default.
     initdbFlags: ["--encoding=UTF8", "--locale=C"],
+    // initdb otherwise adopts the host timezone (e.g. SAST), and raw SQL that
+    // writes a JS Date into a "timestamp without time zone" column is then
+    // shifted by the offset. Real deployments run in UTC.
+    postgresFlags: ["-c", "timezone=UTC"],
   });
 
   await pg.initialise();
