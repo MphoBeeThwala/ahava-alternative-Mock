@@ -298,9 +298,11 @@ describe("break-glass and the patient's access log", () => {
       expect(res.status).toBe(201);
       await new Promise((r) => setTimeout(r, 50)); // sent after the response, best-effort
 
-      expect(spy).toHaveBeenCalledTimes(1);
-      const args = spy.mock.calls[0][0];
-      expect(args.to).toBe(patientRow.email);
+      // The previous test's fire-and-forget email can land after this spy is
+      // installed, so look at the call for this patient, not the total count.
+      const calls = spy.mock.calls.filter(([a]) => a.to === patientRow.email);
+      expect(calls).toHaveLength(1);
+      const args = calls[0][0];
       expect(args.clinicianRole).toBe("Doctor");
       expect(args.registration).toBe(`HPCSA ${doctorRow.hcpsaNumber}`);
       expect(JSON.stringify(args)).not.toContain("Unconscious");
