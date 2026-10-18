@@ -76,6 +76,17 @@ jobs:
       - name: Build
         run: pnpm --filter @ahava-healthcare/api build
 
+  route-coverage:
+    name: Every endpoint has a test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Check route coverage
+        run: node scripts/check-route-coverage.cjs
+
   ml-service:
     name: ML service — pytest
     runs-on: ubuntu-latest
@@ -234,5 +245,26 @@ jobs:
       # (that path exists for running these same tests locally without
       # Docker) and applies migrations to this real service container
       # instead — one real database, same as production, not a mock.
+      # Backend <-> ML contract (routes/crossService.integration.test.ts): the
+      # backend talks to a real, running ML service over HTTP with the shared key.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Start the ML service
+        working-directory: apps/ml-service
+        env:
+          ML_SERVICE_REQUIRE_AUTH: "true"
+          ML_SERVICE_SHARED_SECRET: ci-e2e-secret
+          DATABASE_URL: ""
+        run: |
+          pip install -r requirements.txt
+          nohup python -m uvicorn main:app --port 8000 > ml-service.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8000/ && exit 0; sleep 1; done
+          cat ml-service.log; exit 1
+
       - name: Integration tests
+        env:
+          ML_E2E_URL: http://127.0.0.1:8000
+          ML_E2E_SECRET: ci-e2e-secret
         run: pnpm --filter @ahava-healthcare/api test:integration

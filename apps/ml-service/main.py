@@ -8,7 +8,7 @@ from models import (
 )
 from engine import EarlyWarningEngine, _dict_to_biometric
 import db
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 import hmac
 from dotenv import load_dotenv
@@ -150,7 +150,7 @@ def early_warning_summary_with_context(user_id: str, body: EarlyWarningSummaryRe
         raise HTTPException(status_code=404, detail="No biometric data for user")
     try:
         last = _dict_to_biometric(latest_row)
-        return engine.full_analysis(user_id, last, body.context)
+        return engine.full_analysis(user_id, last, body.context, bp_as_of=datetime.now(timezone.utc))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -166,7 +166,7 @@ def early_warning_summary(user_id: str):
         raise HTTPException(status_code=404, detail="No biometric data for user")
     try:
         last = _dict_to_biometric(latest_row)
-        summary = engine.full_analysis(user_id, last, engine.get_context(user_id))
+        summary = engine.full_analysis(user_id, last, engine.get_context(user_id), bp_as_of=datetime.now(timezone.utc))
         return summary
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
