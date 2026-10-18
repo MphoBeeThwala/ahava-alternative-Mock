@@ -142,7 +142,17 @@ app.use(
     },
   }),
 );
-app.use(express.urlencoded({ extended: true, limit: "20mb" }));
+// PayFast posts its ITN as application/x-www-form-urlencoded and its server-to-server
+// postback must be given those exact bytes, so keep them for this content type too.
+app.use(
+  express.urlencoded({
+    extended: true,
+    limit: "20mb",
+    verify: (req: any, res, buf) => {
+      req.rawBody = buf;
+    },
+  }),
+);
 
 // Reject cross-site state-changing requests that authenticate by cookie
 app.use(originGuard(corsOrigins));
