@@ -191,3 +191,29 @@ class TestEarlyWarning:
         # The stored context is what the plain GET summary uses.
         client.post(f"/ingest?user_id={user}", json=vitals(), headers=AUTH)
         assert client.get(f"/early-warning/summary/{user}", headers=AUTH).status_code == 200
+
+
+class TestMeasuredBpInSummary:
+    def test_a_cuff_reading_taken_after_the_last_wearable_sync_shows_in_the_summary(self, client):
+        user = uid()
+        client.post(f"/ingest?user_id={user}", json=vitals(days_ago=0.01), headers=AUTH)
+        crisis = {"timestamp": iso(), "systolic": 195, "diastolic": 125}
+        assert client.post(f"/ingest/bp?user_id={user}", json=crisis, headers=AUTH).status_code == 200
+
+        for res in (
+            client.get(f"/early-warning/summary/{user}", headers=AUTH),
+            client.post(f"/early-warning/summary/{user}", json={}, headers=AUTH),
+        ):
+            assert res.status_code == 200
+            bp = res.json()["bp_assessment"]
+            assert bp["readings_7d"] == 1
+            assert bp["latest_systolic"] == 195
+            assert bp["level"] == "RED"
+            assert res.json()["requires_clinician_review"] is True
+
+    def test_a_replayed_analysis_stays_as_of_its_own_timestamp(self, client):
+        user = uid()
+        client.post(f"/ingest/bp?user_id={user}", json={"timestamp": iso(), "systolic": 195, "diastolic": 125}, headers=AUTH)
+        res = client.post(f"/early-warning/analyze?user_id={user}", json={"biometrics": vitals(days_ago=3)}, headers=AUTH)
+        assert res.status_code == 200
+        assert res.json()["bp_assessment"]["readings_7d"] == 0

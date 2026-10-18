@@ -88,7 +88,7 @@ def _blend_seed(personal: Dict[str, float], demo_mean: float, demo_std: float,
 
 def _dict_to_biometric(row: dict) -> BiometricData:
     return BiometricData(
-        timestamp=row.get("timestamp", datetime.utcnow()),
+        timestamp=row.get("timestamp", datetime.now(timezone.utc).replace(tzinfo=None)),
         heart_rate_resting=float(row.get("heart_rate_resting") or 70),
         hrv_rmssd=float(row.get("hrv_rmssd") or 40),
         spo2=float(row.get("spo2") or 97),
@@ -1195,8 +1195,16 @@ class EarlyWarningEngine:
     def full_analysis(
         self, user_id: str, data: BiometricData,
         context: Optional[ContextualProfile] = None,
+        bp_as_of: Optional[datetime] = None,
     ) -> EarlyWarningSummary:
-        """Run full pipeline: anomaly detection + CVD risk + fusion."""
+        """Run full pipeline: anomaly detection + CVD risk + fusion.
+
+        bp_as_of: assess measured blood pressure as of this time instead of the
+        latest wearable reading's. The stored-history summaries pass "now", so a
+        cuff reading taken after the last wearable sync still counts; the
+        analyze path leaves it unset so a replay of past data stays as-of its
+        own timestamp.
+        """
         profile = context or db.load_context(user_id)
         profile_was_missing = profile is None
         if profile is None:
@@ -1212,7 +1220,7 @@ class EarlyWarningEngine:
             user_id, days=self.MIN_BASELINE_DAYS + self.ROLLING_WINDOW_DAYS + 1, as_of=data.timestamp
         )
         alert_level, anomalies = self._evaluate(user_id, data)
-        _, _, bp_assessment = self._assess_measured_vitals(user_id, data.timestamp)
+        _, _, bp_assessment = self._assess_measured_vitals(user_id, bp_as_of or data.timestamp)
         # Measured BP fills the risk charts' systolic input only when the
         # profile has none; a stated value is never overridden or imputed.
         systolic_for_risk = profile.systolic_bp
@@ -1272,6 +1280,7 @@ class EarlyWarningEngine:
         provenance = self._build_provenance(user_id, data, alert_level)
         requires_clinician_review = (
             alert_level != AlertLevel.GREEN
+            or bp_assessment.level != "GREEN"
             or uncertainty.score >= 0.45
             or getattr(data, "ecg_rhythm", "unknown") == "irregular"
         )
@@ -1283,7 +1292,7 @@ class EarlyWarningEngine:
 
         return EarlyWarningSummary(
             user_id=user_id,
-            processed_at=datetime.utcnow(),
+            processed_at=datetime.now(timezone.utc).replace(tzinfo=None),
             heart_rate_resting=data.heart_rate_resting,
             hrv_rmssd=data.hrv_rmssd,
             spo2=data.spo2,

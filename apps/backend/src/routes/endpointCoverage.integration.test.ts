@@ -416,3 +416,45 @@ describe("service roots and the webhooks index", () => {
     expect(res.body).toEqual({ success: true, events: [] });
   });
 });
+
+describe("admin SANC lookup and doctor HPCSA profile", () => {
+  it("GET /admin/users/:id/sanc is admin-only and only describes nurses", async () => {
+    const admin = await register("ADMIN", "sanc-admin");
+    const nurse = await register("NURSE", "sanc-nurse");
+    const patient = await register("PATIENT", "sanc-patient");
+    const url = (id: string) => `/api/v1/admin/users/${id}/sanc`;
+
+    expect((await request(app).get(url(nurse.userId))).status).toBe(401);
+    expect((await nurse.agent.get(url(nurse.userId))).status).toBe(403);
+
+    const ok = await admin.agent.get(url(nurse.userId));
+    expect(ok.status).toBe(200);
+    expect(ok.body.sanc).toMatchObject({ id: nurse.userId, role: "NURSE", sancVerificationStatus: "Active" });
+    expect((await admin.agent.get(url(patient.userId))).status).toBe(404);
+    expect((await admin.agent.get(url("missing"))).status).toBe(404);
+  });
+
+  it("PATCH /triage-review/profile/hpcsa is for doctors, needs a number, and un-verifies a changed number", async () => {
+    const doctor = await register("DOCTOR", "hpcsa-doctor");
+    const patient = await register("PATIENT", "hpcsa-patient");
+    const url = "/api/v1/triage-review/profile/hpcsa";
+
+    expect((await request(app).patch(url).send({ hcpsaNumber: "MP0001" })).status).toBe(401);
+    expect((await patient.agent.patch(url).send({ hcpsaNumber: "MP0001" })).status).toBe(403);
+    expect((await doctor.agent.patch(url).send({ hcpsaNumber: "  " })).status).toBe(400);
+
+    const before = await prisma.user.findUniqueOrThrow({ where: { id: doctor.userId } });
+    expect(before.hcpsaVerified).toBe(true);
+
+    // Re-saving the same number keeps verification.
+    const same = await doctor.agent.patch(url).send({ hcpsaNumber: before.hcpsaNumber });
+    expect(same.status).toBe(200);
+    expect(same.body.hcpsa.hcpsaVerified).toBe(true);
+
+    // A different number must be verified again before it is trusted.
+    const changed = await doctor.agent.patch(url).send({ hcpsaNumber: "MP9999999" });
+    expect(changed.status).toBe(200);
+    expect(changed.body.hcpsa).toEqual({ hcpsaNumber: "MP9999999", hcpsaVerified: false });
+    expect((await doctor.agent.get(url)).body.hcpsa.hcpsaVerified).toBe(false);
+  });
+});
