@@ -1,0 +1,47 @@
+name: Production uptime check
+
+# Runs scripts/prod-smoke.js against the deployed stack every 15 minutes. It is
+# read-only (no accounts, no clinical writes). When a check fails the run fails,
+# and GitHub emails the people watching the repository's Actions - that email is
+# the alert. See docs/BACKUP_AND_ALERTING.md for setup.
+#
+# Setup (Settings > Secrets and variables > Actions):
+#   Variables: BACKEND_URL, FRONTEND_URL, ML_URL   (no trailing slash)
+#   Secret:    ML_SERVICE_SHARED_SECRET            (optional; enables the key checks)
+# With BACKEND_URL unset the job exits quietly, so forks and previews do not alert.
+#
+# GitHub pauses scheduled workflows in a repository with no activity for 60 days;
+# re-enable it under the Actions tab if that happens.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Smoke test production
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run smoke test
+        env:
+          BACKEND_URL: ${{ vars.BACKEND_URL }}
+          FRONTEND_URL: ${{ vars.FRONTEND_URL }}
+          ML_URL: ${{ vars.ML_URL }}
+          ML_SERVICE_SHARED_SECRET: ${{ secrets.ML_SERVICE_SHARED_SECRET }}
+        run: |
+          if [ -z "$BACKEND_URL" ]; then
+            echo "BACKEND_URL variable is not set; skipping."
+            exit 0
+          fi
+          node scripts/prod-smoke.js
