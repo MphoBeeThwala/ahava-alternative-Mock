@@ -78,7 +78,9 @@ export async function processBiometricReading(
     // measured them: that corrupts the person's baseline and can hide a real
     // abnormal value. Check what was actually provided against the absolute
     // thresholds instead, and leave the ML history alone.
-    const hr = biometricData.heartRateResting ?? biometricData.heartRate;
+    const hr =
+      biometricData.heartRateResting ??
+      (biometricData.source === "wearable" ? undefined : biometricData.heartRate);
     const completeWearableSet =
       hr != null &&
       biometricData.hrvRmssd != null &&
@@ -331,7 +333,9 @@ export function fallbackAnalysis(biometricData: any): MonitoringResult {
   let alertLevel: "GREEN" | "YELLOW" | "RED" = "GREEN";
 
   // Basic threshold checks
-  const heartRate = biometricData.heartRateResting || biometricData.heartRate;
+  const heartRate =
+    biometricData.heartRateResting ||
+    (biometricData.source === "wearable" ? undefined : biometricData.heartRate);
   if (heartRate) {
     if (heartRate >= 130) {
       anomalies.push("Significantly elevated heart rate");
