@@ -40,3 +40,21 @@ export const rookApi = {
     return res.data;
   },
 };
+
+export interface PhoneSyncResult {
+  success: boolean;
+  alertLevel: 'GREEN' | 'YELLOW' | 'RED';
+  readinessScore: number | null;
+  anomalies: string[];
+  baselineStatus?: string;
+}
+
+/** Direct sync from the phone's health store (Health Connect / Apple Health). No vendor account needed. */
+export const phoneHealthApi = {
+  sync: async (payload: object, idempotencyKey?: string): Promise<PhoneSyncResult> => {
+    const res = await apiClient.post('/biometrics/health-connect', payload, {
+      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
+    });
+    return res.data;
+  },
+};

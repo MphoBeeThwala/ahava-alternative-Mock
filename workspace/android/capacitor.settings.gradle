@@ -5,5 +5,5 @@ project(':capacitor-android').projectDir = new File('../../node_modules/.pnpm/@c
 include ':capacitor-device'
 project(':capacitor-device').projectDir = new File('../../node_modules/.pnpm/@capacitor+device@8.0.3_@capacitor+core@8.5.1/node_modules/@capacitor/device/android')
 
-include ':capacitor-health'
-project(':capacitor-health').projectDir = new File('../../node_modules/.pnpm/capacitor-health@8.2.0_@capacitor+core@8.5.1/node_modules/capacitor-health/android')
+include ':capgo-capacitor-health'
+project(':capgo-capacitor-health').projectDir = new File('../../node_modules/.pnpm/@capgo+capacitor-health@8.11.12_@capacitor+core@8.5.1/node_modules/@capgo/capacitor-health/android')

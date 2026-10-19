@@ -20,7 +20,7 @@ export default function PrivacyPolicyPage() {
           <ul>
             <li><strong>Account information:</strong> Name, email address, phone number, date of birth, gender.</li>
             <li><strong>Sign-in details (only if you choose Sign in with Google):</strong> your Google account name, email address and a unique Google account ID. See section 6.</li>
-            <li><strong>Health data:</strong> Biometric readings (heart rate, blood pressure, oxygen saturation, temperature), wearable device data synced through Terra, ROOK or Android Health Connect when you connect a device, the symptoms and photos you submit for AI triage, and the results.</li>
+            <li><strong>Health data:</strong> Biometric readings (heart rate, blood pressure, oxygen saturation, temperature), wearable device data synced through Terra, ROOK, Android Health Connect or Apple Health when you connect a device (heart rate, resting heart rate, heart rate variability, blood oxygen, breathing rate, body temperature, sleep, activity and blood pressure, only the types you allow), the symptoms and photos you submit for AI triage, and the results.</li>
             <li><strong>Location data:</strong> Approximate location used to match you with nearby nurses (nurses only, collected during active availability).</li>
             <li><strong>Device data:</strong> IP address, browser/app type, usage logs for security and debugging.</li>
           </ul>
@@ -68,7 +68,7 @@ export default function PrivacyPolicyPage() {
             <li><strong>Email (Resend):</strong> delivers verification, password-reset and service emails to your email address.</li>
             <li><strong>Payments (PayFast):</strong> processes your payment. You enter card details on PayFast&rsquo;s pages; we do not receive or store your card number.</li>
             <li><strong>Medical-aid claims (Healthbridge):</strong> where medical-aid billing is used, claim details such as visit date, tariff codes and member details are sent to your scheme through the Healthbridge clearing house.</li>
-            <li><strong>Wearables (Terra, ROOK, Android Health Connect):</strong> only when you connect a device. Each is governed by its own privacy policy.</li>
+            <li><strong>Wearables (Terra, ROOK, Android Health Connect, Apple Health):</strong> only when you connect a device. Health Connect and Apple Health data is read on your phone with your permission and sent only to Ahava; it is never sold or used for advertising. Terra and ROOK are governed by their own privacy policies.</li>
             <li><strong>Hosting and storage (Railway, Cloudflare R2):</strong> hold the platform and uploaded files. <strong>Key management (Amazon Web Services KMS):</strong> protects our encryption keys; it does not receive patient records.</li>
             <li><strong>Public medical references (such as NCBI/PubMed and StatPearls):</strong> receive general clinical search terms, never your identity.</li>
           </ul>

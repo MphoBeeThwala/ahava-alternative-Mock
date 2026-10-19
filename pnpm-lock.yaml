@@ -195,6 +195,9 @@ importers:
       '@capacitor/ios':
         specifier: ^8.5.1
         version: 8.5.1(@capacitor/core@8.5.1)
+      '@capgo/capacitor-health':
+        specifier: 8.11.12
+        version: 8.11.12(@capacitor/core@8.5.1)
       '@emotion/react':
         specifier: ^11.14.0
         version: 11.14.0(@types/react@19.2.11)(react@19.1.0)
@@ -207,9 +210,6 @@ importers:
       axios:
         specifier: ^1.12.2
         version: 1.13.4
-      capacitor-health:
-        specifier: ^8.2.0
-        version: 8.2.0(@capacitor/core@8.5.1)
       next:
         specifier: ^15.5.9
         version: 15.5.14(@babel/core@7.29.0)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
@@ -635,6 +635,11 @@ packages:
     resolution: {integrity: sha512-0EVqwCYf3RUp2JAjUGZ04xmG6dSpIsPmPacI9zKxn6mu9RSiHhmFF230ghe00HrkyB6ig6SfNdoADvVODxYhlQ==}
     peerDependencies:
       '@capacitor/core': ^8.5.0
+
+  '@capgo/capacitor-health@8.11.12':
+    resolution: {integrity: sha512-r+gK0ILL89hProHRQVsxECtdyexLmg62uBsbKUYDQJTeAHyoPlL8Uj9uTvONN7wgd3a/T5mp65jc1klzX+/RlA==}
+    peerDependencies:
+      '@capacitor/core': '>=8.0.0'
 
   '@csstools/color-helpers@6.1.1':
     resolution: {integrity: sha512-gLNsunvwf3mCi5u5o46/Z/JcJMnhbHSaZ69rkgPzNM3J4s8hWwpPUQB6/tt0EDFyCiWzxANlx+2LJwpYj4zS1w==}
@@ -2918,11 +2923,6 @@ packages:
 
   caniuse-lite@1.0.30001780:
     resolution: {integrity: sha512-llngX0E7nQci5BPJDqoZSbuZ5Bcs9F5db7EtgfwBerX9XGtkkiO4NwfDDIRzHTTwcYC8vC7bmeUEPGrKlR/TkQ==}
-
-  capacitor-health@8.2.0:
-    resolution: {integrity: sha512-ppnw6GIs3lHHlX3uNDJXLfJz5LDZ33JOiEe96qoYrHpy3zM3dKnpV9x/imczRAMdPOaYoABPdE+kxkf04QZHwg==}
-    peerDependencies:
-      '@capacitor/core': '>=8.0.0'
 
   chai@5.3.3:
     resolution: {integrity: sha512-4zNhdJD/iOjSH0A05ea+Ke6MU5mmpQcbQsSOkgdaUMJ9zTlDTD/GYlwohmIE2u0gaxHYiVHEn1Fw9mZ/ktJWgw==}
@@ -6716,6 +6716,10 @@ snapshots:
     dependencies:
       '@capacitor/core': 8.5.1
 
+  '@capgo/capacitor-health@8.11.12(@capacitor/core@8.5.1)':
+    dependencies:
+      '@capacitor/core': 8.5.1
+
   '@csstools/color-helpers@6.1.1': {}
 
   '@csstools/css-calc@3.4.0(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.1))(@csstools/css-tokenizer@4.0.1)':
@@ -8972,10 +8976,6 @@ snapshots:
   camelcase@6.3.0: {}
 
   caniuse-lite@1.0.30001780: {}
-
-  capacitor-health@8.2.0(@capacitor/core@8.5.1):
-    dependencies:
-      '@capacitor/core': 8.5.1
 
   chai@5.3.3:
     dependencies:
