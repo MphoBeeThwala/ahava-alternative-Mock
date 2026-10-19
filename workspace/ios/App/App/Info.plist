@@ -22,6 +22,8 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Ahava reads your heart rate, heart rate variability, blood oxygen, breathing rate, sleep, activity and blood pressure from Apple Health so its early-warning checks can spot changes from your normal. It never writes to Apple Health.</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>

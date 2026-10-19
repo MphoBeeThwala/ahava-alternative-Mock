@@ -9,7 +9,7 @@ import { MapsUnavailableError, autocompleteAddress, mapsEnabled, placeDetails } 
  * Every route degrades the same way: when maps are off, capped or failing, the
  * client gets { available: false } and keeps the manual address field.
  */
-const router = Router();
+const router: Router = Router();
 
 // Per signed-in user, on top of the monthly cap in services/googleMaps.ts.
 const perUser = rateLimit({

@@ -6,6 +6,7 @@ import RoleGuard, { UserRole } from "../../../components/RoleGuard";
 import DashboardLayout from "../../../components/DashboardLayout";
 import { terraApi, TerraStatus, rookApi, RookStatus } from "../../../lib/api";
 import { useToast } from "../../../contexts/ToastContext";
+import PhoneHealthCard from "../../../components/PhoneHealthCard";
 
 const SUPPORTED_DEVICES = [
   { name: "Apple Watch",   icon: "⌚", color: "#1c1917" },
@@ -174,6 +175,9 @@ export default function WearablePage() {
           </div>
 
           <div style={{ maxWidth: 900, margin: "0 auto", padding: "32px 24px", display: "flex", flexDirection: "column", gap: 28 }}>
+
+            {/* ── Direct phone health sync (no vendor account) ── */}
+            <PhoneHealthCard />
 
             {/* ── Connection status card (Terra) ── */}
             <div style={{ background: "var(--card)", borderRadius: 20, border: "1.5px solid var(--border)", padding: "28px 32px", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 20 }}>

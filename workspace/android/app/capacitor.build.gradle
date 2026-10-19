@@ -10,7 +10,7 @@ android {
 apply from: "../capacitor-cordova-android-plugins/cordova.variables.gradle"
 dependencies {
     implementation project(':capacitor-device')
-    implementation project(':capacitor-health')
+    implementation project(':capgo-capacitor-health')
 
 }
 

@@ -1,179 +1,125 @@
 /**
- * healthConnect.ts — Google Health Connect ingestion endpoint
+ * healthConnect.ts - phone health-store ingestion (no Terra/Rook needed)
  *
- * POST /api/biometrics/health-connect
+ * POST /api/v1/biometrics/health-connect
  *
- * Accepts a batch of Health Connect records from the Capacitor Android app,
- * maps them to the existing BiometricReading + ML service pipeline.
- * Free — no per-user cost, unlike Terra API.
+ * The mobile app reads what the patient's watch has already synced to the
+ * phone's health store (Google Health Connect on Android, Apple Health on
+ * iPhone) and posts one summary here. Free: no per-user vendor fee.
  *
- * Supported Health Connect record types:
- *   HeartRate, RestingHeartRate, HeartRateVariabilitySdnn,
- *   OxygenSaturation, RespiratoryRate, Steps,
- *   ActiveCaloriesBurned, SleepSession, BodyTemperature
+ * Only values the device actually measured are accepted and stored. Anything
+ * missing stays missing: it is never replaced by a "typical" number, because a
+ * made-up SpO2 or heart rate in a patient's baseline can hide a real problem.
+ * The reading then goes through the same pipeline as a manual submission
+ * (services/biometricIngest.ts): partial submissions are checked against the
+ * absolute thresholds, and only a complete wearable set trains the ML baseline.
  */
 
-import { Router, Request, Response, NextFunction } from "express";
+import { Router, Response, NextFunction } from "express";
+import Joi from "joi";
 import { authMiddleware, AuthenticatedRequest } from "../middleware/auth";
+import { rateLimiter } from "../middleware/rateLimiter";
+import { idempotencyMiddleware } from "../middleware/idempotency";
 import prisma from "../lib/prisma";
-import { mlServiceHeaders } from "../services/mlServiceAuth";
+import { ingestBiometrics } from "../services/biometricIngest";
 
 const router: Router = Router();
 
-const ML_SERVICE_URL = process.env.ML_SERVICE_URL ?? "http://localhost:8000";
+const syncSchema = Joi.object({
+  platform: Joi.string().valid("android", "ios").optional(),
+  deviceModel: Joi.string().max(100).optional(),
+  syncedAt: Joi.date().iso().max("now").optional(),
 
-// ─── Payload type from capacitor-health plugin ───────────────────────────────
-// Fields sourced from: queryAggregated (steps, active-calories)
-//                    + queryWorkouts (heartRateSamples via includeHeartRate)
+  // Measured by the device
+  heartRate: Joi.number().min(30).max(220).optional(), // average over the window, NOT resting
+  heartRateResting: Joi.number().min(30).max(200).optional(),
+  hrvRmssd: Joi.number().min(0).max(300).optional(), // Android reports RMSSD
+  hrvSdnn: Joi.number().min(0).max(300).optional(), // Apple reports SDNN: a different measure, kept out of the RMSSD baseline
+  oxygenSaturation: Joi.number().min(50).max(100).optional(),
+  respiratoryRate: Joi.number().min(4).max(60).optional(),
+  temperature: Joi.number().min(30).max(45).optional(),
+  skinTempOffset: Joi.number().min(-5).max(5).optional(),
+  sleepDurationHours: Joi.number().min(0).max(24).optional(),
+  steps: Joi.number().min(0).optional(),
+  activeCalories: Joi.number().min(0).optional(),
+  bloodPressure: Joi.object({
+    systolic: Joi.number().min(50).max(250).required(),
+    diastolic: Joi.number().min(30).max(150).required(),
+  })
+    .custom((v, helpers) =>
+      v.systolic > v.diastolic ? v : helpers.message({ custom: "Systolic must be higher than diastolic" }),
+    )
+    .optional(),
 
-interface HealthConnectPayload {
-  steps: number;
-  activeCalories: number;
-  heartRateSamples: number[]; // bpm values from workout heart rate readings
-  workoutCount?: number;
-  deviceModel?: string;
-  syncedAt: string;
-}
+  // Older app builds sent workout heart-rate samples. Their average is an
+  // exercise heart rate, so it is stored as heartRate, never as resting.
+  heartRateSamples: Joi.array().items(Joi.number().min(30).max(220)).max(5000).optional(),
+}).unknown(false);
 
-// ─── Aggregation helpers ─────────────────────────────────────────────────────
+const MEASURED_FIELDS = [
+  "heartRate", "heartRateResting", "hrvRmssd", "hrvSdnn", "oxygenSaturation", "respiratoryRate",
+  "temperature", "skinTempOffset", "sleepDurationHours", "steps", "activeCalories", "bloodPressure",
+] as const;
 
-function average(arr: number[]): number | undefined {
-  if (!arr.length) return undefined;
-  return arr.reduce((a, b) => a + b, 0) / arr.length;
-}
-
-function mapToMlPayload(payload: HealthConnectPayload) {
-  const avgHr = average(payload.heartRateSamples);
-  return {
-    heart_rate_resting: avgHr ?? 70,
-    spo2: 97, // Not available from capacitor-health; use baseline default
-    respiratory_rate: 15, // Not available; use baseline default
-    skin_temp_offset: 0, // Not available; use baseline default
-    hrv_rmssd: undefined, // Not available from capacitor-health
-    step_count: Math.round(payload.steps ?? 0),
-    active_calories: Math.round(payload.activeCalories ?? 0),
-    sleep_duration_hours: undefined,
-  };
-}
-
-// ─── Route ───────────────────────────────────────────────────────────────────
+const average = (xs: number[]): number | undefined =>
+  xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : undefined;
 
 router.post(
   "/",
+  rateLimiter,
   authMiddleware,
+  idempotencyMiddleware({ scope: "health-connect-sync" }),
   async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ error: "Not authenticated" });
 
-      const body = req.body as HealthConnectPayload;
-      if (body?.steps == null && !body?.heartRateSamples?.length) {
-        return res.status(400).json({ error: "No health data provided" });
-      }
+      const { error, value } = syncSchema.validate(req.body ?? {}, { abortEarly: true });
+      if (error) return res.status(400).json({ error: error.details[0].message });
 
-      const aggregated = mapToMlPayload(body);
-      const timestamp = body.syncedAt ?? new Date().toISOString();
+      const sampleAverage = average(value.heartRateSamples ?? []);
+      const heartRate = value.heartRate ?? sampleAverage;
+      const hasData =
+        heartRate != null || MEASURED_FIELDS.some((f) => f !== "heartRate" && value[f] != null);
+      if (!hasData) return res.status(400).json({ error: "No health data provided" });
 
-      // ── 1. Forward to ML service for early warning analysis ──────────────────
-      interface MlIngestResult {
-        alert_level?: string;
-        anomalies?: string[];
-        readiness_score?: number;
-      }
-      let mlResult: MlIngestResult = {};
-      try {
-        const mlRes = await fetch(
-          `${ML_SERVICE_URL}/ingest?user_id=${encodeURIComponent(userId)}`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              ...mlServiceHeaders(),
-            },
-            body: JSON.stringify({ timestamp, ...aggregated }),
-            signal: AbortSignal.timeout(10000),
-          },
-        );
-        // fetch's .json() is typed as Promise<unknown> under strict mode —
-        // the ML service's response shape is trusted the same way it always
-        // was (this is a service we operate, already wrapped in try/catch
-        // and consumed defensively below), just now named instead of implicit.
-        if (mlRes.ok) mlResult = (await mlRes.json()) as MlIngestResult;
-      } catch (mlErr) {
-        console.warn(
-          "[healthConnect] ML service unavailable, saving reading anyway:",
-          (mlErr as Error).message,
-        );
-      }
+      const deviceType =
+        value.deviceModel ?? (value.platform === "ios" ? "apple_health" : "health_connect");
 
-      // ── 2. Persist BiometricReading ──────────────────────────────────────────
-      const reading = await prisma.biometricReading.create({
-        data: {
-          userId,
-          heartRateResting: aggregated.heart_rate_resting,
-          hrvRmssd: aggregated.hrv_rmssd,
-          oxygenSaturation: aggregated.spo2,
-          respiratoryRate: aggregated.respiratory_rate,
-          skinTempOffset: aggregated.skin_temp_offset,
-          stepCount: aggregated.step_count,
-          activeCalories: aggregated.active_calories,
-          sleepDurationHours: aggregated.sleep_duration_hours,
-          source: "wearable",
-          deviceType: body.deviceModel ?? "health_connect",
-          alertLevel: mlResult.alert_level ?? "GREEN",
-          anomalies: mlResult.anomalies ?? [],
-          readinessScore: mlResult.readiness_score ?? null,
-        },
+      const result = await ingestBiometrics(userId, {
+        heartRate: heartRate != null ? Math.round(heartRate * 10) / 10 : undefined,
+        heartRateResting: value.heartRateResting,
+        hrvRmssd: value.hrvRmssd,
+        oxygenSaturation: value.oxygenSaturation,
+        respiratoryRate: value.respiratoryRate,
+        temperature: value.temperature,
+        skinTempOffset: value.skinTempOffset,
+        sleepDurationHours: value.sleepDurationHours,
+        stepCount: value.steps != null ? Math.round(value.steps) : undefined,
+        activeCalories: value.activeCalories,
+        bloodPressure: value.bloodPressure,
+        source: "wearable",
+        deviceType,
       });
 
-      // ── 3. Create HealthAlert if RED/YELLOW ──────────────────────────────────
-      if (mlResult.alert_level === "RED" || mlResult.alert_level === "YELLOW") {
-        await prisma.healthAlert.create({
-          data: {
-            userId,
-            alertLevel: mlResult.alert_level,
-            title:
-              mlResult.alert_level === "RED"
-                ? "Urgent health alert detected"
-                : "Health metric anomaly detected",
-            message: `Your wearable data shows: ${(mlResult.anomalies ?? []).join(", ") || "unusual readings"}. Consider consulting a clinician if you want clarification.`,
-            detectedAnomalies: mlResult.anomalies ?? [],
-            biometricReadingId: reading.id,
-          },
-        });
-      }
-
-      // ── 4. Update connected devices list on User ─────────────────────────────
-      if (body.deviceModel) {
-        const user = await prisma.user.findUnique({
-          where: { id: userId },
-          select: { id: true },
-        });
-        if (user) {
-          const existing = await prisma.user.findUnique({
-            where: { id: userId },
-          } as any);
-          const devices: string[] = [
-            ...((existing as any)?.connectedDevices ?? []),
-          ];
-          if (!devices.includes(body.deviceModel)) {
-            devices.push(body.deviceModel);
-            await prisma.user.update({
-              where: { id: userId },
-              data: { connectedDevices: devices } as any,
-            });
-          }
+      // Remember which devices have synced, for the "connected devices" list.
+      if (value.deviceModel) {
+        const user = await prisma.user.findUnique({ where: { id: userId } } as any);
+        const devices: string[] = [...((user as any)?.connectedDevices ?? [])];
+        if (!devices.includes(value.deviceModel)) {
+          devices.push(value.deviceModel);
+          await prisma.user.update({ where: { id: userId }, data: { connectedDevices: devices } as any });
         }
       }
 
-      res.json({
+      return res.json({
         success: true,
-        readingId: reading.id,
-        alertLevel: mlResult.alert_level ?? "GREEN",
-        readinessScore: mlResult.readiness_score ?? null,
-        anomalies: mlResult.anomalies ?? [],
-        recordsProcessed:
-          (body.heartRateSamples?.length ?? 0) + (body.steps ? 1 : 0),
+        readingId: result.biometricRecord.id,
+        alertLevel: result.alertLevel,
+        readinessScore: result.readinessScore,
+        anomalies: result.anomalies,
+        baselineStatus: result.baselineStatus,
+        recordsProcessed: MEASURED_FIELDS.filter((f) => value[f] != null).length + (sampleAverage != null ? 1 : 0),
       });
     } catch (error) {
       return next(error);
