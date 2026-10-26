@@ -51,6 +51,20 @@ export const configuredModels = (provider: AiProvider): string[] =>
     ? list(process.env.AI_CLAUDE_MODELS, DEFAULT_CLAUDE_MODELS)
     : list(process.env.AI_GEMINI_MODELS, DEFAULT_GEMINI_MODELS);
 
+/**
+ * The order providers are tried in, from AI_PROVIDER_ORDER (e.g. "gemini,claude").
+ * Unknown names are ignored and any provider left out is appended, so a typo
+ * can never remove a provider from triage; to switch one off, unset its key.
+ */
+export const providerOrder = (): AiProvider[] => {
+  const known: AiProvider[] = ['claude', 'gemini'];
+  const wanted = (process.env.AI_PROVIDER_ORDER ?? '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter((s): s is AiProvider => (known as string[]).includes(s));
+  return [...new Set([...wanted, ...known])];
+};
+
 const intEnv = (name: string, fallback: number, min: number) =>
   Math.max(min, parseInt(process.env[name] ?? '', 10) || fallback);
 

@@ -20,7 +20,7 @@ jest.mock('./evidenceProvider', () => ({
 import { analyzeSymptoms } from './aiTriage';
 import { _resetAiHealthForTests, getAiHealth, getProviderState } from './aiHealth';
 import {
-  classifyHttpFailure, discoverBestModel, effectiveChain, extractJsonObject,
+  classifyHttpFailure, discoverBestModel, effectiveChain, extractJsonObject, providerOrder,
 } from './aiProviders';
 import { recordProbe } from './aiHealth';
 
@@ -102,6 +102,33 @@ describe('reading the model response', () => {
 
     expect(result.modelUsed).toBe('claude-sonnet-5-5');
     expect(getAiHealth().providers.find((p) => p.provider === 'claude')!.workingModel).toBe('claude-sonnet-5-5');
+  });
+});
+
+describe('AI_PROVIDER_ORDER', () => {
+  it('defaults to claude then gemini', () => {
+    delete process.env.AI_PROVIDER_ORDER;
+    expect(providerOrder()).toEqual(['claude', 'gemini']);
+  });
+
+  it('puts the configured provider first and never drops one', () => {
+    process.env.AI_PROVIDER_ORDER = 'gemini';
+    expect(providerOrder()).toEqual(['gemini', 'claude']);
+  });
+
+  it('ignores unknown names and stray case or spaces', () => {
+    process.env.AI_PROVIDER_ORDER = ' deepseek, GEMINI ,claude';
+    expect(providerOrder()).toEqual(['gemini', 'claude']);
+  });
+
+  it('asks the first-ordered provider first', async () => {
+    process.env.AI_PROVIDER_ORDER = 'gemini,claude';
+    process.env.GEMINI_API_KEY = 'g-key';
+    fetchMock.mockResolvedValue(claudeResponse(goodAnswer));
+
+    await analyzeSymptoms({ symptoms: MS_CASE });
+
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/generativelanguage|googleapis/);
   });
 });
 
