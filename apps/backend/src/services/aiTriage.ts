@@ -8,6 +8,7 @@ import {
     extractJsonObject,
     runClaude,
     runGemini,
+    providerOrder,
 } from './aiProviders';
 import type { ProviderFailure } from './aiHealth';
 import type { ClinicalFindings } from './clinical/clinicalChecks';
@@ -491,24 +492,16 @@ ${TRIAGE_PROMPT_END}`;
         const ask = async (promptText: string): Promise<ParsedAnswer | null> => {
             const input = { prompt: promptText, files };
             const accept = (text: string, model: string): ParsedAnswer => parseAnswer(text, model, clinical.questions);
-            if (process.env.ANTHROPIC_API_KEY) {
+            for (const provider of providerOrder()) {
+                const key = provider === 'claude' ? process.env.ANTHROPIC_API_KEY : process.env.GEMINI_API_KEY;
+                if (!key) continue;
                 try {
-                    const ran = await runClaude(input, accept);
+                    const ran = provider === 'claude' ? await runClaude(input, accept) : await runGemini(input, accept);
                     failures.push(...ran.failures);
                     return ran.value;
                 } catch (error) {
                     if (error instanceof AiProviderError) failures.push(...error.failures);
-                    else failures.push({ provider: 'claude', model: 'n/a', kind: 'unknown', message: String((error as Error)?.message ?? error) });
-                }
-            }
-            if (process.env.GEMINI_API_KEY) {
-                try {
-                    const ran = await runGemini(input, accept);
-                    failures.push(...ran.failures);
-                    return ran.value;
-                } catch (error) {
-                    if (error instanceof AiProviderError) failures.push(...error.failures);
-                    else failures.push({ provider: 'gemini', model: 'n/a', kind: 'unknown', message: String((error as Error)?.message ?? error) });
+                    else failures.push({ provider, model: 'n/a', kind: 'unknown', message: String((error as Error)?.message ?? error) });
                 }
             }
             return null;
