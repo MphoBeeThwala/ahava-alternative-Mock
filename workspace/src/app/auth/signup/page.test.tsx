@@ -9,7 +9,7 @@ let googleSignedIn: (() => void) | undefined;
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
 vi.mock('../../../contexts/AuthContext', () => ({ useAuth: () => ({ register }) }));
-vi.mock('../../../lib/api/auth', () => ({ authApi: { getInvite: vi.fn() } }));
+vi.mock('../../../lib/api/auth', () => ({ authApi: { getInvite: vi.fn(), getBetaConfig: () => Promise.resolve({ betaCodeRequired: false }) } }));
 vi.mock('../../../lib/api/consent', () => ({ consentApi: { give: (...a: unknown[]) => give(...a) } }));
 vi.mock('../../../components/GoogleSignInButton', () => ({
   default: (props: { onSignedIn: () => void }) => {

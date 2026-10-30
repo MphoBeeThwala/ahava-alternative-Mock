@@ -14,6 +14,8 @@ export interface RegisterData {
   researchConsent?: boolean;
   // Staff only: the token from the invite link an admin sent them.
   inviteToken?: string;
+  // Patients only, while the closed-beta gate is on (BETA_INVITE_CODES).
+  betaCode?: string;
   sancRegistrationNumber?: string;
   hpcsaNumber?: string;
 }
@@ -82,6 +84,10 @@ export const authApi = {
     const res = await apiClient.post('/auth/register', data, {
       headers: COOKIE_AUTH_HEADERS,
     });
+    return res.data;
+  },
+  getBetaConfig: async (): Promise<{ betaCodeRequired: boolean }> => {
+    const res = await apiClient.get('/auth/beta-config');
     return res.data;
   },
   getInvite: async (token: string): Promise<StaffInviteDetails> => {

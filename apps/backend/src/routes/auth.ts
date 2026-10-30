@@ -26,6 +26,7 @@ import { accessTokenSecondsFor, refreshRefusal } from "../services/sessionPolicy
 import { checkLoginAllowed, clearLoginFailures, recordLoginFailure } from "../services/loginThrottle";
 import { consumeInvite, findUsableInvite, isStaffInviteRequired } from "../services/staffInvites";
 import { writeRequestAudit } from "../services/clinicalAudit";
+import { isBetaGateEnabled, isValidBetaCode } from "../services/betaGate";
 import { RESEARCH_CONSENT_TYPE, RESEARCH_CONSENT_VERSION } from "../services/research/pseudonym";
 import prisma, { TransactionClient } from "../lib/prisma";
 import { getRedis } from "../services/redis";
@@ -88,6 +89,8 @@ const registerSchema = Joi.object({
   // Staff (nurse, doctor, admin) accounts need an admin-issued invite
   // (services/staffInvites.ts).
   inviteToken: Joi.string().max(200).optional(),
+  // Closed-beta code for new patient accounts (services/betaGate.ts).
+  betaCode: Joi.string().trim().max(100).allow("").optional(),
   // The shared registration secrets were retired for invites. Older cached
   // sign-up pages still send this field (often as ''), so it is accepted
   // and dropped rather than failing their patient sign-ups.
@@ -262,6 +265,11 @@ async function rotateRefreshToken(
 class InviteAlreadyUsedError extends Error {}
 
 // Register new user
+// Lets the sign-up page know whether to ask for a beta code.
+router.get("/beta-config", (_req, res) => {
+  res.json({ betaCodeRequired: isBetaGateEnabled() });
+});
+
 router.post("/register", authRateLimiter, async (req, res, next) => {
   try {
     const { error, value } = registerSchema.validate(req.body);
@@ -283,8 +291,16 @@ router.post("/register", authRateLimiter, async (req, res, next) => {
       hpcsaNumber,
       inviteToken,
       researchConsent,
+      betaCode,
     } = value;
     let email = rawEmail.toLowerCase();
+
+    if (role === "PATIENT" && isBetaGateEnabled() && !isValidBetaCode(betaCode)) {
+      return res.status(403).json({
+        error: "Ahava is in a closed beta. Enter a valid beta invite code to create an account.",
+        code: "BETA_CODE_REQUIRED",
+      });
+    }
 
     // Staff accounts are created only through a single-use invite an admin
     // sent to this person (services/staffInvites.ts). Patients sign up freely.

@@ -37,6 +37,25 @@ export default function SignupPage() {
   const [invite, setInvite] = useState<StaffInviteDetails | null>(null);
   const [inviteChecking, setInviteChecking] = useState(false);
 
+  // Closed beta: patients need a code. /auth/signup?beta=<code> pre-fills it.
+  const [betaCodeRequired, setBetaCodeRequired] = useState(false);
+  const [betaCode, setBetaCode] = useState("");
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("beta");
+    if (code) {
+      setBetaCode(code);
+      params.delete("beta");
+      const rest = params.toString();
+      window.history.replaceState(null, "", window.location.pathname + (rest ? `?${rest}` : ""));
+    }
+    authApi
+      .getBetaConfig()
+      .then((c) => setBetaCodeRequired(!!c.betaCodeRequired))
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     const token = new URLSearchParams(window.location.search).get("invite");
     if (!token) return;
@@ -81,6 +100,7 @@ export default function SignupPage() {
         // Sent only when ticked, and only for patients: staff are not research subjects.
         ...(!invite && researchConsent ? { researchConsent: true } : {}),
         ...(invite && inviteToken ? { inviteToken } : {}),
+        ...(!invite && betaCode.trim() ? { betaCode: betaCode.trim() } : {}),
         ...(invite?.role === "NURSE" && registrationNumber
           ? { sancRegistrationNumber: registrationNumber }
           : {}),
@@ -480,6 +500,39 @@ export default function SignupPage() {
                 onBlur={(e) => (e.currentTarget.style.borderColor = "#e7e5e4")}
               />
             </div>
+
+            {/* Closed beta: patients need an invite code */}
+            {betaCodeRequired && !invite && (
+              <div>
+                <label
+                  htmlFor="signup-beta-code"
+                  style={{
+                    display: "block",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: "#374151",
+                    marginBottom: 6,
+                  }}
+                >
+                  Beta invite code
+                </label>
+                <input
+                  id="signup-beta-code"
+                  type="text"
+                  required
+                  autoComplete="off"
+                  placeholder="Enter your invite code"
+                  value={betaCode}
+                  onChange={(e) => setBetaCode(e.target.value)}
+                  style={inp}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = "#0d9488")}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = "#e7e5e4")}
+                />
+                <p style={{ fontSize: 12, color: "#78716c", marginTop: 6 }}>
+                  Ahava is in a closed beta. This is a test version, not for emergencies or medical advice.
+                </p>
+              </div>
+            )}
 
             {/* Role: staff roles come only from an invite */}
             {invite ? (
