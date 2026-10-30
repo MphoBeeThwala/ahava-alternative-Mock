@@ -38,6 +38,7 @@ import { auditSignIn } from "../services/signInAudit";
 import { writeRequestAudit } from "../services/clinicalAudit";
 import { seedBaselineForUser } from "../services/baselineSeed";
 import { addEmailJob } from "../services/queue";
+import { isBetaGateEnabled } from "../services/betaGate";
 
 const router: Router = Router();
 
@@ -176,6 +177,14 @@ router.post("/", requireEnabled, authRateLimiter, async (req, res, next) => {
         linkToken,
         email: existing.email,
         needsTwoFactorCode: existing.totpEnabled,
+      });
+    }
+
+    // Closed beta: new accounts need a beta code, which Google sign-in can't carry.
+    if (isBetaGateEnabled()) {
+      return res.status(403).json({
+        error: "Ahava is in a closed beta. Create your account with your beta invite code on the sign-up page first, then you can sign in.",
+        code: "BETA_CODE_REQUIRED",
       });
     }
 
