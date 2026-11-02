@@ -144,6 +144,8 @@ export default function PatientDashboard() {
             bloodPressure: { systolic: 0, diastolic: 0 },
             temperature: undefined,
             oxygenSaturation: undefined,
+            hrvRmssd: undefined,
+            respiratoryRate: undefined,
             source: 'manual',
         });
     };
@@ -514,9 +516,12 @@ export default function PatientDashboard() {
                     primaryDisabled={loading}
                 >
                     <div className="space-y-3" role="form" aria-label="Record biometrics">
+                        <p className="text-xs leading-relaxed text-[var(--muted)]">
+                            Sit down and rest for 5 minutes first, and log at the same times each day. Fill in only what you measured.
+                        </p>
                         <div className="grid grid-cols-2 gap-2">
                             <div>
-                                <label htmlFor="biometric-heart-rate" className="mb-1 block text-xs font-semibold text-[var(--muted)]">Heart rate (bpm)</label>
+                                <label htmlFor="biometric-heart-rate" className="mb-1 block text-xs font-semibold text-[var(--muted)]">Resting heart rate (bpm)</label>
                                 <input
                                     id="biometric-heart-rate"
                                     name="heartRate"
@@ -604,6 +609,47 @@ export default function PatientDashboard() {
                             })}
                         />
                         </div>
+                        <div className="grid grid-cols-2 gap-2">
+                            <div>
+                                <label htmlFor="biometric-hrv" className="mb-1 block text-xs font-semibold text-[var(--muted)]">HRV, RMSSD (ms)</label>
+                                <input
+                                    id="biometric-hrv"
+                                    name="hrvRmssd"
+                                    type="number"
+                                    min={0}
+                                    max={300}
+                                    placeholder="optional"
+                                    className="w-full rounded-xl border px-3 py-2.5 text-[var(--foreground)] outline-none transition placeholder:text-[var(--muted)] focus:ring-2 focus:ring-[var(--primary)]"
+                                    style={{ borderColor: 'var(--border)' }}
+                                    value={biometricData.hrvRmssd || ''}
+                                    onChange={(e) => setBiometricData({
+                                        ...biometricData,
+                                        hrvRmssd: e.target.value ? Number(e.target.value) : undefined,
+                                    })}
+                                />
+                            </div>
+                            <div>
+                                <label htmlFor="biometric-resp-rate" className="mb-1 block text-xs font-semibold text-[var(--muted)]">Breathing rate (per min)</label>
+                                <input
+                                    id="biometric-resp-rate"
+                                    name="respiratoryRate"
+                                    type="number"
+                                    min={4}
+                                    max={60}
+                                    placeholder="optional"
+                                    className="w-full rounded-xl border px-3 py-2.5 text-[var(--foreground)] outline-none transition placeholder:text-[var(--muted)] focus:ring-2 focus:ring-[var(--primary)]"
+                                    style={{ borderColor: 'var(--border)' }}
+                                    value={biometricData.respiratoryRate || ''}
+                                    onChange={(e) => setBiometricData({
+                                        ...biometricData,
+                                        respiratoryRate: e.target.value ? Number(e.target.value) : undefined,
+                                    })}
+                                />
+                            </div>
+                        </div>
+                        <p className="text-xs leading-relaxed text-[var(--muted)]">
+                            HRV: enter the RMSSD value from Garmin, Fitbit or Samsung. Apple Watch shows a different measure (SDNN), so leave it blank.
+                        </p>
                     </div>
                 </Modal>
             </DashboardLayout>

@@ -10,12 +10,12 @@ const serif = 'var(--font-serif, Georgia, serif)';
 const steps = [
   { n: '1', title: 'Tell us what’s going on', desc: 'Describe your symptoms in your own words, and add a photo if it helps.' },
   { n: '2', title: 'Get a clear next step', desc: 'AI checks your symptoms and suggests how urgent they are and what to do. A clinician reviews the result.' },
-  { n: '3', title: 'Follow it up', desc: 'Book a nurse visit, or keep an eye on your vitals from your phone so changes get noticed early.' },
+  { n: '3', title: 'Follow it up', desc: 'Book a nurse visit, or log your vitals each day so changes get noticed early.' },
 ];
 
 const features: { icon: IconName; title: string; desc: string }[] = [
   { icon: 'stethoscope', title: 'Symptom Check', desc: 'Plain-language guidance on how urgent your symptoms are, with a clinician reviewing the result.' },
-  { icon: 'watch', title: 'Vitals from your phone', desc: 'Connect Health Connect or Apple Health. Ahava learns your normal and flags meaningful changes.' },
+  { icon: 'watch', title: 'Track your vitals', desc: 'Log readings from your watch or cuff. After about two weeks Ahava learns your normal and flags meaningful changes. Automatic phone sync is coming.' },
   { icon: 'calendar', title: 'Nurse visits', desc: 'Book a nurse to come to you when you need hands-on care.' },
 ];
 

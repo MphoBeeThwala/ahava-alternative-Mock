@@ -35,6 +35,16 @@ const STEPS = [
   { n: "4", title: "AI monitors in real time",  body: "Every sync triggers Ahava's early-warning model. If anything unusual is detected (RED or YELLOW alert), your care team is notified immediately." },
 ];
 
+// Terra and ROOK need paid API accounts that aren't set up yet, so their
+// connect buttons stay disabled. Flip to false once the accounts are live.
+const VENDOR_SYNC_UNDER_CONSTRUCTION = true;
+
+const underConstructionPill = (
+  <span style={{ marginLeft: 8, background: "#FBF1DD", color: "#5C3D04", border: "1px solid #EBD3A0", borderRadius: 999, padding: "2px 10px", fontSize: 11, fontWeight: 700, verticalAlign: "middle" }}>
+    Under construction
+  </span>
+);
+
 export default function WearablePage() {
   const toast = useToast();
   const [status, setStatus] = useState<TerraStatus | null>(null);
@@ -169,8 +179,16 @@ export default function WearablePage() {
                 Connect Your Smartwatch ⌚
               </h1>
               <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 14, margin: 0 }}>
-                Link your wearable device to unlock continuous AI health monitoring — no manual logging needed.
+                Link your wearable for automatic syncing from the Ahava phone app.
               </p>
+            </div>
+          </div>
+
+          <div style={{ maxWidth: 900, margin: "24px auto 0", padding: "0 24px" }}>
+            <div style={{ background: "#FBF1DD", border: "1px solid #EBD3A0", color: "#5C3D04", borderRadius: 14, padding: "14px 18px", fontSize: 14, lineHeight: 1.6 }}>
+              <strong>Beta note:</strong> automatic syncing isn&apos;t available in the web beta yet. Log your vitals by hand from the{" "}
+              <Link href="/patient/dashboard" style={{ color: "#5C3D04", fontWeight: 700 }}>dashboard</Link>, using the readings on your watch.
+              Ahava needs about two weeks of readings to learn your normal.
             </div>
           </div>
 
@@ -187,7 +205,7 @@ export default function WearablePage() {
                 </div>
                 <div>
                   <div style={{ fontSize: 16, fontWeight: 800, color: "var(--foreground)", marginBottom: 4 }}>
-                    {loadingStatus ? "Checking status…" : isConnected ? "Terra Connected" : "Connect via Terra"}
+                    {loadingStatus ? "Checking status…" : isConnected ? "Terra Connected" : <>Connect via Terra{VENDOR_SYNC_UNDER_CONSTRUCTION && underConstructionPill}</>}
                   </div>
                   {isConnected && devices.length > 0 && (
                     <div style={{ fontSize: 13, color: "var(--muted)", display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -208,10 +226,10 @@ export default function WearablePage() {
                 {!isConnected ? (
                   <button
                     onClick={handleConnect}
-                    disabled={connecting}
-                    style={{ padding: "13px 28px", borderRadius: 12, border: "none", background: connecting ? "#94a3b8" : "linear-gradient(135deg,#0d9488,#059669)", color: "white", fontSize: 15, fontWeight: 700, cursor: connecting ? "not-allowed" : "pointer", fontFamily: "inherit", boxShadow: connecting ? "none" : "0 4px 16px rgba(13,148,136,0.35)", transition: "all 0.2s" }}
+                    disabled={connecting || VENDOR_SYNC_UNDER_CONSTRUCTION}
+                    style={{ padding: "13px 28px", borderRadius: 12, border: "none", background: connecting || VENDOR_SYNC_UNDER_CONSTRUCTION ? "#94a3b8" : "linear-gradient(135deg,#0d9488,#059669)", color: "white", fontSize: 15, fontWeight: 700, cursor: connecting || VENDOR_SYNC_UNDER_CONSTRUCTION ? "not-allowed" : "pointer", fontFamily: "inherit", boxShadow: connecting || VENDOR_SYNC_UNDER_CONSTRUCTION ? "none" : "0 4px 16px rgba(13,148,136,0.35)", transition: "all 0.2s" }}
                   >
-                    {connecting ? "Opening Terra…" : "Connect Terra →"}
+                    {VENDOR_SYNC_UNDER_CONSTRUCTION ? "Coming soon" : connecting ? "Opening Terra…" : "Connect Terra →"}
                   </button>
                 ) : (
                   <>
@@ -242,7 +260,7 @@ export default function WearablePage() {
                 </div>
                 <div>
                   <div style={{ fontSize: 16, fontWeight: 800, color: "var(--foreground)", marginBottom: 4 }}>
-                    {loadingStatus ? "Checking status…" : rookStatus?.connected ? "ROOK Connected" : "Connect via ROOK (Trial)"}
+                    {loadingStatus ? "Checking status…" : rookStatus?.connected ? "ROOK Connected" : <>Connect via ROOK{VENDOR_SYNC_UNDER_CONSTRUCTION && underConstructionPill}</>}
                   </div>
                   <div style={{ fontSize: 13, color: "var(--muted)" }}>
                     {rookStatus?.connected ? "Active ROOK health data sync" : "Access more biometric sources with our new ROOK integration"}
@@ -254,10 +272,10 @@ export default function WearablePage() {
                 {!rookStatus?.connected ? (
                   <button
                     onClick={handleConnectRook}
-                    disabled={connectingRook}
-                    style={{ padding: "13px 28px", borderRadius: 12, border: "none", background: connectingRook ? "#94a3b8" : "linear-gradient(135deg,#3b82f6,#2563eb)", color: "white", fontSize: 15, fontWeight: 700, cursor: connectingRook ? "not-allowed" : "pointer", fontFamily: "inherit", boxShadow: connectingRook ? "none" : "0 4px 16px rgba(59,130,246,0.35)", transition: "all 0.2s" }}
+                    disabled={connectingRook || VENDOR_SYNC_UNDER_CONSTRUCTION}
+                    style={{ padding: "13px 28px", borderRadius: 12, border: "none", background: connectingRook || VENDOR_SYNC_UNDER_CONSTRUCTION ? "#94a3b8" : "linear-gradient(135deg,#3b82f6,#2563eb)", color: "white", fontSize: 15, fontWeight: 700, cursor: connectingRook || VENDOR_SYNC_UNDER_CONSTRUCTION ? "not-allowed" : "pointer", fontFamily: "inherit", boxShadow: connectingRook || VENDOR_SYNC_UNDER_CONSTRUCTION ? "none" : "0 4px 16px rgba(59,130,246,0.35)", transition: "all 0.2s" }}
                   >
-                    {connectingRook ? "Opening ROOK…" : "Connect ROOK →"}
+                    {VENDOR_SYNC_UNDER_CONSTRUCTION ? "Coming soon" : connectingRook ? "Opening ROOK…" : "Connect ROOK →"}
                   </button>
                 ) : (
                   <button
