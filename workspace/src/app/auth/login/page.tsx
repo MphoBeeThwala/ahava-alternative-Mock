@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth, TwoFactorRequiredError } from '../../../contexts/AuthContext';
 import GoogleSignInButton from '../../../components/GoogleSignInButton';
+import { BRAND, LogoMark } from '../../../components/Logo';
 
 export default function LoginPage() {
     const router = useRouter();
@@ -107,20 +108,20 @@ export default function LoginPage() {
         <div style={{ display: 'flex', minHeight: '100vh', fontFamily: 'inherit' }}>
 
             {/* ── LEFT BRAND PANEL ── */}
-            <div style={{ flex: '0 0 42%', background: 'linear-gradient(160deg,#0a1628 0%,#0d2f5e 55%,#0a3d3a 100%)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 48px', position: 'relative', overflow: 'hidden' }}>
+            <div style={{ flex: '0 0 42%', background: 'linear-gradient(160deg,#0B3B31 0%,#0F5D4E 100%)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 48px', position: 'relative', overflow: 'hidden' }}>
                 <div style={{ position: 'absolute', top: -100, right: -80, width: 320, height: 320, borderRadius: '50%', background: 'radial-gradient(circle,rgba(13,148,136,0.18),transparent 70%)', pointerEvents: 'none' }} />
                 <div style={{ position: 'absolute', bottom: -80, left: -60, width: 280, height: 280, borderRadius: '50%', background: 'radial-gradient(circle,rgba(0,74,173,0.2),transparent 70%)', pointerEvents: 'none' }} />
                 <div style={{ position: 'relative', zIndex: 1, textAlign: 'center', maxWidth: 320 }}>
-                    <div style={{ width: 80, height: 80, borderRadius: 22, background: 'linear-gradient(135deg,#0d9488,#059669)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 38, margin: '0 auto 24px' }}>⚕️</div>
+                    <div style={{ margin: '0 auto 24px', width: 80, height: 80, borderRadius: 22, background: BRAND.cream, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><LogoMark size={52} label="Ahava Healthcare" /></div>
                     <h2 style={{ color: 'white', fontSize: 24, fontWeight: 800, marginBottom: 12 }}>Healthcare that comes to you</h2>
                     <p style={{ color: 'rgba(255,255,255,0.55)', fontSize: 14, lineHeight: 1.7, marginBottom: 40 }}>
-                        AI-powered health monitoring, on-demand nurse visits, and doctor oversight — all in one platform.
+                        Symptom checks reviewed by a clinician, vitals from your phone, and nurse visits when you need one.
                     </p>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                         {[
-                            { icon: '🔒', label: 'POPIA Compliant', sub: 'Your data is encrypted & protected' },
-                            { icon: '✅', label: 'Professional Nurses', sub: 'Accreditation in progress' },
-                            { icon: '⚕️', label: 'Doctor Oversight', sub: 'Licensed medical oversight' },
+                            { icon: '🔒', label: 'Closed beta', sub: 'Invite only while we test' },
+                            { icon: '✅', label: 'Two-factor for staff', sub: 'Clinicians sign in with an authenticator app' },
+                            { icon: '⚕️', label: 'Clinician review', sub: 'AI triage results are reviewed' },
                         ].map(({ icon, label, sub }) => (
                             <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12, padding: '10px 14px', textAlign: 'left' }}>
                                 <span style={{ fontSize: 20 }}>{icon}</span>

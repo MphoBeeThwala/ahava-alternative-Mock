@@ -7,6 +7,7 @@ import { useAuth } from "../../../contexts/AuthContext";
 import { authApi, type StaffInviteDetails } from "../../../lib/api/auth";
 import { consentApi } from "../../../lib/api/consent";
 import GoogleSignInButton from "../../../components/GoogleSignInButton";
+import { BRAND, LogoMark } from "../../../components/Logo";
 import { RESEARCH_AGREE_TEXT, RESEARCH_CONSENT_VERSION, RESEARCH_TITLE, ResearchDetails, ResearchIntro } from "../../../components/ResearchConsentCopy";
 
 const ROLE_LABEL: Record<StaffInviteDetails["role"], string> = {
@@ -183,7 +184,7 @@ export default function SignupPage() {
         style={{
           flex: "0 0 40%",
           background:
-            "linear-gradient(160deg,#0a1628 0%,#0d2f5e 55%,#0a3d3a 100%)",
+            "linear-gradient(160deg,#0B3B31 0%,#0F5D4E 100%)",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
@@ -227,21 +228,7 @@ export default function SignupPage() {
             maxWidth: 300,
           }}
         >
-          <div
-            style={{
-              width: 72,
-              height: 72,
-              borderRadius: 20,
-              background: "linear-gradient(135deg,#0d9488,#059669)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 32,
-              margin: "0 auto 24px",
-            }}
-          >
-            ⚕️
-          </div>
+          <div style={{ width: 72, height: 72, borderRadius: 20, background: BRAND.cream, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 24px" }}><LogoMark size={48} label="Ahava Healthcare" /></div>
           <h2
             style={{
               color: "white",
@@ -250,7 +237,7 @@ export default function SignupPage() {
               marginBottom: 10,
             }}
           >
-            Join thousands of South Africans
+            Join the Ahava beta
           </h2>
           <p
             style={{
@@ -260,14 +247,13 @@ export default function SignupPage() {
               marginBottom: 36,
             }}
           >
-            Take control of your health with AI monitoring, verified nurses, and
-            doctor oversight.
+            Check your symptoms with AI, reviewed by a clinician. Invite only while we test.
           </p>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {[
-              { icon: "🧠", text: "AI-powered symptom analysis" },
+              { icon: "🧠", text: "Symptom Check with AI" },
               { icon: "🏥", text: "On-demand nurse home visits" },
-              { icon: "👨‍⚕️", text: "Doctor-reviewed diagnostics" },
+              { icon: "👨‍⚕️", text: "Clinician-reviewed triage" },
               { icon: "📊", text: "Real-time biometric tracking" },
             ].map(({ icon, text }) => (
               <div

@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Plus_Jakarta_Sans } from "next/font/google";
+import { Plus_Jakarta_Sans, Fraunces } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "../contexts/AuthContext";
 import { ToastProvider } from "../contexts/ToastContext";
@@ -13,9 +13,17 @@ const plusJakarta = Plus_Jakarta_Sans({
   weight: ["400", "500", "600", "700"],
 });
 
+// Serif for the wordmark and headlines: warmer than the sans used for the UI.
+const fraunces = Fraunces({
+  variable: "--font-serif",
+  subsets: ["latin"],
+  display: "swap",
+  weight: ["500", "600"],
+});
+
 export const metadata: Metadata = {
   title: "Ahava Healthcare",
-  description: "AI-Powered Healthcare Platform for South Africa",
+  description: "Check your symptoms with AI, reviewed by a clinician. Closed beta.",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
@@ -26,7 +34,7 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#0a1628",
+  themeColor: "#FBF7F0",
 };
 
 export default function RootLayout({
@@ -36,7 +44,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${plusJakarta.variable} font-sans antialiased`}>
+      <body className={`${plusJakarta.variable} ${fraunces.variable} font-sans antialiased`}>
         <ServiceWorkerRegistration />
         <AuthProvider>
           <ToastProvider>
