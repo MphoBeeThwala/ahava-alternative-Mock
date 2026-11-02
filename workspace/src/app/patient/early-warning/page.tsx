@@ -128,7 +128,7 @@ export default function EarlyWarningPage() {
                       <Link href="/patient/book-visit" className="btn-primary inline-block px-4 py-2 rounded-xl font-medium">
                         Request a Nurse Visit
                       </Link>
-                      <Link href="/patient/ai-doctor" className="inline-block px-4 py-2 rounded-xl font-medium border border-slate-200 text-[var(--foreground)] hover:bg-slate-50">
+                      <Link href="/patient/symptom-check" className="inline-block px-4 py-2 rounded-xl font-medium border border-slate-200 text-[var(--foreground)] hover:bg-slate-50">
                         Ask a Doctor (Remote)
                       </Link>
                     </div>

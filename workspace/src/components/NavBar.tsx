@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { Logo } from "./Logo";
 import { useAuth } from '../contexts/AuthContext';
 
 export default function NavBar() {
@@ -28,7 +29,7 @@ export default function NavBar() {
                     <div className="flex justify-between h-14">
                         <div className="flex">
                             <Link href="/" className="flex-shrink-0 flex items-center">
-                                <span className="text-xl font-bold text-slate-900 tracking-tight">Ahava Healthcare</span>
+                                <Logo size={28} />
                             </Link>
                         </div>
                         <div className="flex items-center gap-4">
@@ -51,7 +52,7 @@ export default function NavBar() {
                 <div className="flex justify-between h-14">
                     <div className="flex">
                         <Link href={getDashboardPath()} className="flex-shrink-0 flex items-center">
-                            <span className="text-xl font-bold text-slate-900 tracking-tight">Ahava Healthcare</span>
+                            <Logo size={28} />
                         </Link>
                     </div>
                     <div className="flex items-center gap-4">

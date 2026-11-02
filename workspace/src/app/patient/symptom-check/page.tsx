@@ -539,7 +539,7 @@ export default function AiDoctorPage() {
           <div className="max-w-2xl mx-auto">
             <div className="flex flex-wrap justify-between items-center gap-4 mb-8">
               <h1 className="text-2xl sm:text-3xl font-bold text-[var(--foreground)] tracking-tight">
-                AI Doctor Assistant
+                Symptom Check
               </h1>
               <Link
                 href="/patient/dashboard"

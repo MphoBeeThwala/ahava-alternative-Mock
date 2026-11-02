@@ -6,11 +6,11 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "Ahava Healthcare",
     short_name: "Ahava",
-    description: "AI-powered healthcare platform for South Africa",
+    description: "Check your symptoms with AI, reviewed by a clinician.",
     start_url: "/",
     display: "standalone",
-    background_color: "#0a1628",
-    theme_color: "#0a1628",
+    background_color: "#FBF7F0",
+    theme_color: "#FBF7F0",
     icons: [
       { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
       { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },

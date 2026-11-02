@@ -116,7 +116,7 @@ export default function PatientDashboard() {
     }, []);
 
     // New in Phase 3: a lightweight status preview of the patient's most
-    // recent triage case (the full flow already lives at /patient/ai-doctor —
+    // recent triage case (the full flow already lives at /patient/symptom-check —
     // this just surfaces where the newest one stands). Read-only, uses the
     // same endpoint that page already calls; adds no new backend behavior.
     const loadTriageCases = useCallback(async () => {
@@ -409,7 +409,7 @@ export default function PatientDashboard() {
                                             icon="stethoscope"
                                             message="No symptom checks yet"
                                             action={
-                                                <Link href="/patient/ai-doctor" className="text-sm font-semibold text-[var(--primary)]">
+                                                <Link href="/patient/symptom-check" className="text-sm font-semibold text-[var(--primary)]">
                                                     Describe your symptoms →
                                                 </Link>
                                             }
@@ -490,12 +490,12 @@ export default function PatientDashboard() {
 
                                 <Card className="flex items-center justify-between gap-3">
                                     <div>
-                                        <p className="text-sm font-bold text-[var(--foreground)]">AI Doctor Assistant</p>
+                                        <p className="text-sm font-bold text-[var(--foreground)]">Symptom Check</p>
                                         <p className="mt-0.5 text-xs text-[var(--muted)]">
                                             For decision support only — not a medical diagnosis.
                                         </p>
                                     </div>
-                                    <Link href="/patient/ai-doctor" className="shrink-0 text-sm font-semibold text-[var(--primary)]">
+                                    <Link href="/patient/symptom-check" className="shrink-0 text-sm font-semibold text-[var(--primary)]">
                                         Open →
                                     </Link>
                                 </Card>

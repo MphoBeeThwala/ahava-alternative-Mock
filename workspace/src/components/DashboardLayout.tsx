@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { useAuth } from "../contexts/AuthContext";
 import { authApi } from "../lib/api";
 import { Icon } from "./ui/Icon";
+import { Logo } from "./Logo";
 
 /**
  * Dashboard layout: sidebar + main content.
@@ -157,14 +158,8 @@ export default function DashboardLayout({
         {/* Brand header */}
         <div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
           <div className="flex items-center gap-3">
-            <div
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[9px] text-white"
-              style={{ background: `linear-gradient(135deg,${accent},#059669)` }}
-            >
-              <Icon name="stethoscope" size={16} />
-            </div>
-            <Link href={dashboardPath} className="font-bold text-[var(--foreground)] tracking-tight text-sm leading-tight" aria-label="Ahava Healthcare home">
-              Ahava<br /><span style={{ color: accent, fontWeight: 600 }}>Healthcare</span>
+            <Link href={dashboardPath} aria-label="Ahava Healthcare home">
+              <Logo size={30} />
             </Link>
           </div>
           {/* Close button for mobile */}
@@ -206,12 +201,12 @@ export default function DashboardLayout({
                 <Icon name="alert-triangle" size={18} /><span>Early Warning</span>
               </Link>
               <Link
-                href="/patient/ai-doctor"
-                className={linkClass(pathname === "/patient/ai-doctor")}
-                aria-current={pathname === "/patient/ai-doctor" ? "page" : undefined}
+                href="/patient/symptom-check"
+                className={linkClass(pathname === "/patient/symptom-check")}
+                aria-current={pathname === "/patient/symptom-check" ? "page" : undefined}
                 onClick={() => setIsSidebarOpen(false)}
               >
-                <Icon name="stethoscope" size={18} /><span>AI Doctor</span>
+                <Icon name="stethoscope" size={18} /><span>Symptom Check</span>
               </Link>
               <Link
                 href="/patient/wearable"
@@ -350,13 +345,7 @@ export default function DashboardLayout({
             <Icon name="menu" size={20} />
           </button>
           <div className="flex items-center gap-2">
-            <div
-              className="flex h-6 w-6 items-center justify-center rounded-md text-white"
-              style={{ background: `linear-gradient(135deg,${accent},#059669)` }}
-            >
-              <Icon name="stethoscope" size={12} />
-            </div>
-            <span className="text-xs font-bold text-[var(--foreground)]">Ahava</span>
+            <Logo size={22} tagline={false} />
           </div>
           <div className="w-8" /> {/* Spacer for alignment */}
         </header>
