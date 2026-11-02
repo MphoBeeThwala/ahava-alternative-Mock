@@ -8,6 +8,10 @@ const nextConfig: NextConfig = {
   ...(process.env.NEXT_OUTPUT_STANDALONE === "false"
     ? {}
     : { output: "standalone" as const }),
+  // The triage flow was "AI Doctor" at /patient/ai-doctor; keep old links working.
+  async redirects() {
+    return [{ source: "/patient/ai-doctor", destination: "/patient/symptom-check", permanent: true }];
+  },
   // Google's sign-in popup talks back to the page with postMessage. The
   // default browser policy for some setups blocks that; this is the value
   // Google documents for pages that use Sign in with Google.
