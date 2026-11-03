@@ -208,6 +208,8 @@ export default function LoginPage() {
                                     id="login-email"
                                     data-testid="login-email"
                                     type="email"
+                                    autoCapitalize="none"
+                                    autoCorrect="off"
                                     required
                                     autoComplete="email"
                                     placeholder="you@example.com"

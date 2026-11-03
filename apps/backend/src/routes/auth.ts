@@ -41,7 +41,12 @@ import { signToken, verifyToken, TWOFA_PENDING_TTL_SECONDS } from "../services/t
 const router: Router = Router();
 
 // Allow any TLD including .test for mock/load-test users (IANA list excludes .test)
+// Trimmed and lower-cased on the way in: every account is stored lower-case, and
+// phone keyboards capitalise the first letter, which made sign-in fail with
+// "Invalid credentials" for the right email and password.
 export const emailSchema = Joi.string()
+  .trim()
+  .lowercase()
   .email({ tlds: { allow: false } })
   .required();
 
