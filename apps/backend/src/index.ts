@@ -47,11 +47,12 @@ import { authMiddleware } from "./middleware/auth";
 import { attachRequestId } from "./middleware/requestId";
 import { originGuard } from "./middleware/originGuard";
 import { trustedProxyClientIp } from "./middleware/trustedProxy";
+import { rejectCiphertextInput } from "./middleware/rejectCiphertextInput";
 
 // Import services
 import { getRedis, initializeRedis } from "./services/redis";
 import { initializeQueue, closeQueues } from "./services/queue";
-import { getWebSocketRedisHealth, initializeWebSocket } from "./services/websocket";
+import { WS_MAX_PAYLOAD_BYTES, getWebSocketRedisHealth, initializeWebSocket } from "./services/websocket";
 import { getAiHealth } from "./services/aiHealth";
 import { startAiHealthMonitor } from "./services/aiProviders";
 import { startResearchSweepMonitor } from "./services/research/researchSweep";
@@ -62,7 +63,7 @@ import { loadEncryptionKeys } from "./lib/keyManagement";
 
 const app: Application = express();
 const server = createServer(app);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ server, maxPayload: WS_MAX_PAYLOAD_BYTES });
 
 // Trust proxy so X-Forwarded-For is trusted (required behind Render/Railway/reverse proxies for rate-limit)
 app.set("trust proxy", 1);
@@ -158,6 +159,9 @@ app.use(
     },
   }),
 );
+
+// Clients never send our ciphertext (decryption-oracle defence)
+app.use(rejectCiphertextInput);
 
 // Reject cross-site state-changing requests that authenticate by cookie
 app.use(originGuard(corsOrigins));

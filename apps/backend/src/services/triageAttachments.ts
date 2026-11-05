@@ -1,3 +1,4 @@
+import { decryptData, encryptData } from "../utils/encryption";
 import { randomUUID } from "crypto";
 import { sanitizeDataUrlImage } from "../utils/imageUtils";
 import {
@@ -25,6 +26,11 @@ export interface StoredTriageAttachment {
   // format existing rows were already written in.
   storageKey?: string;
   dataUrl?: string;
+  // True when the bytes are AES-256-GCM encrypted at the application layer
+  // (for `dataUrl` the field holds the ciphertext, not a data: URL; for
+  // `storageKey` the object body is the ciphertext). Older attachments are
+  // not encrypted and read back unchanged.
+  encrypted?: boolean;
 }
 
 interface ParsedDataUrl {
@@ -44,6 +50,8 @@ const ALLOWED_LAB_TYPES = new Set([
   ...ALLOWED_IMAGE_TYPES,
   "application/pdf",
 ]);
+
+const attachmentAad = (id: string) => `triage-attachment:${id}`;
 
 function parseDataUrl(dataUrl: string): ParsedDataUrl {
   const match = /^data:([^;]+);base64,(.+)$/s.exec(dataUrl.trim());
@@ -179,6 +187,9 @@ export async function persistTriageAttachment(params: {
   if (buffer.length === 0 || buffer.length > MAX_ATTACHMENT_BYTES) {
     throw new Error("Attachment exceeds the 5MB size limit");
   }
+  if (mimeType === "application/pdf" && buffer.subarray(0, 5).toString("latin1") !== "%PDF-") {
+    throw new Error("Attachment is not a valid PDF");
+  }
 
   const ext = extensionForMimeType(mimeType);
   const id = randomUUID();
@@ -196,13 +207,17 @@ export async function persistTriageAttachment(params: {
   // embedded in the TriageCase row — every existing consumer of this
   // manifest goes through materializeTriageAttachment, so nothing else
   // needs to know which backend a given attachment used.
+  // Patient photos and lab results are health records: encrypt the bytes before
+  // they reach the database or the bucket, bound to this attachment's id.
+  const sealed = encryptData(buffer.toString("base64"), attachmentAad(id));
+
   if (isObjectStorageConfigured()) {
     const storageKey = `triage-attachments/${id}.${ext}`;
-    await uploadObject(storageKey, buffer, mimeType);
-    return { ...base, storageKey };
+    await uploadObject(storageKey, Buffer.from(sealed, "utf8"), "application/octet-stream");
+    return { ...base, storageKey, encrypted: true };
   }
 
-  return { ...base, dataUrl: dataUrlToStore };
+  return { ...base, dataUrl: sealed, encrypted: true };
 }
 
 export function buildTriageAttachmentUrl(caseId: string, attachmentId: string) {
@@ -220,9 +235,17 @@ export async function materializeTriageAttachment(
 ): Promise<ParsedDataUrl> {
   if (attachment.storageKey) {
     const { buffer, contentType } = await getObjectBuffer(attachment.storageKey);
+    if (attachment.encrypted) {
+      const plain = decryptData(buffer.toString("utf8"), attachmentAad(attachment.id));
+      return { mimeType: attachment.mimeType, buffer: Buffer.from(plain, "base64") };
+    }
     return { mimeType: contentType || attachment.mimeType, buffer };
   }
   if (attachment.dataUrl) {
+    if (attachment.encrypted) {
+      const plain = decryptData(attachment.dataUrl, attachmentAad(attachment.id));
+      return { mimeType: attachment.mimeType, buffer: Buffer.from(plain, "base64") };
+    }
     return parseDataUrl(attachment.dataUrl);
   }
   throw new Error(`Attachment ${attachment.id} has neither storageKey nor dataUrl`);

@@ -3,7 +3,7 @@ import { UserRole } from '@prisma/client';
 import { AuthenticatedRequest, authMiddleware, requirePatient } from '../middleware/auth';
 import { idempotencyMiddleware } from '../middleware/idempotency';
 import { DISPATCH_RADIUS_KM, notifyNearbyNurses, withdrawBookingOffer } from '../services/websocket';
-import { encryptData, encryptPatientLocation, isEncryptedPayload, safeDecrypt } from '../utils/encryption';
+import { encryptData, encryptPatientLocation, safeDecrypt } from '../utils/encryption';
 import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 import { NO_ACCESS_ERROR, auditAccessDenied, checkVerifiedClinician, displayName, hasActiveAccess, isClinicianRole, patientsWithActiveAccess } from '../services/careAccess';
 import Joi from 'joi';
@@ -69,9 +69,10 @@ router.post('/', requirePatient, idempotencyMiddleware({ scope: 'booking-create'
       return res.status(400).json({ error: 'Unsupported visit duration' });
     }
 
-    const encryptedAddress = isEncryptedPayload(bookingData.encryptedAddress)
-      ? bookingData.encryptedAddress
-      : encryptData(bookingData.encryptedAddress || bookingData.address || '');
+    // Always encrypted here from plaintext. Accepting a client-supplied
+    // ciphertext made this endpoint a decryption oracle (it echoes the address
+    // back decrypted).
+    const encryptedAddress = encryptData(bookingData.address || bookingData.encryptedAddress || '');
 
     const booking = await prisma.booking.create({
       data: {

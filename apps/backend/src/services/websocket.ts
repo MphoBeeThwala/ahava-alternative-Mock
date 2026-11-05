@@ -14,9 +14,33 @@ interface AuthenticatedWebSocket extends WebSocket {
   userRole?: string;
   isAlive?: boolean;
   authTimeout?: ReturnType<typeof setTimeout>;
+  /** Messages seen in the current rate window (see WS_RATE_*). */
+  rateWindowStart?: number;
+  rateCount?: number;
+  clientIp?: string;
 }
 
 const clients = new Map<string, AuthenticatedWebSocket>();
+
+// ---- abuse limits -----------------------------------------------------------
+// A frame is parsed before anyone is authenticated, so size and rate are
+// bounded here rather than left to the library defaults (100 MiB per frame).
+export const WS_MAX_PAYLOAD_BYTES = 64 * 1024;
+const WS_MAX_PREAUTH_BYTES = 4 * 1024; // an AUTH frame is a few hundred bytes
+const WS_RATE_WINDOW_MS = 10_000;
+const WS_RATE_MAX_MESSAGES = 60; // per socket per window (location updates ~ every few seconds)
+const WS_MAX_CONNECTIONS_PER_IP = 20;
+const connectionsPerIp = new Map<string, number>();
+
+/** Close a user's open socket here (deactivation, role change, credentials change). Other replicas do the same via pub/sub. */
+export const closeUserSocket = (userId: string, reason = 'Session revoked') => {
+  const ws = clients.get(userId);
+  if (ws) {
+    onlineNurses.delete(userId);
+    try { ws.close(4001, reason); } catch { /* already closed */ }
+  }
+};
+
 const onlineNurses = new Map<string, { lat: number; lng: number }>(); // Track online nurses with location
 
 export const isValidCoordinate = (lat: unknown, lng: unknown): lat is number =>
@@ -206,6 +230,7 @@ const ensureRedisPubSub = async () => {
       }
       if (evt.type === 'authCacheInvalidate') {
         authCacheInvalidationHandler?.(evt.userId);
+        closeUserSocket(evt.userId);
         return;
       }
       if (evt.type === 'bookingTaken') {
@@ -256,6 +281,20 @@ export const initializeWebSocket = (wss: WebSocketServer) => {
   wss.on('connection', (ws: AuthenticatedWebSocket, req) => {
     console.log('🔌 New WebSocket connection');
 
+    const forwarded = String(req.headers['x-forwarded-for'] ?? '').split(',').map((h) => h.trim()).filter(Boolean);
+    ws.clientIp = forwarded[forwarded.length - 1] || req.socket.remoteAddress || 'unknown';
+    const open = (connectionsPerIp.get(ws.clientIp) ?? 0) + 1;
+    if (open > WS_MAX_CONNECTIONS_PER_IP) {
+      ws.close(1013, 'Too many connections');
+      return;
+    }
+    connectionsPerIp.set(ws.clientIp, open);
+    ws.once('close', () => {
+      const left = (connectionsPerIp.get(ws.clientIp as string) ?? 1) - 1;
+      if (left <= 0) connectionsPerIp.delete(ws.clientIp as string);
+      else connectionsPerIp.set(ws.clientIp as string, left);
+    });
+
     // Heartbeat mechanism
     ws.isAlive = true;
     ws.on('pong', () => {
@@ -267,8 +306,23 @@ export const initializeWebSocket = (wss: WebSocketServer) => {
     }, 5000);
 
     // Handle messages
-    ws.on('message', async (data) => {
+    ws.on('message', async (data, isBinary) => {
       try {
+        const size = Array.isArray(data) ? data.reduce((n, b) => n + b.length, 0) : (data as Buffer | ArrayBuffer).byteLength;
+        if (isBinary || (!ws.userId && size > WS_MAX_PREAUTH_BYTES)) {
+          ws.close(1009, 'Message not allowed');
+          return;
+        }
+        const nowMs = Date.now();
+        if (!ws.rateWindowStart || nowMs - ws.rateWindowStart > WS_RATE_WINDOW_MS) {
+          ws.rateWindowStart = nowMs;
+          ws.rateCount = 0;
+        }
+        ws.rateCount = (ws.rateCount ?? 0) + 1;
+        if (ws.rateCount > WS_RATE_MAX_MESSAGES) {
+          ws.close(1008, 'Rate limit exceeded');
+          return;
+        }
         const message = JSON.parse(data.toString());
         if (!ws.userId) {
           const ticket =
@@ -751,7 +805,15 @@ const handleVisitStatusUpdate = async (ws: AuthenticatedWebSocket, data: any) =>
 };
 
 const handleTypingIndicator = async (ws: AuthenticatedWebSocket, data: any) => {
-  // Send typing indicator to recipient
+  // Only between the two people on the same visit, with well-typed fields.
+  if (typeof data?.recipientId !== 'string' || typeof data?.visitId !== 'string' || typeof data?.isTyping !== 'boolean') return;
+  const visit = await prisma.visit.findUnique({
+    where: { id: data.visitId },
+    select: { nurseId: true, doctorId: true, booking: { select: { patientId: true } } },
+  });
+  if (!visit) return;
+  const people = new Set([visit.nurseId, visit.doctorId, visit.booking.patientId].filter(Boolean) as string[]);
+  if (!people.has(ws.userId as string) || !people.has(data.recipientId)) return;
   sendToUser(data.recipientId, {
     type: 'TYPING_INDICATOR',
     data: {
@@ -790,6 +852,7 @@ export const sendToUser = (userId: string, message: any) => {
  * no-op and each replica just falls back to its own TTL, exactly like today.
  */
 export const publishAuthCacheInvalidation = (userId: string) => {
+  closeUserSocket(userId);
   publishEvent({ instanceId: INSTANCE_ID, type: 'authCacheInvalidate', userId });
 };
 

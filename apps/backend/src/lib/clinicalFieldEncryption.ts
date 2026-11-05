@@ -40,8 +40,13 @@ export const ENCRYPTED_CLINICAL_FIELDS: Record<string, { text?: string[]; json?:
   Message: { text: ['content'] },
 };
 
+// Always encrypts, even a value that already looks like ciphertext. Passing such
+// a value through let a caller store someone else's stolen ciphertext in a field
+// they control and have the API decrypt it on read. Wrapped, it reads back as
+// the same string they put in. (The backfill script only calls this on values
+// that are not yet encrypted.)
 export function encryptClinicalText(value: string): string {
-  return isEncryptedPayload(value) ? value : encryptData(value, CLINICAL_TEXT_AAD);
+  return encryptData(value, CLINICAL_TEXT_AAD);
 }
 
 function isEncryptedJson(value: unknown): value is { [JSON_MARKER]: string } {
@@ -51,7 +56,6 @@ function isEncryptedJson(value: unknown): value is { [JSON_MARKER]: string } {
 
 export function encryptClinicalJson(value: unknown): unknown {
   if (value === null || value === undefined || value === Prisma.DbNull || value === Prisma.JsonNull) return value;
-  if (isEncryptedJson(value)) return value;
   return { [JSON_MARKER]: encryptData(JSON.stringify(value), CLINICAL_TEXT_AAD) };
 }
 
