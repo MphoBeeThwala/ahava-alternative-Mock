@@ -4,11 +4,11 @@
  *
  * Usage:
  *   node scripts/load-test-patient-pipeline.js
- *   BASE_URL=http://localhost:4000 MOCK_PATIENT_PASSWORD=MockPatient1! COUNT=100 CONCURRENCY=10 node scripts/load-test-patient-pipeline.js
+ *   BASE_URL=http://localhost:4000 MOCK_PATIENT_PASSWORD=CHANGE-ME-use-your-own-MOCK_PATIENT_PASSWORD COUNT=100 CONCURRENCY=10 node scripts/load-test-patient-pipeline.js
  *
  * Env:
  *   BASE_URL                 Backend base URL (default http://localhost:4000)
- *   MOCK_PATIENT_PASSWORD    Same as used in seed (default MockPatient1!)
+ *   MOCK_PATIENT_PASSWORD    Same as used in seed (default CHANGE-ME-use-your-own-MOCK_PATIENT_PASSWORD)
  *   COUNT                    Number of users to simulate (default 1000, max 20000)
  *   CONCURRENCY              Parallel requests per wave (default 20, max 2000)
  *   SPOOF_CLIENT_IPS         1 (default) = send a distinct X-Forwarded-For per
@@ -21,7 +21,7 @@
  */
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:4000';
-const PASSWORD = process.env.MOCK_PATIENT_PASSWORD || 'MockPatient1!';
+const PASSWORD = process.env.MOCK_PATIENT_PASSWORD;
 const COUNT = Math.min(parseInt(process.env.COUNT || '1000', 10) || 1000, 20000);
 const CONCURRENCY = Math.min(Math.max(1, parseInt(process.env.CONCURRENCY || '20', 10)), 2000);
 // Real users each arrive from their own IP; a single test machine does not.

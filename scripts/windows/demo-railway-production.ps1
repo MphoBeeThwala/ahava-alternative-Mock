@@ -10,7 +10,7 @@ param()
 # ================================================
 $RAILWAY_BACKEND = "https://backend-production.up.railway.app"  # Update with your actual backend URL
 $RAILWAY_FRONTEND = "https://frontend-production-326c.up.railway.app"
-$MOCK_PASSWORD = "MockPatient1!"
+$MOCK_PASSWORD = "CHANGE-ME-use-your-own-MOCK_PATIENT_PASSWORD"
 
 Write-Host "╔══════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
 Write-Host "║  Early Warning Demo - Railway Production Deployment      ║" -ForegroundColor Cyan

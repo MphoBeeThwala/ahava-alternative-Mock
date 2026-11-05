@@ -8,7 +8,9 @@
  *
  * Env:
  *   MOCK_PATIENT_COUNT       Number of patients to create (default 1000)
- *   MOCK_PATIENT_PASSWORD    Shared password for all mock users (default MockPatient1!)
+ *   MOCK_PATIENT_PASSWORD    REQUIRED. Shared password for all mock users (min 12 chars). No default:
+ *                            a default in the repo is a public password for every mock account.
+ *   ALLOW_MOCK_SEED          Must be 'true' to run when NODE_ENV=production (never do this on a live system)
  *   MOCK_WITH_HISTORY        1 = backfill 14 days of biometric_readings per user (default 0)
  *   MOCK_EARLY_WARNING_COUNT Number of users to mark for early-warning test (default 0); no extra data here, use run-early-warning-test to send anomalous readings via API
  */
@@ -18,7 +20,15 @@ import * as bcrypt from '@node-rs/bcrypt';
 import prisma from '../lib/prisma';
 
 const COUNT = Math.min(parseInt(process.env.MOCK_PATIENT_COUNT || '1000', 10) || 1000, 10000);
-const PASSWORD = process.env.MOCK_PATIENT_PASSWORD || 'MockPatient1!';
+if (process.env.NODE_ENV === 'production' && process.env.ALLOW_MOCK_SEED !== 'true') {
+  console.error('[seed-mock-patients] Refusing to run with NODE_ENV=production. Mock accounts must not exist on a live system.');
+  process.exit(1);
+}
+const PASSWORD = process.env.MOCK_PATIENT_PASSWORD ?? '';
+if (PASSWORD.length < 12) {
+  console.error('[seed-mock-patients] Set MOCK_PATIENT_PASSWORD (at least 12 characters). There is no default.');
+  process.exit(1);
+}
 const WITH_HISTORY = process.env.MOCK_WITH_HISTORY === '1' || process.env.MOCK_WITH_HISTORY === 'true';
 const EARLY_WARNING_COUNT = Math.min(
   Math.max(0, parseInt(process.env.MOCK_EARLY_WARNING_COUNT || '0', 10) || 0),

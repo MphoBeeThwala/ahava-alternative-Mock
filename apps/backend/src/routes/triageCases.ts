@@ -9,6 +9,11 @@ import { resolveTriageOverride } from '../services/triageReviewValidation';
 
 const router: Router = Router();
 
+// Only these User columns may leave the API as the patient/doctor of a case.
+// A bare `include: { patient: true }` returns the whole row: password hash,
+// 2FA secret, reset-token hashes, encrypted ID number, push tokens.
+const PUBLIC_PARTY = { id: true, firstName: true, lastName: true } as const;
+
 // The tiered clinical plan names treatments and tests for the reviewing doctor.
 // It is never part of what a patient is sent.
 function forPatient<T extends Record<string, unknown>>(c: T): Omit<T, 'aiStructuredPlan'> {
@@ -47,7 +52,7 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res, next) => 
 router.get('/:id', authMiddleware, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { id } = req.params;
-    const triageCase = await prisma.triageCase.findUnique({ where: { id }, include: { patient: true, doctor: true } });
+    const triageCase = await prisma.triageCase.findUnique({ where: { id }, include: { patient: { select: PUBLIC_PARTY }, doctor: { select: PUBLIC_PARTY } } });
     if (!triageCase) return res.status(404).json({ error: 'Triage case not found' });
     if (triageCase.patientId !== req.user!.id) {
       if (req.user!.role !== UserRole.DOCTOR || triageCase.doctorId !== req.user!.id) return res.status(403).json({ error: 'Access denied' });

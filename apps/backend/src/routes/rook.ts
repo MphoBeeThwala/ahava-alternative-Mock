@@ -16,6 +16,7 @@ import crypto from 'crypto';
 import { withResilientHttp } from '../services/resilientHttp';
 import { mlServiceHeaders } from '../services/mlServiceAuth';
 import { isWebhookReplay } from '../services/webhookReplayGuard';
+import { webhookSignaturesRequired } from '../services/webhookPolicy';
 
 const router: Router = Router();
 
@@ -325,20 +326,7 @@ export async function handleRookWebhook(
   next: NextFunction
 ): Promise<void> {
   try {
-    const routeSpecificSignatureSetting = parseBooleanEnv(process.env.ROOK_WEBHOOK_SIGNATURE_REQUIRED);
-    const globalSignatureSetting = parseBooleanEnv(process.env.WEBHOOK_SIGNATURE_REQUIRED);
-    // Precedence:
-    // 1) ROOK_WEBHOOK_SIGNATURE_REQUIRED
-    // 2) WEBHOOK_SIGNATURE_REQUIRED
-    // 3) secure-by-default in production
-    const enforceSignedWebhooks =
-      routeSpecificSignatureSetting ??
-      globalSignatureSetting ??
-      (process.env.NODE_ENV === 'production');
-
-    if (!enforceSignedWebhooks && process.env.NODE_ENV === 'production') {
-      console.warn('[rook] Webhook signature verification is DISABLED in production');
-    }
+    const enforceSignedWebhooks = webhookSignaturesRequired(process.env.ROOK_WEBHOOK_SIGNATURE_REQUIRED);
     // ROOK sends HMAC in X-ROOK-HASH header. Keep legacy support for rook-signature.
     const signatureRaw =
       (req.headers['x-rook-hash'] as string | undefined) ||

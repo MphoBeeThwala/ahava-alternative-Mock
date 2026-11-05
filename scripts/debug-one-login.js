@@ -1,5 +1,5 @@
 const BASE = process.env.BASE_URL || 'http://localhost:4000';
-const PASSWORD = process.env.MOCK_PATIENT_PASSWORD || 'MockPatient1!';
+const PASSWORD = process.env.MOCK_PATIENT_PASSWORD;
 
 async function main() {
   const email = 'patient_0001@mock.ahava.test';

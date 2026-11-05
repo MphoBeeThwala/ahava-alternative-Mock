@@ -628,7 +628,7 @@ const handleLocationUpdate = async (ws: AuthenticatedWebSocket, data: any) => {
       },
       include: {
         booking: {
-          include: { patient: true },
+          include: { patient: { select: { id: true, firstName: true, lastName: true } } },
         },
       },
     });

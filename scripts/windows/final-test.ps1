@@ -13,7 +13,7 @@ try {
 # TEST 2: Login
 Write-Host "`n[TEST 2] User Login" -ForegroundColor Yellow
 try {
-    $loginBody = @{email="patient_0001@mock.ahava.test"; password="MockPatient1!"} | ConvertTo-Json
+    $loginBody = @{email="patient_0001@mock.ahava.test"; password="CHANGE-ME-use-your-own-MOCK_PATIENT_PASSWORD"} | ConvertTo-Json
     $login = Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/api/auth/login" -Method POST -Headers @{"Content-Type"="application/json"} -Body $loginBody | ConvertFrom-Json
     Write-Host "PASS: User = $($login.user.email)" -ForegroundColor Green
     $token = $login.accessToken

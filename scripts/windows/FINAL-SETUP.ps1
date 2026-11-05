@@ -62,7 +62,7 @@ Write-Host ""
 
 $env:BASE_URL = $backend
 $env:COUNT = 10
-$env:MOCK_PATIENT_PASSWORD = "MockPatient1!"
+$env:MOCK_PATIENT_PASSWORD = "CHANGE-ME-use-your-own-MOCK_PATIENT_PASSWORD"
 
 try {
     & node scripts/run-early-warning-test.js
