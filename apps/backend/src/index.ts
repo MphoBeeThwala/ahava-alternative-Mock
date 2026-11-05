@@ -5,6 +5,7 @@ import compression from "compression";
 import morgan from "morgan";
 import dotenv from "dotenv";
 import { createServer } from "http";
+import { createHash, timingSafeEqual } from "crypto";
 import { WebSocketServer } from "ws";
 
 // Load environment variables
@@ -45,6 +46,7 @@ import { rateLimiter } from "./middleware/rateLimiter";
 import { authMiddleware } from "./middleware/auth";
 import { attachRequestId } from "./middleware/requestId";
 import { originGuard } from "./middleware/originGuard";
+import { trustedProxyClientIp } from "./middleware/trustedProxy";
 
 // Import services
 import { getRedis, initializeRedis } from "./services/redis";
@@ -112,6 +114,9 @@ app.use(
   }),
 );
 
+// Real client IP from our own Next.js proxy (before anything that reads req.ip)
+app.use(trustedProxyClientIp);
+
 // Compression and logging
 app.use(compression());
 app.use(attachRequestId);
@@ -160,6 +165,17 @@ app.use(originGuard(corsOrigins));
 // Rate limiting
 app.use(rateLimiter);
 
+
+/** True when the request carries the operator's HEALTH_TOKEN (X-Health-Token). Unset token = never. */
+function hasHealthToken(req: express.Request): boolean {
+  const expected = process.env.HEALTH_TOKEN;
+  const given = req.headers["x-health-token"];
+  if (!expected || expected.length < 16 || typeof given !== "string") return false;
+  const a = createHash("sha256").update(given).digest();
+  const b = createHash("sha256").update(expected).digest();
+  return timingSafeEqual(a, b);
+}
+
 // Liveness. Answers as long as the process is running — do not add dependency
 // checks here, or a database blip will have the platform restart every replica
 // at once.
@@ -203,15 +219,19 @@ app.get("/ready", async (req, res) => {
   const checksWithAi: Record<string, string> = { ...checks, ai: ai === "unconfigured" ? "degraded" : ai };
 
   const ready = checks.database === "ok";
+  // The platform health check only needs the status code. Which dependencies
+  // are up is infrastructure detail, shown only to a caller holding HEALTH_TOKEN.
+  const detailed = hasHealthToken(req);
   res.status(ready ? 200 : 503).json({
     status: ready ? "ready" : "not_ready",
-    checks: checksWithAi,
+    ...(detailed ? { checks: checksWithAi } : {}),
     timestamp: new Date().toISOString(),
   });
 });
 
 app.get("/health/ws-redis", (req, res) => {
-  res.json(getWebSocketRedisHealth());
+  if (!hasHealthToken(req)) return res.status(404).json({ error: "Route not found" });
+  return res.json(getWebSocketRedisHealth());
 });
 
 // Root: so opening backend URL in browser doesn't 404
