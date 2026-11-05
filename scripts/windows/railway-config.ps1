@@ -3,7 +3,7 @@
 
 $RAILWAY_BACKEND = "backend-production-9a3b.up.railway.app"
 $RAILWAY_FRONTEND = "https://frontend-production-326c.up.railway.app"
-$MOCK_PASSWORD = "MockPatient1!"
+$MOCK_PASSWORD = "CHANGE-ME-use-your-own-MOCK_PATIENT_PASSWORD"
 
 # To use these settings:
 # . .\railway-config.ps1

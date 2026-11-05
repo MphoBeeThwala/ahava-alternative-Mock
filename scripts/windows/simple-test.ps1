@@ -11,7 +11,7 @@ Write-Host "✓ Status: $($h.status) - Time: $($h.timestamp)" -ForegroundColor G
 
 # TEST 2
 Write-Host "`n[TEST 2] User Login (Mock Patient)" -ForegroundColor Yellow
-$loginBody = @{email="patient_0001@mock.ahava.test"; password="MockPatient1!"} | ConvertTo-Json
+$loginBody = @{email="patient_0001@mock.ahava.test"; password="CHANGE-ME-use-your-own-MOCK_PATIENT_PASSWORD"} | ConvertTo-Json
 $login = Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/api/auth/login" -Method POST -Headers @{"Content-Type"="application/json"} -Body $loginBody | ConvertFrom-Json
 Write-Host "✓ Logged in: $($login.user.email) (Role: $($login.user.role))" -ForegroundColor Green
 Write-Host "  Token: $($login.accessToken.Substring(0,40))..." -ForegroundColor Gray

@@ -49,6 +49,25 @@ function validBookingBody(overrides: Record<string, unknown> = {}) {
 }
 
 describe("bookings: create", () => {
+  it("ignores a client-supplied price and charges the server tariff", async () => {
+    const { agent } = await registerRole("PATIENT", "booking-price");
+
+    const res = await agent
+      .post("/api/v1/bookings")
+      .send(validBookingBody({ amountInCents: 1, estimatedDuration: 90 }));
+
+    expect(res.status).toBe(201);
+    expect(res.body.booking.amountInCents).toBe(70000);
+  });
+
+  it("rejects a duration that is not on the tariff", async () => {
+    const { agent } = await registerRole("PATIENT", "booking-bad-duration");
+
+    const res = await agent.post("/api/v1/bookings").send(validBookingBody({ estimatedDuration: 45 }));
+
+    expect(res.status).toBe(400);
+  });
+
   it("creates a booking for an authenticated patient", async () => {
     const { agent } = await registerRole("PATIENT", "booking-create");
 

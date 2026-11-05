@@ -8,6 +8,7 @@ import { writeRequestAudit as createAuditLog } from '../services/clinicalAudit';
 import { NO_ACCESS_ERROR, auditAccessDenied, checkVerifiedClinician, displayName, hasActiveAccess, isClinicianRole, patientsWithActiveAccess } from '../services/careAccess';
 import Joi from 'joi';
 import prisma from '../lib/prisma';
+import { ALLOWED_VISIT_DURATIONS, visitPriceCents } from '../services/visitTariff';
 
 const router: Router = Router();
 
@@ -30,9 +31,11 @@ const createBookingSchema = Joi.object({
   encryptedAddress: Joi.string().optional(),
   address: Joi.string().optional(),
   scheduledDate: Joi.date().iso().required(),
-  estimatedDuration: Joi.number().min(30).max(240).default(60),
+  estimatedDuration: Joi.number().valid(...ALLOWED_VISIT_DURATIONS).default(60),
   paymentMethod: Joi.string().valid('CARD', 'INSURANCE').required(),
-  amountInCents: Joi.number().min(0).required(),
+  // Accepted for older clients but ignored: the price is set by the server
+  // (services/visitTariff.ts), never by the caller.
+  amountInCents: Joi.any().strip(),
   patientLat: Joi.number().min(-90).max(90).required(),
   patientLng: Joi.number().min(-180).max(180).required(),
   insuranceProvider: Joi.string().when('paymentMethod', {
@@ -61,6 +64,11 @@ router.post('/', requirePatient, idempotencyMiddleware({ scope: 'booking-create'
       return res.status(400).json({ error: 'Scheduled date must be in the future' });
     }
 
+    const amountInCents = visitPriceCents(bookingData.estimatedDuration);
+    if (amountInCents === null) {
+      return res.status(400).json({ error: 'Unsupported visit duration' });
+    }
+
     const encryptedAddress = isEncryptedPayload(bookingData.encryptedAddress)
       ? bookingData.encryptedAddress
       : encryptData(bookingData.encryptedAddress || bookingData.address || '');
@@ -74,7 +82,7 @@ router.post('/', requirePatient, idempotencyMiddleware({ scope: 'booking-create'
         encryptedPatientLocation: encryptPatientLocation(bookingData.patientLat, bookingData.patientLng),
         paymentMethod: bookingData.paymentMethod,
         paymentStatus: 'PENDING',
-        amountInCents: bookingData.amountInCents,
+        amountInCents,
         insuranceProvider: bookingData.insuranceProvider,
         insuranceMemberNumber: bookingData.insuranceMemberNumber,
         insuranceStatus: bookingData.paymentMethod === 'INSURANCE' ? 'PENDING_VERIFICATION' : undefined,

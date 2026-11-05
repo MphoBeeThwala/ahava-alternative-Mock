@@ -19,6 +19,7 @@ import { authMiddleware } from "../middleware/auth";
 import prisma from "../lib/prisma";
 import { mlServiceHeaders } from "../services/mlServiceAuth";
 import { isWebhookReplay } from "../services/webhookReplayGuard";
+import { webhookSignaturesRequired } from "../services/webhookPolicy";
 
 const router: Router = Router();
 
@@ -194,32 +195,46 @@ export default router;
 // Terra webhook handler — exported separately for registration at /webhooks/terra
 // This must use raw body (no JSON body-parser) for HMAC verification.
 // ---------------------------------------------------------------------------
+const TERRA_SIGNATURE_TOLERANCE_SECONDS = 300;
+
+function safeEqualHex(a: string, b: string): boolean {
+  const ab = Buffer.from(a, "utf8");
+  const bb = Buffer.from(b, "utf8");
+  return ab.length === bb.length && crypto.timingSafeEqual(ab, bb);
+}
+
+/**
+ * Terra signs `t=<unix>,v1=<hex>` with HMAC-SHA256 over `<t>.<rawBody>`; the
+ * timestamp must be recent so a captured delivery cannot be replayed later.
+ * The older bare-hex-of-body form is still accepted so existing tooling keeps
+ * working, compared in constant time.
+ */
+function terraSignatureValid(header: string, secret: string, rawBody: Buffer): boolean {
+  const parts = Object.fromEntries(
+    header.split(",").map((kv) => {
+      const i = kv.indexOf("=");
+      return i < 0 ? [kv.trim(), ""] : [kv.slice(0, i).trim(), kv.slice(i + 1).trim()];
+    }),
+  );
+  if (parts.t && parts.v1) {
+    const ts = Number(parts.t);
+    if (!Number.isFinite(ts) || Math.abs(Date.now() / 1000 - ts) > TERRA_SIGNATURE_TOLERANCE_SECONDS) return false;
+    const expected = crypto.createHmac("sha256", secret).update(`${parts.t}.`).update(rawBody).digest("hex");
+    return safeEqualHex(parts.v1, expected);
+  }
+  const expected = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
+  return safeEqualHex(header, expected);
+}
+
 export async function handleTerraWebhook(
   req: Request,
   res: Response,
   next: NextFunction,
 ): Promise<void> {
   try {
-    const routeSpecificSignatureSetting = parseBooleanEnv(
+    const enforceSignedWebhooks = webhookSignaturesRequired(
       process.env.TERRA_WEBHOOK_SIGNATURE_REQUIRED,
     );
-    const globalSignatureSetting = parseBooleanEnv(
-      process.env.WEBHOOK_SIGNATURE_REQUIRED,
-    );
-    // Precedence:
-    // 1) TERRA_WEBHOOK_SIGNATURE_REQUIRED
-    // 2) WEBHOOK_SIGNATURE_REQUIRED
-    // 3) secure-by-default in production
-    const enforceSignedWebhooks =
-      routeSpecificSignatureSetting ??
-      globalSignatureSetting ??
-      process.env.NODE_ENV === "production";
-
-    if (!enforceSignedWebhooks && process.env.NODE_ENV === "production") {
-      console.warn(
-        "[terra] Webhook signature verification is DISABLED in production",
-      );
-    }
     const signature = req.headers["terra-signature"] as string | undefined;
     const rawBody = (req as any).rawBody as Buffer | undefined;
 
@@ -240,11 +255,7 @@ export async function handleTerraWebhook(
         return;
       }
 
-      const expected = crypto
-        .createHmac("sha256", secret)
-        .update(rawBody)
-        .digest("hex");
-      if (signature !== expected) {
+      if (!terraSignatureValid(signature, secret, rawBody)) {
         console.warn("[terra] Webhook HMAC verification failed");
         res.status(401).json({ error: "Invalid signature" });
         return;

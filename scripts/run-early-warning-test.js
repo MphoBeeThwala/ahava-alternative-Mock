@@ -6,16 +6,16 @@
  *
  * Usage:
  *   node scripts/run-early-warning-test.js
- *   BASE_URL=http://localhost:4000 MOCK_PATIENT_PASSWORD=MockPatient1! COUNT=20 node scripts/run-early-warning-test.js
+ *   BASE_URL=http://localhost:4000 MOCK_PATIENT_PASSWORD=CHANGE-ME-use-your-own-MOCK_PATIENT_PASSWORD COUNT=20 node scripts/run-early-warning-test.js
  *
  * Env:
  *   BASE_URL                 Backend base URL (default http://localhost:4000)
- *   MOCK_PATIENT_PASSWORD    Same as used in seed (default MockPatient1!)
+ *   MOCK_PATIENT_PASSWORD    Same as used in seed (default CHANGE-ME-use-your-own-MOCK_PATIENT_PASSWORD)
  *   COUNT                    Number of users to test (default 50)
  */
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:4000';
-const PASSWORD = process.env.MOCK_PATIENT_PASSWORD || 'MockPatient1!';
+const PASSWORD = process.env.MOCK_PATIENT_PASSWORD;
 const COUNT = Math.min(parseInt(process.env.COUNT || '50', 10) || 50, 200);
 
 function pad(n) {

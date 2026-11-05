@@ -21,7 +21,7 @@ Optional:
 
 ```powershell
 $env:MOCK_PATIENT_COUNT=5000
-$env:MOCK_PATIENT_PASSWORD="MockPatient1!"
+$env:MOCK_PATIENT_PASSWORD="CHANGE-ME-use-your-own-MOCK_PATIENT_PASSWORD"
 pnpm seed:mock-patients
 ```
 
@@ -41,7 +41,7 @@ Use one of:
 ```powershell
 $env:BASE_URL="http://localhost:4000"
 $env:MOCK_USER_EMAIL="patient_0001@mock.ahava.test"
-$env:MOCK_USER_PASSWORD="MockPatient1!"
+$env:MOCK_USER_PASSWORD="CHANGE-ME-use-your-own-MOCK_PATIENT_PASSWORD"
 k6 run loadtest/k6/api_smoke.js
 ```
 
@@ -51,7 +51,7 @@ k6 run loadtest/k6/api_smoke.js
 $env:BASE_URL="http://localhost:4000"
 $env:WS_URL="ws://localhost:4000"
 $env:MOCK_USER_COUNT="1000"
-$env:MOCK_USER_PASSWORD="MockPatient1!"
+$env:MOCK_USER_PASSWORD="CHANGE-ME-use-your-own-MOCK_PATIENT_PASSWORD"
 $env:P95_MS="1200"
 k6 run loadtest/k6/api_load.js
 ```

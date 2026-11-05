@@ -55,7 +55,7 @@ Write-Host "`n========== AUTHENTICATION TESTS ==========" -ForegroundColor Cyan
 # Login with mock patient
 $loginBody = @{
     email = "patient_0001@mock.ahava.test"
-    password = "MockPatient1!"
+    password = "CHANGE-ME-use-your-own-MOCK_PATIENT_PASSWORD"
 } | ConvertTo-Json
 
 $loginResponse = Test-Endpoint "User Login" POST "$baseUrl/api/auth/login" -Body $loginBody -Headers @{"Content-Type"="application/json"}

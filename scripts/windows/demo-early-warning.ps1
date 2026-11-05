@@ -41,7 +41,7 @@ function Invoke-LoadTest {
     Write-Host "🚀 Running load test with $UserCount users (concurrency: $Concurrency)..." -ForegroundColor Cyan
     
     $env:BASE_URL = $BaseUrl
-    $env:MOCK_PATIENT_PASSWORD = "MockPatient1!"
+    $env:MOCK_PATIENT_PASSWORD = "CHANGE-ME-use-your-own-MOCK_PATIENT_PASSWORD"
     $env:COUNT = $UserCount
     $env:CONCURRENCY = $Concurrency
     
@@ -63,7 +63,7 @@ function Invoke-EarlyWarningDemo {
     Write-Host "  • Checks: alert detection & response" -ForegroundColor DarkCyan
     
     $env:BASE_URL = $BaseUrl
-    $env:MOCK_PATIENT_PASSWORD = "MockPatient1!"
+    $env:MOCK_PATIENT_PASSWORD = "CHANGE-ME-use-your-own-MOCK_PATIENT_PASSWORD"
     $env:COUNT = $UserCount
     
     node scripts/run-early-warning-test.js
@@ -75,7 +75,7 @@ function Invoke-EarlyWarningDemo {
 function Invoke-SinglePatientStream {
     param(
         [string]$PatientEmail = "patient_0001@mock.ahava.test",
-        [string]$Password = "MockPatient1!",
+        [string]$Password = "CHANGE-ME-use-your-own-MOCK_PATIENT_PASSWORD",
         [int]$DurationSeconds = 300,
         [int]$IntervalSeconds = 30,
         [string]$BaseUrl = "http://localhost:4000"
@@ -124,7 +124,7 @@ function Invoke-ParallelPatients {
     param(
         [int]$PatientCount = 10,
         [string]$BaseUrl = "http://localhost:4000",
-        [string]$Password = "MockPatient1!"
+        [string]$Password = "CHANGE-ME-use-your-own-MOCK_PATIENT_PASSWORD"
     )
     
     Write-Host "👥 Starting demo streams for $PatientCount patients in parallel..." -ForegroundColor Cyan
@@ -177,7 +177,7 @@ function Invoke-ParallelPatients {
 function Get-PatientEarlyWarning {
     param(
         [string]$PatientEmail = "patient_0001@mock.ahava.test",
-        [string]$Password = "MockPatient1!",
+        [string]$Password = "CHANGE-ME-use-your-own-MOCK_PATIENT_PASSWORD",
         [string]$BaseUrl = "http://localhost:4000"
     )
     

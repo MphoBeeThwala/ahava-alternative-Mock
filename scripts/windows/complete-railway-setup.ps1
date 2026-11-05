@@ -126,7 +126,7 @@ try {
         -Headers @{"Content-Type" = "application/json"} `
         -Body (@{
             email = "patient_0001@mock.ahava.test"
-            password = "MockPatient1!"
+            password = "CHANGE-ME-use-your-own-MOCK_PATIENT_PASSWORD"
         } | ConvertTo-Json) `
         -TimeoutSec 5 `
         -ErrorAction Stop
@@ -162,7 +162,7 @@ if ($authToken) {
     
     try {
         $env:BASE_URL = $RAILWAY_BACKEND
-        $env:MOCK_PATIENT_PASSWORD = "MockPatient1!"
+        $env:MOCK_PATIENT_PASSWORD = "CHANGE-ME-use-your-own-MOCK_PATIENT_PASSWORD"
         $env:COUNT = 10
         
         Write-Host "Executing: node scripts/run-early-warning-test.js" -ForegroundColor Gray
@@ -317,7 +317,7 @@ $config = @"
 
 `$RAILWAY_BACKEND = "$RAILWAY_BACKEND"
 `$RAILWAY_FRONTEND = "$RAILWAY_FRONTEND"
-`$MOCK_PASSWORD = "MockPatient1!"
+`$MOCK_PASSWORD = "CHANGE-ME-use-your-own-MOCK_PATIENT_PASSWORD"
 
 # To use these settings:
 # . .\railway-config.ps1
