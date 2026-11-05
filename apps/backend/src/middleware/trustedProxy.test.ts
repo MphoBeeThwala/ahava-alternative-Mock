@@ -2,8 +2,8 @@ import { trustedProxyClientIp } from "./trustedProxy";
 
 const SECRET = "a-long-shared-secret-value";
 
-function run(headers: Record<string, string>, secret: string | undefined = SECRET) {
-  if (secret === undefined) delete process.env.PROXY_SHARED_SECRET;
+function run(headers: Record<string, string>, secret: string | null = SECRET) {
+  if (secret === null) delete process.env.PROXY_SHARED_SECRET;
   else process.env.PROXY_SHARED_SECRET = secret;
   const req: any = { headers, ip: "10.0.0.1" };
   const next = jest.fn();
@@ -25,7 +25,7 @@ describe("trustedProxyClientIp", () => {
     expect(run({ "x-ahava-client-ip": "41.1.2.3" })).toBe("10.0.0.1");
   });
   it("does nothing when no secret is configured", () => {
-    expect(run({ "x-ahava-proxy-secret": SECRET, "x-ahava-client-ip": "41.1.2.3" }, undefined)).toBe("10.0.0.1");
+    expect(run({ "x-ahava-proxy-secret": SECRET, "x-ahava-client-ip": "41.1.2.3" }, null)).toBe("10.0.0.1");
   });
   it("rejects a value that is not an IP address", () => {
     expect(run({ "x-ahava-proxy-secret": SECRET, "x-ahava-client-ip": "not-an-ip" })).toBe("10.0.0.1");
