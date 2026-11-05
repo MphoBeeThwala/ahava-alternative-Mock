@@ -13,6 +13,7 @@ import crypto from "crypto";
 import * as bcrypt from "@node-rs/bcrypt";
 import { authenticator } from "otplib";
 import { encryptData, decryptData } from "../utils/encryption";
+import prisma from "../lib/prisma";
 
 const ISSUER = "Ahava Healthcare";
 const BACKUP_CODE_COUNT = 10;
@@ -37,6 +38,37 @@ export function verifyTotpCode(secret: string, code: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Verify a TOTP code AND burn it. A code is valid for about 90 seconds
+ * (window of 1), so without this a code that was shoulder-surfed, phished or
+ * logged could be replayed — for example to open a step-up window on a stolen
+ * session. The matched 30 s time step is stored; a code is accepted only if its
+ * step is later than the last one used, and the write is atomic so two
+ * simultaneous requests cannot both succeed with the same code.
+ */
+export async function verifyTotpCodeOnce(userId: string, secret: string, code: string): Promise<boolean> {
+  const token = code.trim();
+  if (!/^\d{6}$/.test(token)) return false;
+  // Integration tests sign in and step up repeatedly within one 30 s step; they opt out,
+  // and only under NODE_ENV=test. There is no production switch.
+  if (process.env.NODE_ENV === "test" && process.env.TOTP_REPLAY_PROTECTION_DISABLED_FOR_TESTS === "true") {
+    try { return authenticator.check(token, secret); } catch { return false; }
+  }
+  let delta: number | null;
+  try {
+    delta = authenticator.checkDelta(token, secret);
+  } catch {
+    return false;
+  }
+  if (delta === null || delta === undefined) return false;
+  const step = Math.floor(Date.now() / 30_000) + delta;
+  const { count } = await prisma.user.updateMany({
+    where: { id: userId, OR: [{ totpLastUsedStep: null }, { totpLastUsedStep: { lt: step } }] },
+    data: { totpLastUsedStep: step },
+  });
+  return count === 1;
 }
 
 // AH-13: AAD-bind the secret to the account it belongs to, so a totpSecret

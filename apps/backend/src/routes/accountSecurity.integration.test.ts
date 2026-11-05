@@ -1,3 +1,4 @@
+process.env.TOTP_REPLAY_PROTECTION_DISABLED_FOR_TESTS = "true"; // codes are reused within one 30s step
 /**
  * Account-security hardening (Phase A):
  *  - reset / verification tokens are stored hashed, and verification expires
