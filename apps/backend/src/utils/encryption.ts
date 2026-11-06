@@ -179,7 +179,8 @@ export function decryptData(encryptedData: string, aad?: string, key?: string): 
     const authTag = Buffer.from(tagB64, 'base64');
     const encrypted = Buffer.from(cipherB64, 'base64');
 
-    const decipher = crypto.createDecipheriv(algorithm, encryptionKey, iv);
+    if (authTag.length !== 16) throw new Error('Invalid authentication tag length');
+    const decipher = crypto.createDecipheriv(algorithm, encryptionKey, iv, { authTagLength: 16 });
     decipher.setAAD(buildAAD(aad));
     decipher.setAuthTag(authTag);
 
@@ -194,7 +195,7 @@ export function decryptData(encryptedData: string, aad?: string, key?: string): 
     const authTag = Buffer.from(parts[2], 'base64');
     const encrypted = Buffer.from(parts[3], 'base64');
 
-    const decipher = crypto.createDecipheriv(algorithm, encryptionKey, iv);
+    const decipher = crypto.createDecipheriv(algorithm, encryptionKey, iv, { authTagLength: 16 });
     decipher.setAuthTag(authTag);
 
     const decrypted = Buffer.concat([
@@ -210,7 +211,7 @@ export function decryptData(encryptedData: string, aad?: string, key?: string): 
     const authTag = Buffer.from(parts[1], 'hex');
     const encrypted = Buffer.from(parts[2], 'hex');
 
-    const decipher = crypto.createDecipheriv(algorithm, encryptionKey, iv);
+    const decipher = crypto.createDecipheriv(algorithm, encryptionKey, iv, { authTagLength: 16 });
     decipher.setAuthTag(authTag);
 
     const decrypted = Buffer.concat([

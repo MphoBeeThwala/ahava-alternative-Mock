@@ -75,7 +75,13 @@ export const errorHandler = (
 
   // Default to 500 server error
   const statusCode = error.statusCode || 500;
-  const message = error.message || 'Internal server error';
+  // An unexpected failure (5xx) never shows its internal message to the caller in
+  // production: library errors can name tables, files and hosts. The requestId in
+  // the response lets support find the full detail in the logs.
+  const message =
+    statusCode >= 500 && process.env.NODE_ENV === 'production'
+      ? 'Internal server error'
+      : error.message || 'Internal server error';
 
   res.status(statusCode).json({
     success: false,

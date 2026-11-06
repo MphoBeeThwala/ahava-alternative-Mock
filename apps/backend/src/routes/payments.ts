@@ -188,10 +188,16 @@ router.post('/webhook', async (req, res) => {
       return res.status(200).send('OK');
     }
 
-    await prisma.payment.update({
-      where: { id: payment.id },
+    // Only an unsettled payment may move. A late or retried notification must not
+    // flip a REFUNDED (or already FAILED) payment back, and two notifications
+    // arriving together must not both apply.
+    const moved = await prisma.payment.updateMany({
+      where: { id: payment.id, status: { in: ['PENDING', 'PROCESSING'] } },
       data: { status: nextStatus, payfastData: data as unknown as any },
     });
+    if (moved.count === 0) {
+      return res.status(200).send('OK');
+    }
 
     await createAuditLog({
       userId: null,

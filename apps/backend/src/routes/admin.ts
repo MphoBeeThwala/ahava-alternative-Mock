@@ -232,6 +232,17 @@ router.patch('/users/:id', requireAdmin, async (req: AuthenticatedRequest, res, 
       const decision = await checkStepUp(req.user!);
       if (!decision.ok) return res.status(403).json(decision.body);
     }
+    // Suspending another administrator is what someone holding a stolen admin
+    // session would do first, to slow the response. Needs the same fresh second
+    // factor, and the last other active admin cannot be suspended.
+    if (!value.isActive && user.isActive && user.role === UserRole.ADMIN) {
+      const decision = await checkStepUp(req.user!);
+      if (!decision.ok) return res.status(403).json(decision.body);
+      const otherActiveAdmins = await prisma.user.count({ where: { role: UserRole.ADMIN, isActive: true, id: { notIn: [id, req.user!.id] } } });
+      if (otherActiveAdmins === 0) {
+        return res.status(409).json({ error: 'This is the last other active administrator and cannot be suspended.' });
+      }
+    }
 
     const updated = await prisma.user.update({ where: { id }, data: { isActive: value.isActive } });
     // AH-08: without this, a suspended user stayed authenticated on

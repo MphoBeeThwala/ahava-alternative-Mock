@@ -124,7 +124,12 @@ function parseCookies(headerValue?: string): Record<string, string> {
       return cookies;
     }
 
-    cookies[key] = decodeURIComponent(rawValue);
+    try {
+      cookies[key] = decodeURIComponent(rawValue);
+    } catch {
+      // A malformed escape (e.g. a stray %) must not turn a request into a 500.
+      cookies[key] = rawValue;
+    }
     return cookies;
   }, {});
 }

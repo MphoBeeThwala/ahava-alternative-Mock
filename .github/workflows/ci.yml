@@ -20,6 +20,9 @@ env:
   POOLED_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ahava_ci
   DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ahava_ci
 
+permissions:
+  contents: read
+
 jobs:
   backend:
     name: Backend — type-check, lint, test

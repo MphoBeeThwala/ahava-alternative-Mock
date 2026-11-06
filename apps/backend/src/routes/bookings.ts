@@ -282,13 +282,30 @@ router.patch('/:id/cancel', requirePatient, async (req: AuthenticatedRequest, re
     if (booking.visit?.status && ['COMPLETED', 'CANCELLED'].includes(booking.visit.status)) {
       return res.status(400).json({ error: 'Cannot cancel completed or already cancelled visit' });
     }
+    // Once the nurse has arrived the visit is under way; ending it is a clinical
+    // and billing matter for the nurse / support, not a button for the patient.
+    if (booking.visit?.status && ['ARRIVED', 'IN_PROGRESS'].includes(booking.visit.status)) {
+      return res.status(409).json({ error: 'This visit has already started. Please speak to your nurse or contact support.' });
+    }
 
-    await prisma.$transaction(async (tx) => {
-      await tx.booking.update({ where: { id }, data: { paymentStatus: 'REFUNDED' } });
+    // Conditional on the visit still being cancellable when we write, so a nurse
+    // marking arrival at the same moment cannot be overwritten.
+    const cancelled = await prisma.$transaction(async (tx) => {
       if (booking.visit) {
-        await tx.visit.update({ where: { id: booking.visit.id }, data: { status: 'CANCELLED' } });
+        const { count } = await tx.visit.updateMany({
+          where: { id: booking.visit.id, status: { notIn: ['ARRIVED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'] } },
+          data: { status: 'CANCELLED' },
+        });
+        if (count === 0) return false;
       }
+      // REFUNDED also hides the booking from nurses (see websocket accept-booking).
+      // It does not move money: a paid booking still needs an admin refund.
+      await tx.booking.update({ where: { id }, data: { paymentStatus: 'REFUNDED' } });
+      return true;
     });
+    if (!cancelled) {
+      return res.status(409).json({ error: 'This visit can no longer be cancelled.' });
+    }
 
     // Nothing accepted it yet, so nurses may still be looking at the offer.
     if (!booking.nurseId) withdrawBookingOffer(id);
@@ -300,7 +317,7 @@ router.patch('/:id/cancel', requirePatient, async (req: AuthenticatedRequest, re
       action: 'UPDATE',
       resource: 'Booking',
       resourceId: id,
-      metadata: { oldStatus: 'PENDING', newStatus: 'REFUNDED', visitStatus: 'CANCELLED', reason: 'Patient cancelled' },
+      metadata: { oldStatus: booking.paymentStatus, newStatus: 'REFUNDED', visitStatus: 'CANCELLED', reason: 'Patient cancelled', refundRequired: booking.paymentStatus === 'COMPLETED' },
       ipAddress: req.ip,
       userAgent: req.get('User-Agent'),
     });
