@@ -29,6 +29,7 @@ import {
   generateTotpSecret,
   getTotpProvisioningUri,
   verifyTotpCode,
+  verifyTotpCodeOnce,
   encryptTotpSecret,
   decryptTotpSecret,
   generateBackupCodes,
@@ -193,7 +194,7 @@ router.post("/disable", authMiddleware, authRateLimiter, async (req: Authenticat
     }
 
     const secret = decryptTotpSecret(user.totpSecret, user.id);
-    const validTotp = verifyTotpCode(secret, value.code);
+    const validTotp = await verifyTotpCodeOnce(user.id, secret, value.code);
     const backupResult = validTotp
       ? null
       : await consumeBackupCode(value.code, user.totpBackupCodes);
@@ -249,7 +250,7 @@ router.post("/login-verify", authRateLimiter, async (req, res, next) => {
     }
 
     const secret = decryptTotpSecret(user.totpSecret, user.id);
-    const validTotp = verifyTotpCode(secret, value.code);
+    const validTotp = await verifyTotpCodeOnce(user.id, secret, value.code);
     let remainingBackupCodes: string[] | null = null;
 
     if (!validTotp) {
@@ -307,7 +308,7 @@ router.post("/step-up", authMiddleware, authRateLimiter, async (req: Authenticat
       return res.status(403).json({ error: "Set up two-factor authentication first.", code: "MFA_ENROLLMENT_REQUIRED" });
     }
 
-    const validTotp = verifyTotpCode(decryptTotpSecret(user.totpSecret, user.id), value.code);
+    const validTotp = await verifyTotpCodeOnce(user.id, decryptTotpSecret(user.totpSecret, user.id), value.code);
     let remainingBackupCodes: string[] | null = null;
     if (!validTotp) {
       const backup = await consumeBackupCode(value.code, user.totpBackupCodes);

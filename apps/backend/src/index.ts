@@ -5,6 +5,7 @@ import compression from "compression";
 import morgan from "morgan";
 import dotenv from "dotenv";
 import { createServer } from "http";
+import { createHash, timingSafeEqual } from "crypto";
 import { WebSocketServer } from "ws";
 
 // Load environment variables
@@ -45,11 +46,13 @@ import { rateLimiter } from "./middleware/rateLimiter";
 import { authMiddleware } from "./middleware/auth";
 import { attachRequestId } from "./middleware/requestId";
 import { originGuard } from "./middleware/originGuard";
+import { trustedProxyClientIp } from "./middleware/trustedProxy";
+import { rejectCiphertextInput } from "./middleware/rejectCiphertextInput";
 
 // Import services
 import { getRedis, initializeRedis } from "./services/redis";
 import { initializeQueue, closeQueues } from "./services/queue";
-import { getWebSocketRedisHealth, initializeWebSocket } from "./services/websocket";
+import { WS_MAX_PAYLOAD_BYTES, getWebSocketRedisHealth, initializeWebSocket } from "./services/websocket";
 import { getAiHealth } from "./services/aiHealth";
 import { startAiHealthMonitor } from "./services/aiProviders";
 import { startResearchSweepMonitor } from "./services/research/researchSweep";
@@ -60,7 +63,7 @@ import { loadEncryptionKeys } from "./lib/keyManagement";
 
 const app: Application = express();
 const server = createServer(app);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ server, maxPayload: WS_MAX_PAYLOAD_BYTES });
 
 // Trust proxy so X-Forwarded-For is trusted (required behind Render/Railway/reverse proxies for rate-limit)
 app.set("trust proxy", 1);
@@ -112,6 +115,9 @@ app.use(
   }),
 );
 
+// Real client IP from our own Next.js proxy (before anything that reads req.ip)
+app.use(trustedProxyClientIp);
+
 // Compression and logging
 app.use(compression());
 app.use(attachRequestId);
@@ -154,11 +160,25 @@ app.use(
   }),
 );
 
+// Clients never send our ciphertext (decryption-oracle defence)
+app.use(rejectCiphertextInput);
+
 // Reject cross-site state-changing requests that authenticate by cookie
 app.use(originGuard(corsOrigins));
 
 // Rate limiting
 app.use(rateLimiter);
+
+
+/** True when the request carries the operator's HEALTH_TOKEN (X-Health-Token). Unset token = never. */
+function hasHealthToken(req: express.Request): boolean {
+  const expected = process.env.HEALTH_TOKEN;
+  const given = req.headers["x-health-token"];
+  if (!expected || expected.length < 16 || typeof given !== "string") return false;
+  const a = createHash("sha256").update(given).digest();
+  const b = createHash("sha256").update(expected).digest();
+  return timingSafeEqual(a, b);
+}
 
 // Liveness. Answers as long as the process is running — do not add dependency
 // checks here, or a database blip will have the platform restart every replica
@@ -203,15 +223,19 @@ app.get("/ready", async (req, res) => {
   const checksWithAi: Record<string, string> = { ...checks, ai: ai === "unconfigured" ? "degraded" : ai };
 
   const ready = checks.database === "ok";
+  // The platform health check only needs the status code. Which dependencies
+  // are up is infrastructure detail, shown only to a caller holding HEALTH_TOKEN.
+  const detailed = hasHealthToken(req);
   res.status(ready ? 200 : 503).json({
     status: ready ? "ready" : "not_ready",
-    checks: checksWithAi,
+    ...(detailed ? { checks: checksWithAi } : {}),
     timestamp: new Date().toISOString(),
   });
 });
 
 app.get("/health/ws-redis", (req, res) => {
-  res.json(getWebSocketRedisHealth());
+  if (!hasHealthToken(req)) return res.status(404).json({ error: "Route not found" });
+  return res.json(getWebSocketRedisHealth());
 });
 
 // Root: so opening backend URL in browser doesn't 404

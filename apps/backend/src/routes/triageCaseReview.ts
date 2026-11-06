@@ -1,3 +1,4 @@
+import { CASE_CLOSED_ERROR, CLOSED_TRIAGE_STATUSES, isClosedTriageStatus } from "../services/triageStatus";
 import { Router } from "express";
 import { Prisma, TriageCaseStatus, UserRole } from "@prisma/client";
 import { Response } from "express";
@@ -430,8 +431,14 @@ router.post(
       }
       if (!(await ensureCaseAccess(req, res, triageCase))) return;
 
-      const updated = await prisma.triageCase.update({
-        where: { id },
+      if (isClosedTriageStatus(triageCase.status)) {
+        return res.status(409).json(CASE_CLOSED_ERROR);
+      }
+
+      // Conditional on the case still being open, so two requests racing a
+      // release cannot reopen it.
+      const reopened = await prisma.triageCase.updateMany({
+        where: { id, status: { notIn: CLOSED_TRIAGE_STATUSES } },
         data: {
           doctorId: req.user!.id,
           status: TriageCaseStatus.AWAITING_PATIENT_RESPONSE,
@@ -443,8 +450,9 @@ router.post(
           patientFollowUpResponse: null,
           patientRespondedAt: null,
         },
-        include: triageCaseInclude,
       });
+      if (reopened.count === 0) return res.status(409).json(CASE_CLOSED_ERROR);
+      const updated = await prisma.triageCase.findUniqueOrThrow({ where: { id }, include: triageCaseInclude });
 
       sendToUser(updated.patientId, {
         type: "TRIAGE_FOLLOW_UP_REQUESTED",
@@ -515,6 +523,10 @@ router.post(
 
       if (!(await ensureCaseAccess(req, res, triageCase))) return;
 
+      if (isClosedTriageStatus(triageCase.status)) {
+        return res.status(409).json(CASE_CLOSED_ERROR);
+      }
+
       const {
         chosenLevel,
         normalizedOverrideReason,
@@ -531,8 +543,8 @@ router.post(
           .json({ error: overrideValidationError });
       }
 
-      const updated = await prisma.triageCase.update({
-        where: { id },
+      const reviewedNow = await prisma.triageCase.updateMany({
+        where: { id, status: { notIn: CLOSED_TRIAGE_STATUSES } },
         data: {
           doctorId: req.user!.id,
           doctorNotes: doctorNotes.trim(),
@@ -545,8 +557,9 @@ router.post(
           status: TriageCaseStatus.REVIEWED,
           reviewedAt: new Date(),
         },
-        include: triageCaseInclude,
       });
+      if (reviewedNow.count === 0) return res.status(409).json(CASE_CLOSED_ERROR);
+      const updated = await prisma.triageCase.findUniqueOrThrow({ where: { id }, include: triageCaseInclude });
 
       await markCaseReviewed(id, req.user!.id);
 

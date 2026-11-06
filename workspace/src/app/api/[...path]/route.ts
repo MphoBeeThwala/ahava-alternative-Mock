@@ -42,6 +42,21 @@ function buildUpstreamHeaders(req: NextRequest): Headers {
   const origin = req.headers.get("origin");
   if (origin) out.set("x-forwarded-origin", origin);
 
+  // Tell the API who the real caller is, so its per-IP rate limits and login
+  // lockouts are per user instead of shared by everyone behind this server.
+  // The API believes this only with the shared secret. The platform's edge
+  // appends the caller's address to X-Forwarded-For, so the LAST entry is the
+  // one it added; earlier entries are client-controlled and are ignored.
+  const proxySecret = process.env.PROXY_SHARED_SECRET;
+  if (proxySecret) {
+    const hops = (req.headers.get("x-forwarded-for") ?? "").split(",").map((h) => h.trim()).filter(Boolean);
+    const clientIp = hops[hops.length - 1];
+    if (clientIp) {
+      out.set("x-ahava-client-ip", clientIp);
+      out.set("x-ahava-proxy-secret", proxySecret);
+    }
+  }
+
   return out;
 }
 

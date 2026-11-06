@@ -1,3 +1,4 @@
+process.env.TOTP_REPLAY_PROTECTION_DISABLED_FOR_TESTS = "true"; // codes are reused within one 30s step
 /**
  * Step-up authentication for sensitive actions (middleware/stepUp.ts), and
  * the tighter staff session policy (services/sessionPolicy.ts). Other suites

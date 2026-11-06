@@ -31,6 +31,12 @@ function severityRank(r: {
   return 0;
 }
 
+// A reading puts a patient on the worklist. Shared by the list and by claim,
+// so a doctor cannot claim a patient who is not currently flagged.
+function isFlagged(r: { alertLevel: string | null; bpPromptCheck: boolean | null; cvdRiskCategory: string | null }): boolean {
+  return r.alertLevel === "YELLOW" || r.alertLevel === "RED" || r.bpPromptCheck === true || r.cvdRiskCategory === ">20%";
+}
+
 router.get("/", requireVerifiedDoctor, async (req: AuthenticatedRequest, res, next) => {
   try {
     // Only patients who've given BIOMETRIC_MONITORING consent — the
@@ -210,22 +216,40 @@ router.post("/:patientId/claim", requireVerifiedDoctor, async (req: Authenticate
       select: { id: true },
     });
     if (!consent) return res.status(404).json({ error: "Patient is not enrolled in monitoring" });
-    const now = new Date();
-    const other = await prisma.patientAccessGrant.findFirst({
-      where: {
-        patientId, clinicianId: { not: me }, reason: "MONITORING",
-        revokedAt: null, startsAt: { lte: now }, expiresAt: { gt: now },
-      },
-      select: { id: true },
+    // Only a patient who is on the worklist right now (latest reading flagged)
+    // can be claimed. Without this, any verified doctor could take 30 days of
+    // access to any consenting patient's record by id.
+    const latest = await prisma.biometricReading.findFirst({
+      where: { userId: patientId },
+      orderBy: { createdAt: "desc" },
+      select: { alertLevel: true, bpPromptCheck: true, cvdRiskCategory: true },
     });
-    if (other) return res.status(409).json({ error: "Another doctor is already monitoring this patient" });
+    if (!latest || !isFlagged(latest)) {
+      return res.status(409).json({ error: "This patient is not currently flagged for monitoring" });
+    }
 
-    const grant = await grantAccess({
-      clinicianId: me,
-      patientId,
-      reason: "MONITORING",
-      expiresAt: hoursFromNow(ACCESS_WINDOWS.monitoringDays * 24),
+    // Check-and-grant under a per-patient lock, so two doctors claiming at the
+    // same moment cannot both succeed.
+    const outcome = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"monitoring-claim:" + patientId}))`;
+      const now = new Date();
+      const other = await tx.patientAccessGrant.findFirst({
+        where: {
+          patientId, clinicianId: { not: me }, reason: "MONITORING",
+          revokedAt: null, startsAt: { lte: now }, expiresAt: { gt: now },
+        },
+        select: { id: true },
+      });
+      if (other) return null;
+      return grantAccess({
+        clinicianId: me,
+        patientId,
+        reason: "MONITORING",
+        expiresAt: hoursFromNow(ACCESS_WINDOWS.monitoringDays * 24),
+      });
     });
+    if (!outcome) return res.status(409).json({ error: "Another doctor is already monitoring this patient" });
+    const grant = outcome;
     await writeRequestAudit({
       userId: me,
       userRole: req.user!.role,

@@ -74,6 +74,11 @@ export async function uploadObject(
       Key: key,
       Body: buffer,
       ContentType: contentType,
+      // Optional extra layer on top of the application-layer encryption of the
+      // body. Opt-in because some S3-compatible stores reject the header.
+      ...(process.env.S3_SERVER_SIDE_ENCRYPTION === "AES256" || process.env.S3_SERVER_SIDE_ENCRYPTION === "aws:kms"
+        ? { ServerSideEncryption: process.env.S3_SERVER_SIDE_ENCRYPTION as "AES256" | "aws:kms" }
+        : {}),
     }),
   );
 }

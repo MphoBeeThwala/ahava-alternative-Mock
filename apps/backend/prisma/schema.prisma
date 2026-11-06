@@ -146,6 +146,8 @@ model User {
   // utils/encryption.ts — it is a login credential, not just a setting.
   totpSecret        String?
   totpEnabled       Boolean  @default(false)
+  // Last TOTP time step accepted for this user; a code is single-use (see verifyTotpCodeOnce).
+  totpLastUsedStep  Int?
   totpBackupCodes   String[] @default([]) // bcrypt-hashed, single-use
 
   // Relations

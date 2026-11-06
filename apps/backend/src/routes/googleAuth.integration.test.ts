@@ -1,3 +1,4 @@
+process.env.TOTP_REPLAY_PROTECTION_DISABLED_FOR_TESTS = "true"; // codes are reused within one 30s step
 /**
  * Sign in with Google for patients (routes/googleAuth.ts). Google's token
  * verification is mocked; everything after it (nonce, linking rules, staff

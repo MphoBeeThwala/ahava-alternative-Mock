@@ -1,3 +1,4 @@
+import { CASE_CLOSED_ERROR, isClosedTriageStatus } from '../services/triageStatus';
 import { Router } from 'express';
 import { UserRole, TriageCaseStatus } from '@prisma/client';
 import { AuthenticatedRequest, authMiddleware } from '../middleware/auth';
@@ -81,6 +82,8 @@ router.patch('/:id/review', requireVerifiedClinician(['DOCTOR']), async (req: Au
       await auditAccessDenied(req, 'TriageCase', triageCase.id, triageCase.patientId);
       return res.status(403).json(NO_ACCESS_ERROR);
     }
+
+    if (isClosedTriageStatus(triageCase.status)) return res.status(409).json(CASE_CLOSED_ERROR);
 
     if (!doctorNotes?.trim() || !doctorDiagnosis?.trim()) {
       return res.status(400).json({ error: 'Doctor notes and diagnosis are required' });

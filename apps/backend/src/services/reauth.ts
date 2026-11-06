@@ -6,7 +6,7 @@
  */
 import * as bcrypt from '@node-rs/bcrypt';
 import prisma from '../lib/prisma';
-import { consumeBackupCode, decryptTotpSecret, verifyTotpCode } from './totp';
+import { consumeBackupCode, decryptTotpSecret, verifyTotpCodeOnce } from './totp';
 
 export type ReauthResult =
   | { ok: true }
@@ -34,7 +34,7 @@ export async function verifyReauthentication(
     if (!input.code) {
       return { ok: false, status: 403, code: 'REAUTH_CODE_REQUIRED', error: 'Enter a code from your authenticator app to continue.' };
     }
-    const validTotp = verifyTotpCode(decryptTotpSecret(user.totpSecret, user.id), input.code);
+    const validTotp = await verifyTotpCodeOnce(user.id, decryptTotpSecret(user.totpSecret, user.id), input.code);
     if (!validTotp) {
       const backup = await consumeBackupCode(input.code, user.totpBackupCodes);
       if (!backup.matched) {

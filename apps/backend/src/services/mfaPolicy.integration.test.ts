@@ -1,3 +1,4 @@
+process.env.TOTP_REPLAY_PROTECTION_DISABLED_FOR_TESTS = "true"; // codes are reused within one 30s step
 /**
  * Mandatory two-factor authentication for staff (services/mfaPolicy.ts).
  * Other suites run with enforcement off (testSetup/globalSetup.js); this

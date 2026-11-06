@@ -22,6 +22,8 @@ describe("triageAttachments", () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
+    // Attachment bytes are encrypted at rest, so a test key is needed.
+    process.env.ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
     delete process.env.S3_BUCKET;
     delete process.env.S3_ACCESS_KEY_ID;
     delete process.env.S3_SECRET_ACCESS_KEY;
@@ -40,6 +42,9 @@ describe("triageAttachments", () => {
       });
 
       expect(attachment.dataUrl).toBeDefined();
+      expect(attachment.encrypted).toBe(true);
+      // The stored value is ciphertext, never an image data URL.
+      expect(attachment.dataUrl).not.toMatch(/^data:/);
       expect(attachment.storageKey).toBeUndefined();
       expect(attachment.mimeType).toBe("image/png");
       expect(attachment.byteSize).toBeGreaterThan(0);
