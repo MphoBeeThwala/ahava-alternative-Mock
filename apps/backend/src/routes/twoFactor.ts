@@ -30,6 +30,7 @@ import {
   getTotpProvisioningUri,
   verifyTotpCode,
   verifyTotpCodeOnce,
+  spendBackupCode,
   encryptTotpSecret,
   decryptTotpSecret,
   generateBackupCodes,
@@ -263,13 +264,12 @@ router.post("/login-verify", authRateLimiter, async (req, res, next) => {
       remainingBackupCodes = backupResult.remaining;
     }
 
-    await clearLoginVerifyFailures(userId);
-    if (remainingBackupCodes) {
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { totpBackupCodes: remainingBackupCodes },
-      });
+    if (remainingBackupCodes && !(await spendBackupCode(user.id, user.totpBackupCodes, remainingBackupCodes))) {
+      await recordLoginVerifyFailure(userId);
+      await auditSignIn(req, "LOGIN_2FA_FAILED", user);
+      return res.status(401).json({ error: "Invalid code" });
     }
+    await clearLoginVerifyFailures(userId);
 
     const { accessToken, refreshToken } = await generateTokens(user.id, user.role);
     await auditSignIn(req, "LOGIN_SUCCESS", user, { method: remainingBackupCodes ? "password+backup_code" : "password+totp" });
@@ -320,10 +320,15 @@ router.post("/step-up", authMiddleware, authRateLimiter, async (req: Authenticat
       remainingBackupCodes = backup.remaining;
     }
 
+    if (remainingBackupCodes && !(await spendBackupCode(user.id, user.totpBackupCodes, remainingBackupCodes))) {
+      await recordLoginVerifyFailure(userId);
+      await auditSignIn(req, "STEP_UP_FAILED", user);
+      return res.status(401).json({ error: "Invalid code" });
+    }
     await clearLoginVerifyFailures(userId);
     await prisma.user.update({
       where: { id: user.id },
-      data: { stepUpVerifiedAt: new Date(), ...(remainingBackupCodes ? { totpBackupCodes: remainingBackupCodes } : {}) },
+      data: { stepUpVerifiedAt: new Date() },
     });
     await auditSignIn(req, "STEP_UP_SUCCESS", user, { method: remainingBackupCodes ? "backup_code" : "totp" });
     return res.json({ success: true, validForSeconds: stepUpWindowSeconds() });

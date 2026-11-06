@@ -71,7 +71,8 @@ router.get('/visits', requireVerifiedNurse, async (req: AuthenticatedRequest, re
     const visits = await prisma.visit.findMany({
       where: { nurseId: req.user!.id },
       include: { booking: { select: { patientId: true, scheduledDate: true, amountInCents: true, encryptedAddress: true, patient: { select: { id: true, firstName: true, lastName: true, phone: true } } } } },
-      orderBy: { scheduledStart: 'desc' }
+      orderBy: { scheduledStart: 'desc' },
+      take: 200,
     });
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'LIST', resource: 'Nurse', metadata: { entity: 'Visit', count: visits.length }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
     // Found via a real user report, 2026-09-14: this query never selected

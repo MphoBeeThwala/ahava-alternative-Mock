@@ -6,7 +6,7 @@
  */
 import * as bcrypt from '@node-rs/bcrypt';
 import prisma from '../lib/prisma';
-import { consumeBackupCode, decryptTotpSecret, verifyTotpCodeOnce } from './totp';
+import { consumeBackupCode, decryptTotpSecret, spendBackupCode, verifyTotpCodeOnce } from './totp';
 
 export type ReauthResult =
   | { ok: true }
@@ -40,7 +40,9 @@ export async function verifyReauthentication(
       if (!backup.matched) {
         return { ok: false, status: 401, code: 'REAUTH_FAILED', error: 'Invalid code' };
       }
-      await prisma.user.update({ where: { id: user.id }, data: { totpBackupCodes: backup.remaining } });
+      if (!(await spendBackupCode(user.id, user.totpBackupCodes, backup.remaining))) {
+        return { ok: false, status: 401, code: 'REAUTH_FAILED', error: 'Invalid code' };
+      }
     }
   }
   return { ok: true };

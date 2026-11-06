@@ -347,6 +347,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.removeItem('accessToken');
       localStorage.removeItem('refresh_token');
       localStorage.removeItem('user');
+      // A doctor's unsent review drafts hold diagnoses and notes for patients;
+      // do not leave them on a shared machine for the next person.
+      try {
+        Object.keys(localStorage)
+          .filter((k) => k.startsWith('ahava:doctor:review-draft:'))
+          .forEach((k) => localStorage.removeItem(k));
+      } catch {
+        // Storage unavailable: nothing to clear.
+      }
     }
     
     setToken(null);

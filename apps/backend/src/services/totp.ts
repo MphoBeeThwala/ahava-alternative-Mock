@@ -121,3 +121,18 @@ export async function consumeBackupCode(
   }
   return { matched: false, remaining: hashedCodes };
 }
+
+/**
+ * Persist the result of consuming a backup code, but only if the stored list is
+ * still exactly what the code was checked against. Two requests carrying the
+ * same backup code both match the list they read; only the first write finds it
+ * unchanged, so a "single-use" code really is single-use. Returns false when it
+ * lost that race (treat as an invalid code).
+ */
+export async function spendBackupCode(userId: string, original: string[], remaining: string[]): Promise<boolean> {
+  const { count } = await prisma.user.updateMany({
+    where: { id: userId, totpBackupCodes: { equals: original } },
+    data: { totpBackupCodes: remaining },
+  });
+  return count === 1;
+}

@@ -89,12 +89,9 @@ const corsOrigins = process.env.CORS_ORIGIN
       .map((o) => o.trim())
       .filter(Boolean)
   : process.env.NODE_ENV === "production"
-    ? [
-        "https://ahava-frontend.onrender.com",
-        "https://frontend-production-326c.up.railway.app",
-        "https://ahava-healthcare-admin.railway.app",
-        "https://ahava-healthcare-doctor.railway.app",
-      ]
+    ? // CORS_ORIGIN should be set in production. Without it, trust only our own
+      // frontend (never hardcoded third-party hostnames that someone else could claim).
+      [process.env.FRONTEND_URL ?? "https://app.ahavaon88.co.za"]
     : [
         "http://localhost:3000",
         "http://127.0.0.1:3000",

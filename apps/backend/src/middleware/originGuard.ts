@@ -87,8 +87,12 @@ export function originGuard(allowedOrigins: string[]) {
       (typeof forwarded === "string" ? forwarded : undefined) ??
       (typeof req.headers.origin === "string" ? req.headers.origin : undefined);
 
-    const origin =
-      rawOrigin && rawOrigin !== "null" ? normalizeOrigin(rawOrigin) : null;
+    // `Origin: null` is what a browser sends from a sandboxed iframe, a data: URL
+    // or a no-referrer form post — i.e. exactly how a cross-site page hides
+    // itself. With a session cookie attached it is never legitimate.
+    if (rawOrigin === "null") return reject(res);
+
+    const origin = rawOrigin ? normalizeOrigin(rawOrigin) : null;
 
     if (origin) {
       // A browser sets Origin on every cross-site write and a page cannot

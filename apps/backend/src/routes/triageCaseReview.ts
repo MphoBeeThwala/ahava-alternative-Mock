@@ -288,6 +288,7 @@ router.get("/", requireVerifiedDoctor, async (req: AuthenticatedRequest, res, ne
 
     const status = rawStatus as (typeof VALID_QUEUE_STATUSES)[number];
     const cases = await prisma.triageCase.findMany({
+      take: 200,
       where: getQueueWhere(req.user!.id, status),
       include: triageCaseInclude,
       orderBy: [{ status: "asc" }, { createdAt: "asc" }],
@@ -315,6 +316,7 @@ router.get(
   async (req: AuthenticatedRequest, res, next) => {
     try {
       const cases = await prisma.triageCase.findMany({
+        take: 200,
         where: { status: TriageCaseStatus.PENDING_REVIEW, doctorId: null },
         include: triageCaseInclude,
         orderBy: { createdAt: "asc" },

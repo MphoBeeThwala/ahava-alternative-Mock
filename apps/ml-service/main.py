@@ -11,6 +11,7 @@ import db
 from datetime import datetime, timezone
 import os
 import hmac
+import logging
 from dotenv import load_dotenv
 
 
@@ -84,7 +85,8 @@ def ingest_biometrics(data: BiometricData, user_id: str):
             message=message
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logging.getLogger("ml-service").exception("request failed")
+        raise HTTPException(status_code=500, detail="Internal error")
 
 @app.post("/ingest/bp", response_model=IngestResponse)
 def ingest_blood_pressure(reading: BpReading, user_id: str):
@@ -102,7 +104,8 @@ def ingest_blood_pressure(reading: BpReading, user_id: str):
             alert_level=alert_level, anomalies=anomalies, message=message,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logging.getLogger("ml-service").exception("request failed")
+        raise HTTPException(status_code=500, detail="Internal error")
 
 @app.get("/readiness-score/{user_id}", response_model=ReadinessScore)
 def get_readiness_score(user_id: str):
@@ -130,7 +133,8 @@ def early_warning_analyze(user_id: str, body: EarlyWarningAnalyzeRequest):
         summary = engine.full_analysis(user_id, body.biometrics, body.context)
         return summary
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logging.getLogger("ml-service").exception("request failed")
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 class EarlyWarningSummaryRequest(BaseModel):
@@ -152,7 +156,8 @@ def early_warning_summary_with_context(user_id: str, body: EarlyWarningSummaryRe
         last = _dict_to_biometric(latest_row)
         return engine.full_analysis(user_id, last, body.context, bp_as_of=datetime.now(timezone.utc))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logging.getLogger("ml-service").exception("request failed")
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.get("/early-warning/summary/{user_id}", response_model=EarlyWarningSummary)
@@ -169,7 +174,8 @@ def early_warning_summary(user_id: str):
         summary = engine.full_analysis(user_id, last, engine.get_context(user_id), bp_as_of=datetime.now(timezone.utc))
         return summary
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logging.getLogger("ml-service").exception("request failed")
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.put("/early-warning/context/{user_id}")

@@ -89,7 +89,7 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res, next) => 
         where.status = statusFilter;
       }
     }
-    const visits = await prisma.visit.findMany({ where, include: visitListInclude, orderBy: { createdAt: 'desc' } });
+    const visits = await prisma.visit.findMany({ where, include: visitListInclude, orderBy: { createdAt: 'desc' }, take: 200 });
 
     let result: any[];
     if (role === UserRole.PATIENT) {

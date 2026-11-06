@@ -20,6 +20,9 @@ on:
         default: "none"
         required: false
 
+permissions:
+  contents: read
+
 jobs:
   live-eval:
     name: Score gold cases against the live engine
@@ -53,8 +56,12 @@ jobs:
         run: pnpm --filter @ahava-healthcare/api prisma:generate
 
       - name: Live clinical evaluation
+        env:
+          # Passed through the environment, never interpolated into the script:
+          # a workflow input is attacker-shaped text.
+          PACK: ${{ github.event.inputs.pack }}
         run: |
-          PACK="${{ github.event.inputs.pack }}"
+          case "$PACK" in none|set1|set2|all|"") ;; *) echo "Invalid pack: $PACK"; exit 1 ;; esac
           ARGS="--out clinical-eval-report.md"
           if [ -n "$PACK" ] && [ "$PACK" != "none" ]; then ARGS="$ARGS --pack $PACK"; fi
           pnpm --filter @ahava-healthcare/api eval:clinical:live -- $ARGS

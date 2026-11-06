@@ -74,6 +74,15 @@ describe("originGuard", () => {
       expect(next).not.toHaveBeenCalled();
     });
 
+    it("a write from an opaque origin (Origin: null) that carries a session cookie", () => {
+      const { next, res } = run({
+        headers: { cookie: "ahava_access_token=x", origin: "null" },
+      });
+
+      expect(next).not.toHaveBeenCalled();
+      expect(res.statusCode).toBe(403);
+    });
+
     it("a DELETE as readily as a POST", () => {
       const { next } = run({
         method: "DELETE",

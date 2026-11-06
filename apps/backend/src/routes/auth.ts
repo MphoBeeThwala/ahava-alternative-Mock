@@ -37,8 +37,17 @@ import {
   setAuthCookies,
 } from "../services/authSession";
 import { signToken, verifyToken, TWOFA_PENDING_TTL_SECONDS } from "../services/tokens";
+import { escapeHtml } from "../utils/html";
 
 const router: Router = Router();
+
+// Compared against when the email is unknown, so a login for a non-existent
+// account takes as long as one with a wrong password (no timing oracle).
+const DUMMY_PASSWORD_HASH = bcrypt.hash(
+  "timing-equaliser-not-a-real-password",
+  parseInt(process.env.BCRYPT_ROUNDS || "10", 10),
+);
+DUMMY_PASSWORD_HASH.catch(() => {});
 
 // Allow any TLD including .test for mock/load-test users (IANA list excludes .test)
 // Trimmed and lower-cased on the way in: every account is stored lower-case, and
@@ -53,6 +62,9 @@ export const emailSchema = Joi.string()
 // Password must be 8+ chars with at least one uppercase, one digit, one special character
 export const passwordComplexitySchema = Joi.string()
   .min(8)
+  // bcrypt only reads the first 72 bytes and hashing a huge string is a cheap
+  // way to burn CPU; cap it.
+  .max(128)
   .pattern(/[A-Z]/, "uppercase letter")
   .pattern(/[0-9]/, "number")
   .pattern(/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/, "special character")
@@ -60,14 +72,16 @@ export const passwordComplexitySchema = Joi.string()
   .messages({
     "string.pattern.name": "Password must contain at least one {#name}",
     "string.min": "Password must be at least 8 characters",
+    "string.max": "Password must be at most 128 characters",
   });
 
 // Validation schemas
 const registerSchema = Joi.object({
   email: emailSchema,
   password: passwordComplexitySchema,
-  firstName: Joi.string().min(2).required(),
-  lastName: Joi.string().min(2).required(),
+  // No markup in names: they are printed into emails and clinical documents.
+  firstName: Joi.string().trim().min(2).max(80).pattern(/^[^<>]*$/).required(),
+  lastName: Joi.string().trim().min(2).max(80).pattern(/^[^<>]*$/).required(),
   role: Joi.string().valid("PATIENT", "NURSE", "DOCTOR", "ADMIN").required(),
   phone: Joi.string().optional(),
   dateOfBirth: Joi.date().optional(),
@@ -104,7 +118,7 @@ const registerSchema = Joi.object({
 
 const loginSchema = Joi.object({
   email: emailSchema,
-  password: Joi.string().required(),
+  password: Joi.string().max(256).required(),
 });
 
 const refreshTokenSchema = Joi.object({
@@ -464,7 +478,7 @@ router.post("/register", authRateLimiter, async (req, res, next) => {
           <h1 style="margin:8px 0 0;color:white;font-size:22px;font-weight:800;">Ahava Healthcare</h1>
         </td></tr>
         <tr><td style="padding:36px 40px;text-align:center;">
-          <h2 style="margin:0 0 12px;font-size:20px;color:#0f172a;">Hi ${firstName}, verify your email</h2>
+          <h2 style="margin:0 0 12px;font-size:20px;color:#0f172a;">Hi ${escapeHtml(firstName)}, verify your email</h2>
           <p style="margin:0 0 28px;color:#475569;font-size:14px;line-height:1.6;">
             Welcome to Ahava Healthcare! Click the button below to verify your email address and activate your account.
           </p>
@@ -588,7 +602,8 @@ router.post("/login", authRateLimiter, async (req, res, next) => {
     });
 
     if (!user || !user.passwordHash) {
-      // Still record attempt to prevent email enumeration timing attacks
+      // Do the same work as a wrong password, so timing does not reveal whether the account exists.
+      await bcrypt.compare(password, await DUMMY_PASSWORD_HASH);
       await recordLoginFailure(email, ip);
       await auditSignIn(req, "LOGIN_FAILED", null, { email, reason: "unknown_account" });
       return res.status(401).json({ error: "Invalid credentials" });
@@ -928,9 +943,9 @@ router.put(
     try {
       const userId = req.user.id;
       const { error, value } = Joi.object({
-        firstName: Joi.string().min(1).max(80),
-        lastName: Joi.string().min(1).max(80),
-        phone: Joi.string().allow("", null),
+        firstName: Joi.string().trim().min(1).max(80).pattern(/^[^<>]*$/),
+        lastName: Joi.string().trim().min(1).max(80).pattern(/^[^<>]*$/),
+        phone: Joi.string().trim().max(25).allow("", null),
         dateOfBirth: Joi.string().isoDate().allow(null),
         gender: Joi.string()
           .valid("MALE", "FEMALE", "OTHER", "PREFER_NOT_TO_SAY")
@@ -952,6 +967,18 @@ router.put(
       });
       if (!currentUser)
         return res.status(404).json({ error: "User not found" });
+
+      // A nurse's or doctor's name was verified against the SANC / HPCSA register;
+      // changing it afterwards would put an unverified name on prescriptions.
+      if (
+        (req.user.role === "NURSE" || req.user.role === "DOCTOR") &&
+        ((value.firstName !== undefined && value.firstName !== currentUser.firstName) || value.lastName !== undefined)
+      ) {
+        const current = await prisma.user.findUnique({ where: { id: userId }, select: { firstName: true, lastName: true } });
+        if (value.firstName !== current?.firstName || (value.lastName !== undefined && value.lastName !== current?.lastName)) {
+          return res.status(403).json({ error: "Clinician names are verified against the professional register. Contact an administrator to change yours." });
+        }
+      }
 
       const updateData: Record<string, unknown> = {};
       if (value.firstName !== undefined) updateData.firstName = value.firstName;
@@ -1062,32 +1089,33 @@ router.post("/forgot-password", authRateLimiter, async (req, res, next) => {
     const user = await prisma.user.findUnique({
       where: { email: value.email },
     });
-    // Always return success to avoid email enumeration
-    if (!user)
-      return res.json({
-        success: true,
-        message: "If that email exists, a reset link has been sent.",
-      });
-
-    const { token, tokenHash } = newOneTimeToken();
-    const expiry = new Date(Date.now() + PASSWORD_RESET_TTL_MS);
-
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { passwordResetToken: tokenHash, passwordResetExpiry: expiry },
-    });
-
-    const resetUrl = `${process.env.FRONTEND_URL ?? ""}/auth/reset-password?token=${token}`;
-    await addEmailJob({
-      to: user.email,
-      subject: "Reset your Ahava Healthcare password",
-      html: `<p>Hi ${user.firstName},</p><p>We received a request to reset your password. Click the button below — this link expires in 1 hour.</p><p><a href="${resetUrl}" style="background:#0d9488;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">Reset Password</a></p><p>If you didn't request this, you can safely ignore this email.</p>`,
-    });
-
+    // Same response, sent at the same point, whether or not the account exists:
+    // the token write and email below happen after it, so response time does not
+    // reveal which addresses are registered.
     res.json({
       success: true,
       message: "If that email exists, a reset link has been sent.",
     });
+    if (!user) return;
+
+    try {
+      const { token, tokenHash } = newOneTimeToken();
+      const expiry = new Date(Date.now() + PASSWORD_RESET_TTL_MS);
+
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { passwordResetToken: tokenHash, passwordResetExpiry: expiry },
+      });
+
+      const resetUrl = `${process.env.FRONTEND_URL ?? ""}/auth/reset-password?token=${token}`;
+      await addEmailJob({
+        to: user.email,
+        subject: "Reset your Ahava Healthcare password",
+        html: `<p>Hi ${escapeHtml(user.firstName)},</p><p>We received a request to reset your password. Click the button below — this link expires in 1 hour.</p><p><a href="${resetUrl}" style="background:#0d9488;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">Reset Password</a></p><p>If you didn't request this, you can safely ignore this email.</p>`,
+      });
+    } catch (err) {
+      console.error("[auth/forgot-password] background send failed:", (err as Error)?.message ?? err);
+    }
   } catch (error) {
     return next(error);
   }
@@ -1197,7 +1225,7 @@ router.post("/change-password", authMiddleware, authRateLimiter, async (req: Aut
 
 /** Best-effort notice to the OLD address that the sign-in email changed — the cue for someone who didn't do it. */
 function notifyEmailChanged(oldEmail: string, firstName: string, newEmail: string) {
-  const safeName = firstName.replace(/[<>&"]/g, "");
+  const safeName = escapeHtml(firstName);
   const masked = newEmail.replace(/^(.).*(@.*)$/, "$1***$2");
   addEmailJob({
     to: oldEmail,
@@ -1208,7 +1236,7 @@ function notifyEmailChanged(oldEmail: string, firstName: string, newEmail: strin
 
 /** Best-effort "your password changed" email — the cue for someone who didn't do it. */
 function notifyPasswordChanged(email: string, firstName: string, kind: "change" | "reset") {
-  const safeName = firstName.replace(/[<>&"]/g, "");
+  const safeName = escapeHtml(firstName);
   addEmailJob({
     to: email,
     subject: "Your Ahava Healthcare password was changed",
@@ -1261,32 +1289,32 @@ router.post("/resend-verification", authRateLimiter, async (req, res, next) => {
     const user = await prisma.user.findUnique({
       where: { email: value.email },
     });
-    if (!user || user.isVerified)
-      return res.json({
-        success: true,
-        message: "If applicable, a verification email has been sent.",
-      });
-
-    const { token, tokenHash } = newOneTimeToken();
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        emailVerificationToken: tokenHash,
-        emailVerificationExpiry: new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS),
-      },
-    });
-
-    const verifyUrl = `${process.env.FRONTEND_URL ?? ""}/auth/verify-email?token=${token}`;
-    await addEmailJob({
-      to: user.email,
-      subject: "Verify your Ahava Healthcare email",
-      html: `<p>Hi ${user.firstName},</p><p>Please verify your email address:</p><p><a href="${verifyUrl}" style="background:#0d9488;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">Verify Email</a></p><p>This link expires in 24 hours.</p>`,
-    });
-
+    // Respond first (see forgot-password): same response and timing either way.
     res.json({
       success: true,
       message: "If applicable, a verification email has been sent.",
     });
+    if (!user || user.isVerified) return;
+
+    try {
+      const { token, tokenHash } = newOneTimeToken();
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          emailVerificationToken: tokenHash,
+          emailVerificationExpiry: new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS),
+        },
+      });
+
+      const verifyUrl = `${process.env.FRONTEND_URL ?? ""}/auth/verify-email?token=${token}`;
+      await addEmailJob({
+        to: user.email,
+        subject: "Verify your Ahava Healthcare email",
+        html: `<p>Hi ${escapeHtml(user.firstName)},</p><p>Please verify your email address:</p><p><a href="${verifyUrl}" style="background:#0d9488;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">Verify Email</a></p><p>This link expires in 24 hours.</p>`,
+      });
+    } catch (err) {
+      console.error("[auth/resend-verification] background send failed:", (err as Error)?.message ?? err);
+    }
   } catch (error) {
     return next(error);
   }
@@ -1301,10 +1329,10 @@ router.post(
   authMiddleware,
   async (req: AuthenticatedRequest, res) => {
     try {
-      if (
-        process.env.NODE_ENV === "production" &&
-        req.user!.role !== "ADMIN"
-      ) {
+      // Self-verification is a development convenience only. Anywhere that is not
+      // explicitly development/test (production, staging, unset NODE_ENV) it needs an admin.
+      const devLike = process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test";
+      if (!devLike && req.user!.role !== "ADMIN") {
         return res
           .status(403)
           .json({ error: "Manual verification is not available." });

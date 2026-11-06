@@ -272,6 +272,10 @@ router.post(
   "/",
   rateLimiter,
   authMiddleware,
+  // Symptom checks are a patient feature. Without this a nurse, doctor or admin
+  // could create "patient" cases for themselves, spend the AI budget and claim
+  // their own case.
+  requirePatient,
   aiTriageBudgetMiddleware,
   requireConsent("AI_TRIAGE"),
   async (req: AuthenticatedRequest, res, next) => {

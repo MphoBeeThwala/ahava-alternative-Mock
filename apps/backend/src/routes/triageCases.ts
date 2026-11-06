@@ -36,7 +36,7 @@ router.get('/', authMiddleware, async (req: AuthenticatedRequest, res, next) => 
       if (!check.ok) return res.status(check.status).json({ error: check.error, code: check.code });
       where.doctorId = req.user!.id;
     } else return res.status(403).json({ error: 'Access denied' });
-    const cases = await prisma.triageCase.findMany({ where, include: { patient: { select: { id: true, firstName: true, lastName: true } }, doctor: { select: { id: true, firstName: true, lastName: true } } }, orderBy: { createdAt: 'desc' } });
+    const cases = await prisma.triageCase.findMany({ where, include: { patient: { select: { id: true, firstName: true, lastName: true } }, doctor: { select: { id: true, firstName: true, lastName: true } } }, orderBy: { createdAt: 'desc' }, take: 200 });
     await createAuditLog({ userId: req.user!.id, userRole: req.user!.role, action: 'LIST', resource: 'TriageCase', metadata: { count: cases.length, role: req.user!.role }, ipAddress: req.ip, userAgent: req.get('User-Agent') });
     if (role === UserRole.DOCTOR) {
       const allowed = await patientsWithActiveAccess(req.user!.id, cases.map((c) => c.patientId));
